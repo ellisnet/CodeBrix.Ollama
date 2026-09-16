@@ -1,0 +1,56 @@
+# ==============================================================================
+# llama-native-tools/.gitignore
+# ==============================================================================
+#
+# LINE 1 IS LOAD-BEARING - DO NOT DELETE IT.
+#
+# The repository-root .gitignore is the standard Visual Studio / .NET one. It
+# ignores directory and file names that also occur inside the vendored
+# llama.cpp source tree, for example:
+#
+#     [Aa][Rr][Mm]/      -> llama.cpp/ggml/src/ggml-cpu/arch/arm/
+#     [Oo]ut/  [Ll][Oo][Gg]/  [Rr]elease/  [Dd]ebug/  bld/  [Oo]bj/  *.env ...
+#
+# Without the "!*" below, those folders would be silently left out of every
+# commit, and the vendored snapshot would not build for the next person who
+# cloned this repository. A nested .gitignore takes precedence over the ones
+# above it, so re-including everything here and then re-ignoring only what this
+# folder genuinely produces is the correct fix - and it keeps the root
+# .gitignore untouched.
+#
+# Verify at any time with:
+#     git check-ignore -v llama-native-tools/llama.cpp/ggml/src/ggml-cpu/arch/arm/quants.c
+#     git check-ignore -v llama-native-tools/linux/pins.env
+#         -> both should print nothing (i.e. the files are NOT ignored)
+# ==============================================================================
+
+# Re-include everything under this folder, overriding the root .gitignore.
+!*
+!*/
+
+# --- what this folder really does produce, and must not commit ---------------
+
+# Built native libraries, unstripped copies, dSYM bundles, staged archives,
+# BUILD-INFO files. ONE tree, shared by all three platform builds, so all seven
+# RIDs land side by side.
+#
+# THE LEADING SLASH MATTERS. Without it this pattern would match ANY directory
+# named "output" at any depth inside the vendored tree.
+# NOTE THE TRAILING /* RATHER THAN A BARE /output/. A directory that is itself
+# excluded is never descended into, so a later "!" rule can NEVER re-include a
+# file inside it. Excluding the CONTENTS leaves the directory visible, and the
+# negation below then works.
+/output/*
+
+# ...except the placeholder README that explains what goes there.
+!/output/README.txt
+
+# Local scratch that the scripts may leave behind.
+*.tmp
+*.log
+build-scratch/
+
+# Finder droppings. Needed explicitly: the "!*" above re-includes everything
+# under this folder and so overrides any .DS_Store rule inherited from the root
+# or from a user's global gitignore.
+.DS_Store

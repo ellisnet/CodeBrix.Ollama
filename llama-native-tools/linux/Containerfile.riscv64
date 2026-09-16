@@ -1,0 +1,90 @@
+# =============================================================================================
+# Containerfile.riscv64 - the codebrix_llama build machine for linux-riscv64
+# =============================================================================================
+#
+# WHAT THIS IS, AND WHY IT IS A SEPARATE STEP
+#   The rule this folder exists for says the LIBRARY BUILD may not reach outside this
+#   repository. Tools installed on a build machine are the one allowed exception - and this
+#   file IS that installation, written down and version-pinned: it takes the digest-pinned
+#   manylinux base image (gcc 14, glibc 2.39) and adds cmake and ninja. Nothing else.
+#
+#   Building this image is the ONLY step that uses the network. The library build afterwards
+#   runs with `--network none` and cannot reach anything even if it wanted to.
+#
+#   build.sh builds this image the first time it is needed and reuses it after that.
+#   To rebuild deliberately:   FORCE_IMAGE_REBUILD=1 ./build.sh riscv64
+#
+# THE RISC-V BASELINE (pins.env LLAMA_CMAKE_OPTIONS_RISCV64) is plain rv64gc - NO vector
+# extension. ggml's RVV kernels are a compile-time choice with no runtime fallback, so a
+# library built with them crashes on a board without V. Scalar is the safe floor; if every
+# target board is known to have RVV 1.0 the pin can be changed. This base image is
+# manylinux_2_39 because riscv64 manylinux exists in no older form; that sets the glibc floor
+# for linux-riscv64 at 2.39 (Debian 13 / Ubuntu 24.04+).
+#
+# ON A NATIVE riscv64 HOST this image builds and runs at full speed. On an x86_64 host it runs
+# under qemu-user emulation, which for a code base this size is slow (see README.txt).
+#
+# EVERY VERSION HERE COMES FROM pins.env. The defaults below exist only so a hand-run
+# `podman build -f Containerfile.riscv64 .` still works; build.sh always passes --build-arg.
+#
+#   NEVER YET RUN - see build.sh.
+# =============================================================================================
+
+ARG BASE_IMAGE=quay.io/pypa/manylinux_2_39_riscv64@sha256:04b3acc69a6cebb10ac1252587d202acce6445d91c783d3f92229bb2b2483069
+FROM ${BASE_IMAGE}
+
+ARG CMAKE_VERSION=4.4.3
+ARG NINJA_VERSION=1.13.2
+ARG PYTHON_IN_IMAGE=/opt/python/cp313-cp313/bin/python
+
+LABEL org.opencontainers.image.title="codebrix-llama-build-riscv64"
+LABEL org.opencontainers.image.description="codebrix_llama native build machine: manylinux_2_39_riscv64 + cmake + ninja"
+LABEL org.opencontainers.image.source="CodeBrix.Ollama/llama-native-tools/linux/Containerfile.riscv64"
+
+# ---------------------------------------------------------------------------------------------
+# 1. Distro packages: file and xz, used by the verification gate and the staging step.
+# ---------------------------------------------------------------------------------------------
+RUN set -eux; \
+    if command -v dnf > /dev/null 2>&1; then \
+        dnf install -y --setopt=install_weak_deps=False file xz; \
+        dnf clean all; \
+    elif command -v apt-get > /dev/null 2>&1; then \
+        apt-get update; \
+        apt-get install -y --no-install-recommends file xz-utils; \
+        rm -rf /var/lib/apt/lists/*; \
+    else \
+        echo "ERROR: no dnf and no apt-get in this image." >&2; exit 1; \
+    fi
+
+# ---------------------------------------------------------------------------------------------
+# 2. cmake + ninja, at the pinned versions, from the image's own CPython.
+#    NOTE: if PyPI has no riscv64 wheel for the pinned cmake, pip will try to build it from
+#    source, which needs the image's C++ toolchain (present) and a long time (emulated: very
+#    long). ninja has the same caveat. If that becomes a problem, the alternative is the
+#    image's own package manager (dnf install cmake ninja-build) with the versions recorded
+#    in BUILD-INFO.txt - say so in BUILD-PROVENANCE.txt if that route is taken.
+# ---------------------------------------------------------------------------------------------
+RUN set -eux; \
+    "${PYTHON_IN_IMAGE}" -m pip install --no-cache-dir "cmake==${CMAKE_VERSION}" "ninja==${NINJA_VERSION}"; \
+    ln -sf "$(dirname "${PYTHON_IN_IMAGE}")/cmake" /usr/local/bin/cmake; \
+    ln -sf "$(dirname "${PYTHON_IN_IMAGE}")/ninja" /usr/local/bin/ninja
+
+# ---------------------------------------------------------------------------------------------
+# 3. Prove the toolchain: C++17, and the rv64gc baseline the pins ask for.
+# ---------------------------------------------------------------------------------------------
+RUN set -eux; \
+    echo "=== toolchain in codebrix-llama-build-riscv64 ==="; \
+    grep -m1 PRETTY_NAME /etc/os-release; \
+    uname -m; \
+    cc --version | head -1; \
+    c++ --version | head -1; \
+    ld --version | head -1; \
+    ldd --version | head -1; \
+    cmake --version | head -1; \
+    ninja --version; \
+    printf '#include <vector>\n#include <string_view>\nint main(){ std::string_view s{"x"}; std::vector<int> v{1}; return (int)s.size()-(int)v.size(); }\n' > /tmp/probe.cpp; \
+    c++ -std=c++17 -march=rv64gc -mabi=lp64d -o /tmp/probe /tmp/probe.cpp; \
+    /tmp/probe; \
+    echo "C++17 at rv64gc: ok"
+
+WORKDIR /work

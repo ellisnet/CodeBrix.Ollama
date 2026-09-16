@@ -1,0 +1,137 @@
+================================================================================
+llama-native-tools/llama.cpp - VENDORED UPSTREAM SOURCE SNAPSHOT (BUILD SUBSET)
+================================================================================
+
+WHAT THIS FOLDER IS
+--------------------------------------------------------------------------------
+An unmodified snapshot of the parts of the upstream llama.cpp source tree that
+are needed to build the native library this repository ships. It is the ONLY
+source the native libraries are ever built from. No build step in this
+repository clones, downloads, or otherwise fetches llama.cpp (or anything else)
+at build time - see ../README.txt for the rule this exists to satisfy.
+
+UPSTREAM IDENTITY
+--------------------------------------------------------------------------------
+Project        : llama.cpp - LLM inference in C/C++ (with the ggml tensor library)
+Upstream URL   : https://github.com/ggml-org/llama.cpp
+Tag            : b10221  (upstream tags every merge with its build number; this
+                 commit IS the tag commit, so `git describe` prints exactly b10221)
+Snapshot commit: 815a2a5915f22ce6a760c676389c5dfe8535c08f
+Commit subject : "vendor : update BoringSSL to 0.20260730.0 (#26353)"
+Author date    : 2026-08-01 15:53:00 -03:00
+Commit date    : 2026-08-01 20:53:00 +02:00
+ggml version   : 0.18.0          (ggml/CMakeLists.txt GGML_VERSION_MAJOR/MINOR/PATCH)
+llama build no.: 10221           (what upstream's build-info would report; the
+                                  vendored tree has no .git, so the build reports
+                                  BUILD_NUMBER 0 / BUILD_COMMIT "unknown" and this
+                                  file plus pins.env are the record instead)
+Licence        : MIT - the full text is in LICENSE beside this file
+                 ("Copyright (c) 2023-2026 The ggml authors"). Some vendored
+                 files under ggml/src/ carry other permissive licences (Apache-2.0
+                 for Intel's SYCL backend and Arm's KleidiAI glue, among others);
+                 every one of them is inventoried, with its full licence text, in
+                 ../../THIRD-PARTY-NOTICES.txt at the root of this repository.
+
+WHY THIS COMMIT
+--------------------------------------------------------------------------------
+It is the llama.cpp commit that LLamaSharp v0.29.0+34 (commit 59dc9752, 2026-09-12)
+pins its P/Invoke bindings to. CodeBrix.Ollama.ModelRunner's managed binding is
+written against this exact C API, so the vendored source, the shipped natives and
+the managed declarations all describe one API surface. When the binding is moved
+to a newer llama.cpp, this snapshot is re-vendored at that commit (see HOW THE
+COPY WAS MADE - it is one rsync command) and this file is rewritten.
+
+WHAT WAS COPIED - AND WHAT DELIBERATELY WAS NOT
+--------------------------------------------------------------------------------
+This is a BUILD SUBSET, not the complete upstream tree. The complete tree is
+164 MB / 3,310 files; the subset is 25 MB / 1,467 files. Jeremy's rule for
+this folder (2026-09-15) is that everything the native build needs must be
+here and nothing may be fetched, NOT that the whole upstream repository must be
+mirrored. The subset was PROVEN sufficient on 2026-09-15: a directory holding
+exactly these paths and no .git configured and built to a working library.
+
+Copied (six top-level paths, complete and unmodified):
+
+    CMakeLists.txt      the upstream root project
+    LICENSE             MIT
+    cmake/              build-info, common, git-vars, license, the .cmake.in
+                        templates, and upstream's toolchain files. NOTE:
+                        cmake/download-models.cmake is present but INERT -
+                        nothing in the vendored subset includes it; upstream
+                        uses it only from tests/ and examples/, neither of
+                        which is vendored. It is kept so the subset stays a
+                        faithful copy of cmake/.
+    ggml/               the tensor library, ALL of it - including backends that
+                        are never compiled here (CUDA, SYCL, Vulkan, OpenCL,
+                        Hexagon, CANN, WebGPU, OpenVINO, MUSA, virtgpu, ...;
+                        about 15 MB). Kept whole so the snapshot is diffable
+                        against upstream with this six-line list, and so a
+                        backend can be switched on later without re-vendoring.
+    src/                the llama library proper
+    include/            the public C headers (llama.h, llama-cpp.h)
+
+Not copied (nothing the shipped natives need):
+
+    common/             the C++ helper library (CLI arg parsing, the Jinja
+                        engine, sampling helpers, HTTP). Not part of the C API
+                        the binding uses. LLAMA_BUILD_COMMON=OFF.
+    vendor/             cpp-httplib, miniaudio, nlohmann/json, sheredom, stb -
+                        used only by common/ and tools/.
+    tools/, examples/, app/, pocs/, benches/
+                        CLI programs and demos. LLAMA_BUILD_TOOLS/EXAMPLES/APP=OFF.
+    tests/              upstream's test suite (would also pull test models).
+    models/             75 MB of vocab-only GGUF files derived from third-party
+                        models, for upstream's tokenizer tests. Their licensing
+                        is the models' own and they are not needed here.
+    docs/, media/, gguf-py/, conversion/, scripts/, ci/, requirements/,
+    skills/, grammars/, licenses/, .github/, .devops/, and the root dotfiles
+                        documentation, Python tooling, CI configuration.
+
+HOW THE COPY WAS MADE
+--------------------------------------------------------------------------------
+Copied on 2026-09-15 from a clean checkout of the upstream repository at the
+commit above (`git status --porcelain` reported nothing but untracked build
+directories), with exactly this command, run from the checkout's root:
+
+    rsync -a --delete --exclude='.git/' --exclude='.DS_Store' \
+        CMakeLists.txt LICENSE cmake ggml src include \
+        <repo>/llama-native-tools/llama.cpp/
+
+NOT MODIFIED
+--------------------------------------------------------------------------------
+No file in this folder has been modified, renamed, reformatted or deleted, and
+none ever should be. This file (UPSTREAM.txt) is the ONLY addition, and it is a
+new file, not an edit of an upstream one.
+
+If a future build ever needs a change to this source, it goes in
+../patches/*.patch and is applied by the build scripts into a scratch copy at
+build time, never into this folder. As of 2026-09-15 there are no patches.
+
+THE ONE THING IN THE SUBSET THAT COULD FETCH, AND WHY IT CANNOT HERE
+--------------------------------------------------------------------------------
+ggml/src/ggml-cpu/CMakeLists.txt contains a FetchContent block that downloads
+Arm's KleidiAI kernels from GitHub. It runs ONLY when the CMake option
+GGML_CPU_KLEIDIAI is ON. Upstream defaults it to OFF, and pins.env passes
+-DGGML_CPU_KLEIDIAI=OFF explicitly so a future upstream default cannot turn it
+on silently. The Linux build additionally runs with the network disabled, so
+if it were ever reached it would fail loudly rather than fetch. No other
+FetchContent, ExternalProject, submodule, git-clone, curl or wget step exists
+in the vendored subset (the word "curl" in src/llama-sampler.cpp is a variable
+name).
+
+The build-info step (cmake/build-info.cmake, cmake/git-vars.cmake) runs `git`
+READ-ONLY to stamp a commit hash into the build; with no .git here it prints
+"fatal: not a git repository" twice during configure and falls back to
+"unknown". That is expected and harmless.
+
+VERIFYING THIS SNAPSHOT AGAINST UPSTREAM (optional, needs network)
+--------------------------------------------------------------------------------
+    git clone https://github.com/ggml-org/llama.cpp /tmp/llama-verify
+    git -C /tmp/llama-verify checkout 815a2a5915f22ce6a760c676389c5dfe8535c08f
+    for p in CMakeLists.txt LICENSE cmake ggml src include; do
+        diff -r -x .DS_Store /tmp/llama-verify/$p ./$p
+    done                                   # expect no output
+
+That check is a convenience for a human, not a build step: nothing in the build
+depends on it, and the build works with no network at all.
+================================================================================

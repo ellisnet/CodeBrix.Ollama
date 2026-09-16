@@ -1,0 +1,7 @@
+# exports-macos.txt - the symbols libcodebrix_llama.dylib exports (ld64 -exported_symbols_list).
+# Mach-O prefixes C symbols with an underscore. Wildcards are ld64 glob patterns.
+# Everything not matched here is hidden: upstream's internal C++ symbols never leave the library.
+_llama_*
+_ggml_*
+_gguf_*
+_codebrix_llama_*

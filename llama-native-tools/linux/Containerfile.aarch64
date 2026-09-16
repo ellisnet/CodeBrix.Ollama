@@ -1,0 +1,84 @@
+# =============================================================================================
+# Containerfile.aarch64 - the codebrix_llama build machine for linux-arm64
+# =============================================================================================
+#
+# WHAT THIS IS, AND WHY IT IS A SEPARATE STEP
+#   The rule this folder exists for says the LIBRARY BUILD may not reach outside this
+#   repository. Tools installed on a build machine are the one allowed exception - and this
+#   file IS that installation, written down and version-pinned: it takes the digest-pinned
+#   manylinux base image (gcc 14, glibc 2.28) and adds cmake and ninja. Nothing else.
+#
+#   Building this image is the ONLY step that uses the network. The library build afterwards
+#   runs with `--network none` and cannot reach anything even if it wanted to.
+#
+#   build.sh builds this image the first time it is needed and reuses it after that.
+#   To rebuild deliberately:   FORCE_IMAGE_REBUILD=1 ./build.sh arm64
+#
+# THE ARM64 BASELINE (pins.env LLAMA_CMAKE_OPTIONS_ARM64) is armv8.2-a+dotprod+fp16. Step 3
+# below PROVES the compiler accepts that -march and the dotprod / fp16 intrinsics, so a
+# too-old toolchain fails the image build rather than silently building a slower library.
+#
+# ON A NATIVE arm64 HOST this image builds and runs at full speed. On an x86_64 host it runs
+# under qemu-user emulation, which for a code base this size is slow (see README.txt).
+#
+# EVERY VERSION HERE COMES FROM pins.env. The defaults below exist only so a hand-run
+# `podman build -f Containerfile.aarch64 .` still works; build.sh always passes --build-arg.
+#
+#   NEVER YET RUN - see build.sh.
+# =============================================================================================
+
+ARG BASE_IMAGE=quay.io/pypa/manylinux_2_28_aarch64@sha256:162c81dfd3efc710732a571717d3c916a6945ebf279e879ddee3243af96fe46f
+FROM ${BASE_IMAGE}
+
+ARG CMAKE_VERSION=4.4.3
+ARG NINJA_VERSION=1.13.2
+ARG PYTHON_IN_IMAGE=/opt/python/cp313-cp313/bin/python
+
+LABEL org.opencontainers.image.title="codebrix-llama-build-aarch64"
+LABEL org.opencontainers.image.description="codebrix_llama native build machine: manylinux_2_28_aarch64 + cmake + ninja"
+LABEL org.opencontainers.image.source="CodeBrix.Ollama/llama-native-tools/linux/Containerfile.aarch64"
+
+# ---------------------------------------------------------------------------------------------
+# 1. Distro packages: file and xz, used by the verification gate and the staging step.
+# ---------------------------------------------------------------------------------------------
+RUN set -eux; \
+    if command -v dnf > /dev/null 2>&1; then \
+        dnf install -y --setopt=install_weak_deps=False file xz; \
+        dnf clean all; \
+    elif command -v apt-get > /dev/null 2>&1; then \
+        apt-get update; \
+        apt-get install -y --no-install-recommends file xz-utils; \
+        rm -rf /var/lib/apt/lists/*; \
+    else \
+        echo "ERROR: no dnf and no apt-get in this image." >&2; exit 1; \
+    fi
+
+# ---------------------------------------------------------------------------------------------
+# 2. cmake + ninja, at the pinned versions, from the image's own CPython.
+# ---------------------------------------------------------------------------------------------
+RUN set -eux; \
+    "${PYTHON_IN_IMAGE}" -m pip install --no-cache-dir "cmake==${CMAKE_VERSION}" "ninja==${NINJA_VERSION}"; \
+    ln -sf "$(dirname "${PYTHON_IN_IMAGE}")/cmake" /usr/local/bin/cmake; \
+    ln -sf "$(dirname "${PYTHON_IN_IMAGE}")/ninja" /usr/local/bin/ninja
+
+# ---------------------------------------------------------------------------------------------
+# 3. Prove the toolchain - specifically the armv8.2-a+dotprod+fp16 baseline, by COMPILING the
+#    two intrinsics ggml's CPU backend keys its fast paths on, which is worth more than any
+#    version string.
+# ---------------------------------------------------------------------------------------------
+RUN set -eux; \
+    echo "=== toolchain in codebrix-llama-build-aarch64 ==="; \
+    grep -m1 PRETTY_NAME /etc/os-release; \
+    uname -m; \
+    cc --version | head -1; \
+    c++ --version | head -1; \
+    ld --version | head -1; \
+    ldd --version | head -1; \
+    cmake --version | head -1; \
+    ninja --version; \
+    printf '#include <arm_neon.h>\nint main(){ int8x16_t a = vdupq_n_s8(1); int32x4_t s = vdupq_n_s32(0); s = vdotq_s32(s, a, a); float16x8_t h = vdupq_n_f16(1.0); h = vaddq_f16(h, h); return vgetq_lane_s32(s,0) - 16 + (int)vgetq_lane_f16(h,0) - 2; }\n' > /tmp/probe.c; \
+    cc -march=armv8.2-a+dotprod+fp16 -o /tmp/probe /tmp/probe.c; \
+    /tmp/probe; \
+    echo "armv8.2-a+dotprod+fp16 baseline compiles and runs here: ok"
+
+WORKDIR /work

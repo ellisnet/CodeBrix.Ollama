@@ -1,0 +1,159 @@
+================================================================================
+llama-native-tools/BUILD-PROVENANCE.txt
+what was actually built, when, by what, and with what result
+================================================================================
+
+WHY THIS FILE EXISTS
+--------------------------------------------------------------------------------
+A binary in a package is anonymous. This file is how anyone later can tell which
+native library came from which source, which toolchain and which build machine -
+without which "rebuild it and see if it matches" is not a question that can even
+be asked. Every time a binary is adopted into the package's runtimes/ tree, its
+section here is updated from that build's output/<rid>/BUILD-INFO.txt.
+
+Common to every entry below
+--------------------------------------------------------------------------------
+  Source          : llama-native-tools/llama.cpp/ - vendored upstream subset
+                    (CMakeLists.txt, LICENSE, cmake/, ggml/, src/, include/)
+  llama.cpp       : tag b10221, commit 815a2a5915f22ce6a760c676389c5dfe8535c08f
+                    (2026-08-01), ggml 0.18.0
+  Licence         : MIT (llama.cpp/LICENSE, shipped as LICENSE-LlamaCpp.txt beside
+                    every binary; see ../THIRD-PARTY-NOTICES.txt)
+  Patches applied : NONE. The vendored source is unmodified upstream.
+  Wrapper         : llama-native-tools/wrapper/CMakeLists.txt - static archives
+                    linked whole-archive into ONE shared library named
+                    codebrix_llama; exports restricted to llama_* / ggml_* /
+                    gguf_* / codebrix_llama_*; Release with debug info, then
+                    stripped for shipping
+  cmake options   : -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF
+                    -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DGGML_NATIVE=OFF
+                    -DGGML_OPENMP=OFF -DGGML_CPU_KLEIDIAI=OFF -DGGML_BACKEND_DL=OFF
+                    -DGGML_AVX512=OFF -DLLAMA_OPENSSL=OFF -DLLAMA_CURL=OFF
+                    -DLLAMA_BUILD_COMMON=OFF -DLLAMA_BUILD_TOOLS=OFF
+                    -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF
+                    -DLLAMA_BUILD_APP=OFF -DLLAMA_BUILD_SERVER=OFF
+                    (plus the per-architecture options in linux/pins.env,
+                    repeated under each RID below)
+  Conformance     : test-vectors/codebrix-conformance-tiny.gguf (sha256
+                    66c90c32aea69570911279c49ca1252e60408a2fe2218000cff54444cdb6e7d9)
+                    run through the built library; every logit within 0.001 of
+                    test-vectors/EXPECTED.txt, greedy argmax exact, no NaN. The
+                    reference was established on the osx-x64 CPU path on
+                    2026-09-15 (see test-vectors/README.txt), so for every OTHER
+                    RID the conformance pass is a cross-architecture check
+                    against an AVX2-generated reference.
+  Gate            : architecture, all LLAMA_API exports (233) + extras (15),
+                    export surface exactly the four prefixes, system-only
+                    dependencies, platform floor (glibc / minos / static CRT),
+                    signature (macOS), dlopen smoke test (75 entry points +
+                    backend init + device enumeration), model regeneration
+                    byte-identical to the committed asset, conformance.
+
+
+================================================================================
+osx-x64                                                            BUILT + PASSED
+================================================================================
+Built            : 2026-09-16 00:05:52 UTC (2026-09-15 local)
+Built by         : macos/build-osx-x64.sh (native route, Intel Mac)
+Build host       : Intel Mac mini (2018), i7-8700B, macOS 15.8 (x86_64)
+Duration         : about 4 minutes cold; 11 s with a warm ccache (this run)
+Network          : not used - the vendored source, the conformance model and
+                   the expected logits are all files in this repository
+Compiler         : Apple clang version 17.0.0 (clang-1700.6.4.2)
+cmake / ninja    : 4.4.3 / 1.13.2 (both equal to the pins)
+arch options     : -DGGML_METAL=OFF -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple
+CPU baseline     : x86-64 with AVX2, FMA, F16C, BMI2 (no AVX-512)
+GPU backend      : none. Metal OFF - a CPU-only slice by decision (Jeremy,
+                   2026-09-15), and necessarily so: at this commit ggml-metal
+                   returned NaN for every logit on the Intel UHD 630 (verified
+                   with a separate Metal-enabled trial build the same day).
+Deployment target: 11.0 (checked by the gate, not merely requested)
+
+File             : libcodebrix_llama.dylib   install name @rpath/libcodebrix_llama.dylib
+Size (stripped)  : 4,170,664 bytes
+Size (unstripped): 5,226,136 bytes
+SHA256           : b06df3a7392388dbe4b817175a776cc0438bc3844ec0943e4a365897156ed982
+                   *** REPRODUCIBLE EXCEPT FOR LC_UUID - see Reproducibility below.
+                   A rebuild legitimately produces a different sha256. ***
+SHA256 unstripped: f24250f5191d303bbfa6ce01410cd196074ff70dc93e7403e8fdb7e7002c22a3
+LC_UUID          : 5830F46C-EFA7-3F60-840C-45833A3F0831 (NOT stable across builds;
+                   the stored unstripped twin and dSYM carry this one)
+Debug symbols    : libcodebrix_llama.dylib.dSYM, 55 MB, stored under unstripped/osx-x64/
+Dependencies     : /usr/lib/libSystem.B.dylib
+                   /System/Library/Frameworks/Accelerate.framework/Versions/A/Accelerate
+                   /usr/lib/libc++.1.dylib
+Signature        : ad-hoc (codesign --sign -), applied after strip and
+                   install_name_tool; re-verified after the copy into runtimes/
+Exports          : 1,159 symbols, all llama_* / ggml_* / gguf_* / codebrix_llama_*;
+                   all 233 LLAMA_API functions present
+Reproducibility  : four consecutive from-scratch runs on 2026-09-15 (two with
+                   ZERO_AR_DATE=1, which changed nothing). Consecutive
+                   UNSTRIPPED builds differ in 18 bytes (the 16-byte LC_UUID
+                   at offset 1657-1672 and 2 bytes at 3519848-3519849 in the
+                   symbol-table region); the STRIPPED, signed files differ in
+                   112 bytes (UUID + the signature covering it). All code and
+                   data identical; every run passed the whole gate. Cause and
+                   reasoning: macos/README.txt, "WHAT HAS AND HAS NOT BEEN
+                   VERIFIED", item 1. Compare size, exports and gate result,
+                   not the hash.
+Gate             : architecture ok, 248/248 required exports, export surface
+                   exact, install name ok, system-only dependencies, minos 11.0
+                   ok, signature ok, smoke test passed (75/75 entry points,
+                   2 devices: BLAS/Accelerate + CPU, system info "AVX = 1 |
+                   AVX2 = 1 | F16C = 1 | FMA = 1 | BMI2 = 1 | LLAMAFILE = 1 |
+                   ACCELERATE = 1 | REPACK = 1"), model regeneration
+                   byte-identical, conformance CPU: 12 positions, 64 logits
+                   each, max |diff| 4.98e-08, PASSED
+Adopted into src/CodeBrix.Ollama.ModelRunner/runtimes/osx-x64/native/ : YES,
+                   2026-09-15, with llama.cpp's LICENSE beside it as
+                   LICENSE-LlamaCpp.txt. Unstripped twin + dSYM stored under
+                   unstripped/osx-x64/ (SHA256SUMS extended) in the same commit.
+
+
+================================================================================
+osx-arm64                                                             NOT BUILT
+================================================================================
+To be built on the Apple Silicon Mac mini with macos/build-osx-arm64.sh
+(never yet run). Expected arch options: -DGGML_CPU_ARM_ARCH=armv8.2-a+dotprod+fp16
+-DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple.
+The gate for this slice includes the Metal conformance pass, which will be the
+first GPU verification of the reference logits.
+
+
+================================================================================
+win-x64                                                               NOT BUILT
+================================================================================
+To be built on the Windows 11 x64 machine with windows\build-win-x64.ps1
+(never yet run). MSVC, static CRT, AVX2 baseline.
+
+
+================================================================================
+win-arm64                                                             NOT BUILT
+================================================================================
+To be built on the Windows 11 ARM64 machine with windows\build-win-arm64.ps1
+(never yet run). clang-cl, static CRT, armv8.2-a+dotprod+fp16 baseline.
+
+
+================================================================================
+linux-x64                                                             NOT BUILT
+================================================================================
+To be built on the Debian x64 machine with linux/build.sh x64 (never yet run).
+manylinux_2_28 container (glibc floor 2.28), gcc 14, AVX2 baseline, static
+libstdc++/libgcc.
+
+
+================================================================================
+linux-arm64                                                           NOT BUILT
+================================================================================
+To be built on the Debian arm64 machine with linux/build.sh arm64 (never yet
+run). manylinux_2_28 container (glibc floor 2.28), gcc 14,
+armv8.2-a+dotprod+fp16 baseline, static libstdc++/libgcc.
+
+
+================================================================================
+linux-riscv64                                                         NOT BUILT
+================================================================================
+To be built on the Debian riscv64 machine with linux/build.sh riscv64 (never
+yet run). manylinux_2_39 container (glibc floor 2.39), gcc 14, rv64gc scalar
+baseline (no RVV), static libstdc++/libgcc.
+================================================================================

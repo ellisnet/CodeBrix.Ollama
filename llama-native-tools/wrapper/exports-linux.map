@@ -1,0 +1,12 @@
+/* exports-linux.map - GNU ld / lld version script for libcodebrix_llama.so.
+ * Only the public C API is exported; every other symbol (upstream's internal C++ and the
+ * statically linked libstdc++/libgcc) is local to the library. */
+{
+    global:
+        llama_*;
+        ggml_*;
+        gguf_*;
+        codebrix_llama_*;
+    local:
+        *;
+};

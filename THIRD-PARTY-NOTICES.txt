@@ -1,0 +1,544 @@
+THIRD-PARTY SOFTWARE NOTICES AND INFORMATION
+
+CodeBrix.Ollama is a pair of .NET libraries for downloading, managing and
+running large language models in-process: CodeBrix.Ollama.ModelManager (a model
+store and registry client) and CodeBrix.Ollama.ModelRunner (a managed binding
+over a self-built native inference library). As of 2026-09-15 the repository
+holds the native build tooling and the first native library; the managed
+libraries are not yet written, and this file will grow entries for the code
+they port (from the Ollama server, LLamaSharp and possibly OllamaSharp - all
+MIT) when that happens.
+
+Two distinct things in this repository come from other people today, and both
+are covered below:
+
+  1. THE VENDORED SOURCE. llama-native-tools/llama.cpp/ is an unmodified
+     snapshot of the build-sufficient subset of the upstream llama.cpp source
+     tree (which contains the ggml tensor library), committed to this
+     repository so the native libraries can be rebuilt from it alone, years
+     from now, with no dependency that may have disappeared. It is the only
+     source the native libraries are ever built from.
+
+  2. THE SHIPPED BINARIES. The package's runtimes/<rid>/native/ folders under
+     src/CodeBrix.Ollama.ModelRunner/ contain libcodebrix_llama.dylib /
+     libcodebrix_llama.so / codebrix_llama.dll compiled from exactly that
+     source, one per runtime identifier (osx-x64 as of 2026-09-15; six more
+     to come).
+
+Both are governed by the licences reproduced in full below. Every one of them -
+MIT, and the Apache License 2.0 (with and without the LLVM exception) - is
+permissive and compatible with this repository's own MIT licence.
+
+HOW THE MIT LICENCE'S NOTICE REQUIREMENT IS SATISFIED
+    The MIT licence requires that "the above copyright notice and this
+    permission notice shall be included in all copies or substantial portions
+    of the Software". Every build script in llama-native-tools/ copies
+    llama.cpp's own LICENSE file into its output folder as LICENSE-LlamaCpp.txt,
+    and the adoption step copies it into runtimes/<rid>/native/ beside the
+    binary. So the licence text physically travels inside the NuGet package,
+    next to every native library, on every platform - in addition to this file.
+
+WHAT WAS COPIED FROM UPSTREAM, AND WHAT WAS NOT
+    Six top-level paths, complete and unmodified: CMakeLists.txt, LICENSE,
+    cmake/, ggml/, src/, include/ - 1,467 files, about 25 MB. The rest of the
+    upstream tree (common/, vendor/, tools/, examples/, tests/, docs/, models/,
+    gguf-py/, scripts/ and the others - about 140 MB, including 75 MB of
+    vocabulary files derived from third-party models) is not needed to build
+    the library and was deliberately not copied. The exact copy command and
+    the full list of what was excluded are in llama-native-tools/llama.cpp/
+    UPSTREAM.txt. Because it is a subset, this file inventories what IS here,
+    not the whole upstream project.
+
+WHAT WAS MODIFIED
+    NOTHING. Not one vendored file has been edited, renamed, reformatted or
+    deleted. One file was ADDED, and it is a new file rather than a change to
+    an existing one: llama-native-tools/llama.cpp/UPSTREAM.txt, which records
+    where the snapshot came from. llama-native-tools/patches/ exists for the
+    day a build needs a source change - applied at build time to a scratch
+    copy, never to the snapshot - and as of 2026-09-15 it is empty. If a patch
+    is ever added, this section must say so, because a patched binary is no
+    longer plain upstream llama.cpp.
+
+    The shipped binary does contain ONE translation unit that is not
+    upstream's: llama-native-tools/wrapper/codebrix_llama.c, two functions
+    that report the build's identity. It is original content of this
+    repository and is not third-party.
+
+WHAT IS NOT THIRD-PARTY, AND IS DELIBERATELY ABSENT FROM THIS FILE
+    llama-native-tools/test-vectors/codebrix-conformance-tiny.gguf - the
+    synthetic model the build gate runs. It is random weights from a fixed
+    seed, generated in this repository on 2026-09-15 by
+    llama-native-tools/test-vectors/generate-test-model.c. There are no
+    trained weights, nothing derived from anyone's model, no vocabulary, and
+    nothing downloaded. It is original content of this repository, and listing
+    it here would be a false statement about its origin.
+
+    The models that CodeBrix.Ollama downloads AT RUN TIME on a user's machine
+    (and the SmolLM model the test suite will download when its live tests are
+    enabled) are not part of this repository or its packages and are governed
+    by their own licences.
+
+NuGet package dependencies are not listed here; this file covers source code and
+binaries incorporated INTO this repository. (Both libraries are planned to have
+none.)
+
+
+================================================================================
+1. llama.cpp and ggml  (the inference library; vendored source and every
+   shipped native library)
+================================================================================
+
+Project:    llama.cpp - LLM inference in C/C++, with the ggml tensor library
+Source URL: https://github.com/ggml-org/llama.cpp
+            (ggml is developed in-tree at ggml/ and also at
+             https://github.com/ggml-org/ggml)
+Version:    tag b10221 (upstream tags every merge with its build number;
+            this commit is the tag commit)
+Commit:     815a2a5915f22ce6a760c676389c5dfe8535c08f
+            "vendor : update BoringSSL to 0.20260730.0 (#26353)"
+            authored 2026-08-01
+ggml:       0.18.0 (ggml/CMakeLists.txt)
+Licence:    MIT (upstream file: LICENSE)
+Vendored:   llama-native-tools/llama.cpp/  (subset; see UPSTREAM.txt)
+
+Copyright holders. The upstream LICENSE names "The ggml authors"; individual
+source files name more, and the file headers are authoritative. Every distinct
+holder appearing anywhere in the vendored snapshot under MIT terms:
+
+    The ggml authors                      (LICENSE; ggml/src/ggml-cann/*)
+    Intel Corporation                     (ggml/src/ggml-sycl/*, ggml/include/
+                                           ggml-sycl.h - MIT; see also entry 2)
+    Codeplay Software Ltd.                (ggml/src/ggml-sycl/quantize.hpp,
+                                           quants.hpp - MIT, jointly with Intel)
+    Arm Limited and/or its affiliates     (ggml/src/ggml-cpu/kleidiai/* - MIT,
+                                           SPDX-tagged)
+    Mozilla Foundation                    (ggml/src/ggml-cpu/llamafile/sgemm.cpp
+                                           - MIT; the tinyBLAS matmul kernels
+                                           from the llamafile project)
+    Jeffrey Quesnelle and Bowen Peng      (the YaRN rotary-embedding scaling
+                                           routine, credited inline as "MIT
+                                           licensed" in ggml/src/ggml-cpu/ops.cpp,
+                                           ggml/src/ggml-cuda/rope.cu,
+                                           ggml/src/ggml-metal/ggml-metal.metal
+                                           and ggml/src/ggml-opencl/kernels/rope.cl;
+                                           from https://github.com/jquesnelle/yarn)
+
+Most vendored files carry no per-file notice at all and are covered by the
+project LICENSE. Every vendored file that does carry one retains it verbatim.
+
+WHAT WAS INCORPORATED
+    The build-sufficient subset of the upstream tree, unmodified. The native
+    library this package ships is compiled from it with the options recorded
+    in llama-native-tools/linux/pins.env - in short: Release, static archives
+    folded into one shared library, no OpenMP, no HTTP client, the CPU backend
+    at a portable baseline per architecture (AVX2 on x64, armv8.2-a+dotprod+
+    fp16 on arm64, scalar rv64gc on riscv64), Apple Accelerate as the BLAS on
+    macOS, and the Metal GPU backend on osx-arm64 only.
+
+WHAT IS COMPILED INTO THE SHIPPED BINARIES
+    From src/ and include/: the llama library - model loading (GGUF), the
+    tokenizers, the KV-cache and graph code for every supported model
+    architecture, sampling, grammars, chat-template matching, LoRA adapters.
+    From ggml/: ggml-base and ggml (the tensor core and backend registry),
+    ggml-cpu (including the llamafile tinyBLAS kernels and the YaRN routine),
+    ggml-blas (macOS only, over Accelerate), ggml-metal (osx-arm64 only,
+    including its Metal shader source embedded in the dylib; it too carries
+    the YaRN routine).
+
+WHAT IS PRESENT IN THE SNAPSHOT BUT NOT COMPILED INTO ANY SHIPPED BINARY
+    * ggml/src/ggml-cuda, ggml-sycl, ggml-vulkan, ggml-opencl, ggml-hexagon,
+      ggml-cann, ggml-webgpu, ggml-openvino, ggml-musa, ggml-virtgpu,
+      ggml-zendnn, ggml-rpc, ggml-blas on non-macOS, and the other backends
+      under ggml/src/ - GPU and accelerator backends this package does not
+      enable. Kept because removing them would make the snapshot no longer
+      diffable against upstream, and so a backend can be switched on later
+      without re-vendoring. The Apache-2.0 material in entry 2 lives entirely
+      inside these never-compiled folders.
+    * ggml/src/ggml-cpu/kleidiai/* - Arm's KleidiAI glue, compiled only when
+      GGML_CPU_KLEIDIAI is ON, which this package keeps OFF (turning it on
+      would also make CMake download the KleidiAI kernel sources, which the
+      rule this repository's native tooling lives by forbids).
+    * ggml/src/ggml-cpu/arch/{wasm,powerpc,loongarch,s390x}/ and the SpaceMiT
+      RISC-V kernels - architectures and extensions this package does not
+      target (riscv64 is built scalar).
+    * cmake/download-models.cmake - inert; nothing in the subset includes it.
+
+MODIFICATIONS
+    None. See "WHAT WAS MODIFIED" above.
+
+----- llama.cpp licence (MIT), reproduced verbatim from LICENSE -----
+
+MIT License
+
+Copyright (c) 2023-2026 The ggml authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+----- The same MIT terms, as they appear in the per-file headers of the other
+      holders listed above (Intel, Codeplay, Arm, Mozilla, Quesnelle/Peng),
+      differing only in the copyright line -----
+
+(The Mozilla Foundation header in ggml/src/ggml-cpu/llamafile/sgemm.cpp and the
+"The ggml authors" headers in ggml/src/ggml-cann/* reproduce the MIT text in
+full; the Intel, Codeplay and Arm headers state "MIT license" with an SPDX
+identifier; the YaRN routine is credited inline as "MIT licensed. Copyright (c)
+2023 Jeffrey Quesnelle and Bowen Peng." The MIT text above applies to each,
+with the respective copyright line.)
+
+
+================================================================================
+2. Intel Corporation - the SYCL and OpenVINO backends  (Apache-2.0, and
+   Apache-2.0 WITH LLVM-exception)  -  NOT COMPILED INTO ANY SHIPPED BINARY
+================================================================================
+
+Project:    llama.cpp's ggml-sycl backend (Intel oneAPI / SYCL GPU support)
+            and ggml-openvino backend, contributed to ggml by Intel
+Authors:    Intel Corporation; Codeplay Software Ltd. (two files, jointly)
+Licences:   ggml/src/ggml-sycl/* (37 files) carry TWO headers each: an MIT
+            header (Intel, SPDX MIT) AND "Part of the LLVM Project, under the
+            Apache License v2.0 with LLVM Exceptions" (SPDX
+            Apache-2.0 WITH LLVM-exception) - the files began as adaptations
+            of LLVM's SYCL compatibility headers.
+            ggml/src/ggml-openvino/openvino/frontend.h and
+            ggml/src/ggml-openvino/openvino/rt_info/weightless_caching_attributes.hpp
+            (2 files) carry a plain Apache-2.0 SPDX header (Intel Corporation,
+            2018-2024 / 2018-2026).
+Covers:     llama-native-tools/llama.cpp/ggml/src/ggml-sycl/**
+            llama-native-tools/llama.cpp/ggml/src/ggml-openvino/openvino/frontend.h
+            llama-native-tools/llama.cpp/ggml/src/ggml-openvino/openvino/rt_info/weightless_caching_attributes.hpp
+
+WHAT WAS INCORPORATED
+    The files as upstream llama.cpp ships them, unmodified, as part of the
+    vendored subset.
+
+NOT BUILT INTO ANYTHING SHIPPED
+    This package enables neither the SYCL nor the OpenVINO backend on any
+    runtime identifier (GGML_SYCL and GGML_OPENVINO are off by default and are
+    never set). No line of these files is compiled into any shipped binary.
+    They are vendored so the snapshot stays a faithful, diffable copy of the
+    upstream folders it includes, and so those backends could be enabled later
+    without re-vendoring. If one ever is, the shipped binary will then contain
+    Apache-2.0 code and this entry must be promoted from "not built" to
+    "incorporated", with the Apache-2.0 notice requirements (section 4 of the
+    licence) satisfied in the package.
+
+MODIFICATIONS
+    None.
+
+----- Apache License, Version 2.0, reproduced verbatim -----
+
+                                 Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
+
+   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+   1. Definitions.
+
+      "License" shall mean the terms and conditions for use, reproduction,
+      and distribution as defined by Sections 1 through 9 of this document.
+
+      "Licensor" shall mean the copyright owner or entity authorized by
+      the copyright owner that is granting the License.
+
+      "Legal Entity" shall mean the union of the acting entity and all
+      other entities that control, are controlled by, or are under common
+      control with that entity. For the purposes of this definition,
+      "control" means (i) the power, direct or indirect, to cause the
+      direction or management of such entity, whether by contract or
+      otherwise, or (ii) ownership of fifty percent (50%) or more of the
+      outstanding shares, or (iii) beneficial ownership of such entity.
+
+      "You" (or "Your") shall mean an individual or Legal Entity
+      exercising permissions granted by this License.
+
+      "Source" form shall mean the preferred form for making modifications,
+      including but not limited to software source code, documentation
+      source, and configuration files.
+
+      "Object" form shall mean any form resulting from mechanical
+      transformation or translation of a Source form, including but
+      not limited to compiled object code, generated documentation,
+      and conversions to other media types.
+
+      "Work" shall mean the work of authorship, whether in Source or
+      Object form, made available under the License, as indicated by a
+      copyright notice that is included in or attached to the work
+      (an example is provided in the Appendix below).
+
+      "Derivative Works" shall mean any work, whether in Source or Object
+      form, that is based on (or derived from) the Work and for which the
+      editorial revisions, annotations, elaborations, or other modifications
+      represent, as a whole, an original work of authorship. For the purposes
+      of this License, Derivative Works shall not include works that remain
+      separable from, or merely link (or bind by name) to the interfaces of,
+      the Work and Derivative Works thereof.
+
+      "Contribution" shall mean any work of authorship, including
+      the original version of the Work and any modifications or additions
+      to that Work or Derivative Works thereof, that is intentionally
+      submitted to Licensor for inclusion in the Work by the copyright owner
+      or by an individual or Legal Entity authorized to submit on behalf of
+      the copyright owner. For the purposes of this definition, "submitted"
+      means any form of electronic, verbal, or written communication sent
+      to the Licensor or its representatives, including but not limited to
+      communication on electronic mailing lists, source code control systems,
+      and issue tracking systems that are managed by, or on behalf of, the
+      Licensor for the purpose of discussing and improving the Work, but
+      excluding communication that is conspicuously marked or otherwise
+      designated in writing by the copyright owner as "Not a Contribution."
+
+      "Contributor" shall mean Licensor and any individual or Legal Entity
+      on behalf of whom a Contribution has been received by Licensor and
+      subsequently incorporated within the Work.
+
+   2. Grant of Copyright License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      copyright license to reproduce, prepare Derivative Works of,
+      publicly display, publicly perform, sublicense, and distribute the
+      Work and such Derivative Works in Source or Object form.
+
+   3. Grant of Patent License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      (except as stated in this section) patent license to make, have made,
+      use, offer to sell, sell, import, and otherwise transfer the Work,
+      where such license applies only to those patent claims licensable
+      by such Contributor that are necessarily infringed by their
+      Contribution(s) alone or by combination of their Contribution(s)
+      with the Work to which such Contribution(s) was submitted. If You
+      institute patent litigation against any entity (including a
+      cross-claim or counterclaim in a lawsuit) alleging that the Work
+      or a Contribution incorporated within the Work constitutes direct
+      or contributory patent infringement, then any patent licenses
+      granted to You under this License for that Work shall terminate
+      as of the date such litigation is filed.
+
+   4. Redistribution. You may reproduce and distribute copies of the
+      Work or Derivative Works thereof in any medium, with or without
+      modifications, and in Source or Object form, provided that You
+      meet the following conditions:
+
+      (a) You must give any other recipients of the Work or
+          Derivative Works a copy of this License; and
+
+      (b) You must cause any modified files to carry prominent notices
+          stating that You changed the files; and
+
+      (c) You must retain, in the Source form of any Derivative Works
+          that You distribute, all copyright, patent, trademark, and
+          attribution notices from the Source form of the Work,
+          excluding those notices that do not pertain to any part of
+          the Derivative Works; and
+
+      (d) If the Work includes a "NOTICE" text file as part of its
+          distribution, then any Derivative Works that You distribute must
+          include a readable copy of the attribution notices contained
+          within such NOTICE file, excluding those notices that do not
+          pertain to any part of the Derivative Works, in at least one
+          of the following places: within a NOTICE text file distributed
+          as part of the Derivative Works; within the Source form or
+          documentation, if provided along with the Derivative Works; or,
+          within a display generated by the Derivative Works, if and
+          wherever such third-party notices normally appear. The contents
+          of the NOTICE file are for informational purposes only and
+          do not modify the License. You may add Your own attribution
+          notices within Derivative Works that You distribute, alongside
+          or as an addendum to the NOTICE text from the Work, provided
+          that such additional attribution notices cannot be construed
+          as modifying the License.
+
+      You may add Your own copyright statement to Your modifications and
+      may provide additional or different license terms and conditions
+      for use, reproduction, or distribution of Your modifications, or
+      for any such Derivative Works as a whole, provided Your use,
+      reproduction, and distribution of the Work otherwise complies with
+      the conditions stated in this License.
+
+   5. Submission of Contributions. Unless You explicitly state otherwise,
+      any Contribution intentionally submitted for inclusion in the Work
+      by You to the Licensor shall be under the terms and conditions of
+      this License, without any additional terms or conditions.
+      Notwithstanding the above, nothing herein shall supersede or modify
+      the terms of any separate license agreement you may have executed
+      with Licensor regarding such Contributions.
+
+   6. Trademarks. This License does not grant permission to use the trade
+      names, trademarks, service marks, or product names of the Licensor,
+      except as required for reasonable and customary use in describing the
+      origin of the Work and reproducing the content of the NOTICE file.
+
+   7. Disclaimer of Warranty. Unless required by applicable law or
+      agreed to in writing, Licensor provides the Work (and each
+      Contributor provides its Contributions) on an "AS IS" BASIS,
+      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+      implied, including, without limitation, any warranties or conditions
+      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+      PARTICULAR PURPOSE. You are solely responsible for determining the
+      appropriateness of using or redistributing the Work and assume any
+      risks associated with Your exercise of permissions under this License.
+
+   8. Limitation of Liability. In no event and under no legal theory,
+      whether in tort (including negligence), contract, or otherwise,
+      unless required by applicable law (such as deliberate and grossly
+      negligent acts) or agreed to in writing, shall any Contributor be
+      liable to You for damages, including any direct, indirect, special,
+      incidental, or consequential damages of any character arising as a
+      result of this License or out of the use or inability to use the
+      Work (including but not limited to damages for loss of goodwill,
+      work stoppage, computer failure or malfunction, or any and all
+      other commercial damages or losses), even if such Contributor
+      has been advised of the possibility of such damages.
+
+   9. Accepting Warranty or Additional Liability. While redistributing
+      the Work or Derivative Works thereof, You may choose to offer,
+      and charge a fee for, acceptance of support, warranty, indemnity,
+      or other liability obligations and/or rights consistent with this
+      License. However, in accepting such obligations, You may act only
+      on Your own behalf and on Your sole responsibility, not on behalf
+      of any other Contributor, and only if You agree to indemnify,
+      defend, and hold each Contributor harmless for any liability
+      incurred by, or claims asserted against, such Contributor by reason
+      of your accepting any such warranty or additional liability.
+
+   END OF TERMS AND CONDITIONS
+
+   APPENDIX: How to apply the Apache License to your work.
+
+      To apply the Apache License to your work, attach the following
+      boilerplate notice, with the fields enclosed by brackets "[]"
+      replaced with your own identifying information. (Don't include
+      the brackets!)  The text should be enclosed in the appropriate
+      comment syntax for the file format. We also recommend that a
+      file or class name and description of purpose be included on the
+      same "printed page" as the copyright notice for easier
+      identification within third-party archives.
+
+   Copyright [yyyy] [name of copyright owner]
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+
+----- LLVM Exceptions to the Apache 2.0 License, reproduced verbatim (they
+      apply to the ggml-sycl files, per their "Apache-2.0 WITH LLVM-exception"
+      header) -----
+
+---- LLVM Exceptions to the Apache 2.0 License ----
+
+As an exception, if, as a result of your compiling your source code, portions
+of this Software are embedded into an Object form of such source code, you
+may redistribute such embedded portions in such Object form without complying
+with the conditions of Sections 4(a), 4(b) and 4(d) of the License.
+
+In addition, if you combine or link compiled forms of this Software with
+software that is licensed under the GPLv2 ("Combined Software") and if a
+court of competent jurisdiction determines that the patent provision (Section
+3), the indemnity provision (Section 9) or other Section of the License
+conflicts with the conditions of the GPLv2, you may retroactively and
+prospectively choose to deem waived or otherwise exclude such Section(s) of
+the License, but only in their entirety and only with respect to the Combined
+Software.
+
+
+================================================================================
+INVENTORY: HOW THIS FILE WAS COMPILED, AND HOW TO RE-CHECK IT
+================================================================================
+On 2026-09-15 the vendored snapshot was inventoried mechanically, not by
+reading around in it. The snapshot holds 1,468 files (1,467 from upstream plus
+the added UPSTREAM.txt); 59 of them carry a copyright notice.
+
+STEP 1 - every distinct notice, with a count:
+
+    cd llama-native-tools/llama.cpp
+    grep -rhI -o 'Copyright[^"]\{0,90\}' . | sort | uniq -c | sort -rn
+
+  Eleven distinct notice lines naming seven holders: The ggml authors, Intel
+  Corporation (three year ranges), Codeplay Software Ltd., Arm Limited,
+  Mozilla Foundation, and Jeffrey Quesnelle and Bowen Peng. Every one is
+  listed in entry 1 (MIT) and, for Intel and Codeplay, entry 2 as well.
+
+STEP 2 - which files carry a licence grant that is NOT MIT's "Permission is
+hereby granted, free of charge":
+
+    grep -rlI -E 'Apache License|Licensed under the Apache' .      -> 37 files, all ggml/src/ggml-sycl/
+    grep -rhI -o 'SPDX-License-Identifier: *[A-Za-z0-9.+ -]*' . | sort | uniq -c
+                                                                  -> 42 MIT, 39 Apache-2.0
+    grep -rlI 'SPDX-License-Identifier: Apache-2.0' . | grep -v ggml-sycl
+                                                                  -> the 2 ggml-openvino files
+    grep -rlI 'Redistribution and use in source and binary forms' .   -> nothing (no BSD)
+    grep -rlI 'Permission to use, copy, modify' .                     -> nothing (no ISC)
+    grep -rlI -E 'GNU General Public|Lesser General Public|Mozilla Public' .
+                                                                  -> nothing (no copyleft)
+    grep -rlI 'Boost Software License' .                              -> nothing
+
+  The 37 ggml-sycl files with Apache text all ALSO carry an MIT header (the
+  42 MIT SPDX tags = 37 sycl + 4 kleidiai + ggml/include/ggml-sycl.h). Every
+  Apache-tagged file is in a backend this package never compiles -> entry 2.
+
+STEP 3 - words that look like other licences but are not:
+
+    grep -rnI -i -E 'public domain|unlicense|CC0' .
+
+  One real hit: src/llama-sampler.cpp line 3032, a comment saying the DRY
+  sampler's Z-algorithm loop is "adapted from the public domain
+  implementation" at https://github.com/ivanyu/string-algorithms - public
+  domain code carrying no licence obligation, credited by upstream in the
+  comment, and covered here by the llama.cpp MIT licence as upstream ships
+  it. Every other hit is a hexadecimal constant containing "cc0" or an
+  identifier containing "acc0"; none is a licence statement.
+
+STEP 4 - inline credits that are not file headers:
+
+    grep -rnI 'MIT licensed' .
+
+  Four hits, all the YaRN routine (Quesnelle and Peng) - listed in entry 1.
+
+STEP 5 - what is NOT there. No BSD, ISC, GPL, LGPL, MPL or Boost text anywhere
+in the snapshot; no NOTICE file; no bundled third-party library sources (the
+upstream vendor/ folder - cpp-httplib, miniaudio, nlohmann/json, stb, BoringSSL
+- was deliberately not copied, and nothing in the subset includes it).
+
+Re-run steps 1 to 5 after any change to what is vendored, and update this file
+to match. An entry that is out of date is worse than no entry, because it looks
+like a statement someone checked.
+
+================================================================================
+
+Jeremy Ellis and contributors license the CodeBrix.Ollama project to you under
+the terms set forth in the LICENSE file, which is located at the root of this
+repository.
+
+If you have any questions about any third-party code referenced here, or if you
+believe that any third-party code has been included in CodeBrix.Ollama in
+error, please open a new issue at:
+https://github.com/ellisnet/CodeBrix.Ollama/issues
+
+================================================================================
+
+END OF THIRD-PARTY SOFTWARE NOTICES AND INFORMATION
