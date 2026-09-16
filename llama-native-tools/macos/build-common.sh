@@ -11,9 +11,11 @@
 # ../linux/pins.env (the pins, shared by all three platforms - see README.txt for why they live
 # in the linux folder). Nothing is downloaded.
 #
-# STATUS: build-osx-x64.sh was run for real on the Intel Mac mini on 2026-09-15 (native route).
-#         build-osx-arm64.sh, and the CROSS route of build-osx-x64.sh, have NOT been run yet -
-#         see README.txt, "WHAT HAS AND HAS NOT BEEN VERIFIED".
+# STATUS: build-osx-x64.sh was run for real on the Intel Mac mini on 2026-09-15 (native route),
+#         and build-osx-arm64.sh on the Apple Silicon Mac mini the same day; both passed. The
+#         x64 build predates the floor change to 13.3 and must be rebuilt. The CROSS route of
+#         build-osx-x64.sh has NOT been run yet - see README.txt, "WHAT HAS AND HAS NOT BEEN
+#         VERIFIED".
 # ==============================================================================================
 
 set -euo pipefail
@@ -366,9 +368,12 @@ collect_dylib() {
         echo "  [warn] dsymutil failed; crash reports from this build will be harder to read."
 
     strip -x "$out/$LIB_NAME"
-    SIZE_STRIPPED="$(stat -f %z "$out/$LIB_NAME")"
     install_name_tool -id "@rpath/$LIB_NAME" "$out/$LIB_NAME"
     codesign --force --sign - "$out/$LIB_NAME"
+    # Measure AFTER signing: the ad-hoc signature is part of the shipped file, so this is the
+    # size `ls` reports on the file in runtimes/<rid>/native/. (The first osx-x64 record was
+    # taken before signing and understated the shipped size by about 50 KB.)
+    SIZE_STRIPPED="$(stat -f %z "$out/$LIB_NAME")"
 
     cp "$SRC_DIR/LICENSE" "$out/$LICENSE_FILE_NAME"
     echo "  unstripped: $SIZE_UNSTRIPPED bytes -> stripped: $SIZE_STRIPPED bytes"

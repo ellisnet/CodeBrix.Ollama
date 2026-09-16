@@ -118,6 +118,20 @@ if (WIN32)
 endif()
 
 # ----------------------------------------------------------------------------------------------
+# macOS: the deployment target is only an honest floor if no code path calls an API that is
+# newer than it. Clang knows the availability of every SDK symbol and warns on an unguarded use
+# newer than the target; the linker would otherwise turn such a symbol into a WEAK import that
+# loads fine on an older Mac and then crashes on a null pointer when first called. Promoting the
+# warning to an error makes the floor in pins.env something the build proves, not just stamps.
+# Found on 2026-09-15: at an 11.0 target, Accelerate's cblas_sgemm$NEWLAPACK$ILP64 (13.3+) was
+# weak-imported by both macOS slices. Uses guarded with @available (ggml-metal's macOS-15
+# residency sets) do not trigger it. Applies to C, C++ and Objective-C alike.
+# ----------------------------------------------------------------------------------------------
+if (APPLE)
+    add_compile_options(-Werror=unguarded-availability-new)
+endif()
+
+# ----------------------------------------------------------------------------------------------
 # The vendored tree, as a subdirectory. EXCLUDE_FROM_ALL so only what codebrix_llama pulls in
 # gets built. Its targets are the static archives: llama, ggml, ggml-base, ggml-cpu, and the
 # optional ggml-blas / ggml-metal on macOS.
