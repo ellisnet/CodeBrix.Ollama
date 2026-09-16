@@ -17,10 +17,13 @@ package tree:
   <rid>/libcodebrix_llama.dylib    the pre-strip Mach-O (macOS)
   <rid>/libcodebrix_llama.dylib.dSYM/
                                    the macOS debug-symbol bundle
-  <rid>/codebrix_llama.pdb         Windows debug symbols, IF the build emitted
-                                   any (see the windows/ README; a Release build
-                                   may produce none, and then there is nothing
-                                   to store)
+  <rid>/codebrix_llama.pdb         Windows debug symbols (the wrapper builds
+                                   Release with /Zi and /DEBUG, so one is always
+                                   produced). A Windows DLL carries no debug
+                                   info itself and there is no strip step; the
+                                   .pdb IS the twin, and a debugger matches it to
+                                   the DLL by the GUID+age in the DLL's RSDS
+                                   record (dumpbin /headers, "Format: RSDS")
 
 Verify any file two ways:
 
@@ -36,6 +39,17 @@ Verify any file two ways:
         readelf -n ../../src/CodeBrix.Ollama.ModelRunner/runtimes/<rid>/native/libcodebrix_llama.so
      (delete the decompressed .so afterwards; only the .xz is committed)
      macOS: the LC_UUID equals the shipped dylib's (dwarfdump --uuid).
+     Windows: with the .pdb beside a copy of the shipped DLL,
+        dumpbin /pdbpath:verbose codebrix_llama.dll
+     must say "PDB file found" (it checks the GUID and age, not the name).
+
+  A WINDOWS CHECKOUT CAVEAT: `sha256sum -c SHA256SUMS` on Windows reports the
+  dSYM bundles' Info.plist and Relocations .yml files as FAILED. Those are
+  text files, and git's autocrlf rewrites their line endings on checkout (it
+  also gives SHA256SUMS itself CRLF endings, so strip them first:
+  `sed 's/\r$//' SHA256SUMS | sha256sum -c`). The binaries - the dylibs, the
+  DWARF files, the .xz archives, the .pdb - verify fine everywhere. Verify the
+  text files on macOS or Linux, or in a checkout with core.autocrlf=false.
 
 THE LINUX TWINS ARE COMPRESSED
 --------------------------------------------------------------------------------
@@ -84,7 +98,20 @@ STORED SO FAR
              LC_UUID 88DBABCC-377F-3BBB-A943-F3E67AD56808, verified equal on
              the shipped file, the unstripped twin and the dSYM at adoption.
              Same UUID caveat as osx-x64: a rebuild's twin is a different file.
-  (win-x64 and win-arm64: not yet built)
+  win-x64    stored 2026-09-15 from the Windows 11 x64 machine's output/ tree -
+             codebrix_llama.pdb, 58,265,600 bytes (uncompressed; under the
+             100 MB limit), sha256 b14d2269.... RSDS
+             {0AD07C07-2F4B-48CC-A03C-C7EF14AF342B} age 1, verified with
+             `dumpbin /pdbpath:verbose` against the shipped DLL at adoption.
+             Same caveat as the others: a rebuild's .pdb carries a different
+             GUID and is a different file.
+  win-arm64  stored 2026-09-15 from the same x64 machine's output/ tree - the
+             CROSS-BUILT slice's codebrix_llama.pdb, 40,366,080 bytes, sha256
+             bbcb8c26.... RSDS {5CC5FCFE-D2A5-4BE0-4C4C-44205044422E} age 1,
+             verified with `dumpbin /pdbpath:verbose` against the shipped DLL.
+             Adopted by Jeremy's decision with the gate incomplete (the DLL has
+             never been executed) - ../BUILD-PROVENANCE.txt. If it is ever
+             replaced by a native ARM64 build, this .pdb goes with it.
 
 THE RULE
 --------------------------------------------------------------------------------

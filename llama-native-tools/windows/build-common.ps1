@@ -2,11 +2,13 @@
 # build-common.ps1 - shared machinery for the Windows codebrix_llama builds
 # =============================================================================================
 #
-#   NEVER YET RUN. Written on the Intel Mac mini on 2026-09-15, modelled on
-#   CodeBrix.VideoPlayback.Dav1d's dav1d-native-tools/windows/build-common.ps1 (which has run
-#   for real, and whose four first-run fixes are carried over here), with meson replaced by
-#   our CMake wrapper project. Expect to fix something on the first real run; fix it IN THE
-#   SCRIPT and commit that. Then rewrite README.txt's status block.
+#   Written on the Intel Mac mini on 2026-09-15, modelled on CodeBrix.VideoPlayback.Dav1d's
+#   dav1d-native-tools/windows/build-common.ps1 (whose four first-run fixes are carried over
+#   here), with meson replaced by our CMake wrapper project. RUN FOR REAL the same day on the
+#   Windows 11 x64 machine, for win-x64 (native, adopted) and win-arm64 (cross route). Its own
+#   first-run fixes - the export parser, Get-ClVersionLine, Get-ClangClPath's host directory,
+#   the trimmed AllowedDependents - are each explained where they sit. The record is in
+#   ..\BUILD-PROVENANCE.txt.
 #
 # Dot-source this from an architecture script; do not run it directly.
 #
@@ -99,10 +101,16 @@ function Test-Arm64ToolsPresent {
     return $false
 }
 
+# Visual Studio ships clang-cl once per HOST architecture (VC\Tools\Llvm\x64\bin and
+# VC\Tools\Llvm\ARM64\bin); either can target ARM64. The one chosen must be able to RUN on this
+# machine: an x64 host cannot start the ARM64-hosted binary at all ("not a valid application for
+# this OS platform" - the first cross-route run, 2026-09-15, died on exactly that), while an
+# ARM64 host prefers its native one and can fall back to the x64 one under emulation.
 function Get-ClangClPath {
     param([Parameter(Mandatory)][string] $VsInstallPath)
 
-    foreach ($hostDir in @('ARM64', 'x64')) {
+    $hostDirs = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { @('ARM64', 'x64') } else { @('x64') }
+    foreach ($hostDir in $hostDirs) {
         $clangCl = Join-Path $VsInstallPath "VC\Tools\Llvm\$hostDir\bin\clang-cl.exe"
         if (Test-Path -LiteralPath $clangCl) { return $clangCl }
     }
@@ -131,6 +139,16 @@ function Import-DeveloperEnvironment {
         $value = $line.Substring($eq + 1)
         Set-Item -Path "Env:$name" -Value $value
     }
+}
+
+# cl.exe with no arguments prints its "Microsoft (R) C/C++ Optimizing Compiler Version ..." banner
+# on STDERR and the usage line on STDOUT. Merging the streams and taking the first line yields
+# the usage line (the first win-x64 run baked "usage: cl [ option... ]" into the build info), so
+# pick the banner by content.
+function Get-ClVersionLine {
+    $line = & cl 2>&1 | ForEach-Object { "$_" } | Where-Object { $_ -match 'Compiler Version' } | Select-Object -First 1
+    if (-not $line) { return 'cl (version banner not recognised)' }
+    return $line.Trim()
 }
 
 function Assert-OnPath {
@@ -245,9 +263,12 @@ $script:ExtraRequiredSymbols = @(
 
 # Only these may appear in `dumpbin /dependents`. Anything from the Visual C++ runtime
 # (VCRUNTIME140.dll, MSVCP140.dll, api-ms-win-crt-*.dll) means the static-CRT setting did not
-# take, and the package would demand a redistributable on every user's machine. The in-box
-# system DLLs that a static-CRT DLL legitimately imports are all listed.
-$script:AllowedDependents = @('KERNEL32.dll', 'ADVAPI32.dll', 'USER32.dll', 'bcrypt.dll', 'ntdll.dll', 'WS2_32.dll')
+# take, and the package would demand a redistributable on every user's machine. The list was
+# written as a guess (KERNEL32 ADVAPI32 USER32 bcrypt ntdll WS2_32) and trimmed on 2026-09-15 to
+# what the first real builds actually import - both win-x64 (MSVC) and win-arm64 (clang-cl) list
+# exactly KERNEL32.dll and ADVAPI32.dll. A future build that needs another in-box DLL fails here,
+# and the person adding it to this list says why in BUILD-PROVENANCE.txt.
+$script:AllowedDependents = @('KERNEL32.dll', 'ADVAPI32.dll')
 
 $script:GateFailures = New-Object System.Collections.Generic.List[string]
 
@@ -288,10 +309,17 @@ function Test-CodebrixLlamaBinary {
     }
 
     # --- exports ------------------------------------------------------------------------------
+    # dumpbin prints "ordinal hint RVA name". When the .pdb is beside the DLL (it always is here:
+    # Release with /Zi and /DEBUG) it appends " = name (undecorated signature)" to every line, so
+    # the name is the FIRST token after the RVA, never the last thing on the line. (The first
+    # win-x64 run anchored the pattern at end-of-line and parsed zero exports.)
     $exportLines = Invoke-Dumpbin @('/nologo', '/exports', $DllPath)
     $exports = @()
     foreach ($line in $exportLines) {
-        if ($line -match '^\s*\d+\s+[0-9A-Fa-f]+\s+[0-9A-Fa-f]+\s+(\S+)\s*$') { $exports += $Matches[1] }
+        if ($line -match '^\s*\d+\s+[0-9A-Fa-f]+\s+[0-9A-Fa-f]+\s+(\S+)') { $exports += $Matches[1] }
+    }
+    if ($exports.Count -eq 0) {
+        Add-GateFail 'no exports could be parsed from dumpbin /exports - either the DLL exports nothing or the output format changed; run dumpbin /exports on it by hand'
     }
     $required = @(Get-RequiredSymbolsFromHeader (Join-Path $BuildDir 'llama-source-header.h')) + $script:ExtraRequiredSymbols
     $missing = @($required | Where-Object { $exports -notcontains $_ })

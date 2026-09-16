@@ -2,14 +2,25 @@
 llama-native-tools/windows - building codebrix_llama.dll for win-x64 and win-arm64
 ================================================================================
 
->>> STATUS: NEVER YET RUN. These scripts were written on the Intel Mac mini on
-    2026-09-15, modelled on CodeBrix.VideoPlayback.Dav1d's
-    dav1d-native-tools/windows/ (which has run for real on Windows 11 with
-    Visual Studio 2026, and whose four first-run fixes are carried over here),
-    with meson replaced by our CMake wrapper project. Expect to fix something
-    on the first real run - dav1d's Windows scripts needed four fixes. Fix it
-    IN THE SCRIPT and commit that; then rewrite this status block and
-    BUILD-PROVENANCE.txt with what the run established. <<<
+>>> STATUS 2026-09-15: win-x64 BUILT, FULL GATE PASSED, ADOPTED - on the
+    Windows 11 x64 machine (i7-12850HX, Visual Studio Professional 2026 18.10,
+    MSVC 14.51), third run of the day, 44 s. win-arm64 CROSS-BUILT on the same
+    machine (-Route CrossFromX64, clang-cl 22.1.3): the three static checks
+    passed, the three executing checks are UNRUN - and Jeremy ADOPTED IT
+    ANYWAY, overruling the gate rule, with a native rebuild on ARM64 as the
+    plan if it misbehaves (BUILD-PROVENANCE.txt says so in capitals). The DLL
+    has never been executed. output\staging\win-arm64\win-arm64-gate.zip is
+    still waiting for the ARM64 machine - or, better, run .\build-win-arm64.ps1
+    natively there and replace the cross build with a fully gated one. The
+    scripts were written on the Intel Mac mini on 2026-09-15 and, as
+    predicted, the first real runs found things to fix - five, all fixed in
+    the scripts and the wrapper and recorded in ..\BUILD-PROVENANCE.txt: the
+    export parser (dumpbin's "name = name" format with a .pdb present), the
+    cl version banner (stderr, not stdout), the EXPORT SURFACE (22 C++-mangled
+    internal functions leaked through dllexport; the wrapper now generates a
+    .def from the archives instead - see THE BUILD below), the clang-cl host
+    directory on an x64 host, and the allowed-dependents list, trimmed to
+    what is actually imported. <<<
 
 WHAT THIS IS
 --------------------------------------------------------------------------------
@@ -60,6 +71,11 @@ PREREQUISITES
        (or: pip install cmake==4.4.3)
 
      Verify: cmake --version.   The wrapper project needs cmake >= 3.24.
+     NOTE: Visual Studio's own "C++ CMake tools" component bundles a cmake
+     (4.3.1 in VS 2026 18.10) and a ninja; whichever is first on PATH after
+     vcvarsall is what the script uses, and it prints the path and version so
+     you can see which. On the x64 machine the pip --user install came first
+     and the pinned 4.4.3 was used.
 
   3. ninja, at or above the pinned version (1.13.2):
 
@@ -95,8 +111,8 @@ USAGE
   because three of the checks cannot run on an x64 host. Read the summary the
   script prints at the end rather than the exit code alone.
 
-  Timings: unknown until the first run. The osx-x64 build on a 6-core Intel
-  Mac took about 4 minutes cold; expect the same order of magnitude.
+  Timings (2026-09-15, i7-12850HX, 16 cores): win-x64 44 s, win-arm64 cross
+  34 s - both cold, the script deletes the build tree every run.
 
   Output, git-ignored:
     ..\output\<rid>\codebrix_llama.dll     the file the package ships
@@ -124,11 +140,15 @@ The script copies ..\llama.cpp to %TEMP%, applies any patches from ..\patches
 options from pins.env. The wrapper builds llama.cpp and ggml as static
 libraries and links them with /WHOLEARCHIVE into ONE codebrix_llama.dll, with
 the STATIC CRT (MultiThreaded), so no Visual C++ Redistributable is needed on a
-user's machine. On Windows the exported surface is what the public API macros
-mark dllexport - the wrapper defines GGML_SHARED/GGML_BUILD/LLAMA_SHARED/
-LLAMA_BUILD for every translation unit so that the static objects carry the
-export directives and nothing is ever dllimport. It also builds the three gate
-tools. See ..\wrapper\CMakeLists.txt for the reasoning behind every choice.
+user's machine. The exported surface comes from a module-definition (.def)
+file that the wrapper GENERATES after the static archives are built: it reads
+their symbol tables with dumpbin and lists every C-linkage llama_* / ggml_* /
+gguf_* symbol they define (..\wrapper\exports-windows.cmake) - the same rule
+the version script applies on Linux and the symbol list on macOS. Nothing in
+the vendored code is marked dllexport; the first win-x64 run showed that the
+LLAMA_API / GGML_API macros also sit on internal C++ functions, which then
+leaked as mangled exports. It also builds the three gate tools, static CRT as
+well. See ..\wrapper\CMakeLists.txt for the reasoning behind every choice.
 
 
 ================================================================================
@@ -153,11 +173,12 @@ Studio component, not as another download, so nothing comes from outside.
       with "Gate status: INCOMPLETE" at the top, and stages the ARM64 DLL plus
       the ARM64 gate tools so the gate can be finished elsewhere.
 
-  Neither route has been run. The cross route in particular carries the lesson
-  of dav1d's first Windows run: meson needed the triple spelt "aarch64" and the
-  target carried in the CL environment variable. cmake does not have that
-  particular trap - CMAKE_SYSTEM_PROCESSOR=ARM64 and CMAKE_<LANG>_COMPILER_TARGET
-  are the documented way - but expect something else to need adjusting.
+  The cross route HAS run (2026-09-15, on the x64 machine): it builds, the
+  static checks pass, and it exits 1 with the gate incomplete, exactly as
+  designed. cmake did not have meson's "aarch64" spelling trap; the one thing
+  that needed adjusting was which clang-cl to run - Visual Studio ships one per
+  HOST architecture, and the ARM64-hosted copy cannot start on x64. The native
+  route has NOT yet run; it is the one that produces an adoptable binary.
 
 
 ================================================================================
@@ -172,20 +193,24 @@ has. A build that fails any check exits non-zero and must not be adopted.
      declared in the include\llama.h the library was built from (extracted from
      the header at gate time, so the list cannot drift), plus the ggml device
      enumeration and gguf metadata functions and the two codebrix_llama_*
-     identity functions.
+     identity functions. (With the .pdb beside the DLL, dumpbin prints every
+     export as "name = name (undecorated)"; the parser takes the first token
+     after the RVA, and parsing zero names is itself a failure.)
 
   3. Export surface - every exported name must start with llama_, ggml_, gguf_
-     or codebrix_llama_. On Windows this follows from dllexport being applied
-     only to the public API macros; the gate re-checks the finished file.
+     or codebrix_llama_. A C++-mangled name starts with '?' and fails this.
+     The generated .def is what makes it hold; the gate re-checks the finished
+     file rather than trusting the generator.
 
-  4. Dependents - dumpbin /dependents may list only in-box system DLLs
-     (KERNEL32, ADVAPI32, USER32, bcrypt, ntdll, WS2_32). NOTHING from the
-     Visual C++ runtime: VCRUNTIME140.dll, MSVCP140.dll or any
-     api-ms-win-crt-*.dll appearing there means the static CRT did not take,
-     and the package would demand a Visual C++ Redistributable on every user's
-     machine. (The first run will tell which of the allowed in-box DLLs
-     llama.cpp actually imports; trim the list in build-common.ps1 to what is
-     seen, and record it.)
+  4. Dependents - dumpbin /dependents may list only KERNEL32.dll and
+     ADVAPI32.dll - what both real builds (MSVC x64 and clang-cl ARM64)
+     actually import; the list in build-common.ps1 was trimmed to exactly
+     that on 2026-09-15. NOTHING from the Visual C++ runtime: VCRUNTIME140.dll,
+     MSVCP140.dll or any api-ms-win-crt-*.dll appearing there means the static
+     CRT did not take, and the package would demand a Visual C++
+     Redistributable on every user's machine. Another in-box DLL appearing
+     means the vendored code started importing something new; add it to the
+     list only with a note in BUILD-PROVENANCE.txt saying what needs it.
 
   5. LoadLibrary smoke test - ..\smoke-test.c, built by the wrapper as
      smoke-test.exe, loads the STAGED DLL the way .NET does, resolves 75 entry
@@ -270,10 +295,32 @@ dumpbin /dependents lists VCRUNTIME140.dll or api-ms-win-crt-*.dll
     the loop in ..\wrapper\CMakeLists.txt. Delete the build directory and re-run.
 
 The DLL exports nothing, or the gate reports hundreds of missing exports
-    The dllexport definitions did not reach the vendored objects. The wrapper
-    adds GGML_SHARED GGML_BUILD LLAMA_SHARED LLAMA_BUILD with
-    add_compile_definitions() BEFORE add_subdirectory(); if upstream's CMake
-    later overrides them per target, that is the place to look.
+    Either the .def was not generated or the gate could not read dumpbin's
+    output. Look at <build dir>\codebrix_llama-exports.def: it should list
+    over a thousand names ("1147 functions, 5 data symbols" on the first
+    win-x64 build). If it is short or missing, ..\wrapper\exports-windows.cmake
+    did not understand `dumpbin /symbols` - run it on one of the .lib files
+    by hand and compare the line format with the patterns in that script. If
+    the .def is fine, the gate's parser in build-common.ps1 is what to check
+    (run `dumpbin /exports` on the DLL by hand).
+
+"error LNK2001: unresolved external symbol" naming a llama_/ggml_/gguf_ symbol
+    The generated .def lists something the archives declare but do not define.
+    exports-windows.cmake only takes SECTnn (defined) symbols and non-zero-size
+    UNDEF (COMMON) ones; if upstream starts emitting symbols some other way,
+    that filter is where to look.
+
+Exports with '?' in them (C++-mangled names) fail the surface check
+    Something is marking C++ functions dllexport again. The wrapper must NOT
+    define GGML_SHARED / GGML_BUILD / LLAMA_SHARED / LLAMA_BUILD (upstream puts
+    LLAMA_API / GGML_API on internal C++ functions too - src\llama-ext.h,
+    ggml\src\ggml-impl.h); the .def is the only export mechanism.
+
+"Program 'clang-cl.exe' failed to run ... not a valid application for this OS
+platform" (cross route)
+    The ARM64-hosted clang-cl was chosen on an x64 machine. Get-ClangClPath in
+    build-common.ps1 picks the host directory from PROCESSOR_ARCHITECTURE; if
+    that is wrong on some machine, that is the function to fix.
 
 "file machine type arm64 conflicts with ..." (cross route)
     cmake configured for the host rather than the target. Check that the
@@ -338,7 +385,8 @@ FILES
                              folder because that is where the container build
                              sources it as a shell script; this platform parses
                              the same file.
-  ..\wrapper\                the CMake project that produces the single library
+  ..\wrapper\                the CMake project that produces the single library;
+                             exports-windows.cmake in it generates the .def
   ..\smoke-test.c            the load-and-run verification program, shared by
                              all three platforms
   ..\test-vectors\           the conformance model, its reference, and the tools

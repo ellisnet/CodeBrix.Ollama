@@ -104,18 +104,19 @@ else()
 endif()
 
 # ----------------------------------------------------------------------------------------------
-# Windows: the public API macros (LLAMA_API / GGML_API) expand to __declspec(dllexport) only when
-# both the *_SHARED and *_BUILD symbols are defined. Upstream defines them per target for a
-# shared build; for our static-then-whole-archive build nothing would define them, and the DLL
-# would export NOTHING. Defining all four for EVERY translation unit (the vendored ones and our
-# own) makes every public symbol dllexport in its object file, and whole-archive linking carries
-# those directives into codebrix_llama.dll. Nothing is ever dllimport, so there is no mismatch.
-# On ELF and Mach-O the export surface is controlled by the version script / symbol list below
-# instead, and these macros are not needed.
+# Windows: NOTHING is marked __declspec(dllexport) in the vendored code. The public API macros
+# (LLAMA_API / GGML_API) expand to dllexport only when the *_SHARED and *_BUILD symbols are
+# defined, and we deliberately leave them undefined, so the vendored objects carry no export
+# directives at all. The export surface is instead a module-definition file GENERATED from the
+# static archives after they are built (see the WIN32 block below and exports-windows.cmake) -
+# the same rule the version script / symbol list apply on ELF and Mach-O.
+#
+# The first design defined all four macros globally. The first real win-x64 run (2026-09-15)
+# showed why that is wrong: upstream also marks INTERNAL C++ functions with LLAMA_API / GGML_API
+# (src/llama-ext.h, ggml/src/ggml-impl.h), and on Windows a dllexport cannot be taken back by a
+# .def file - the linker merges the two - so 22 C++-mangled names leaked out of the DLL. Without
+# the macros, nothing leaks and the .def is the single source of truth.
 # ----------------------------------------------------------------------------------------------
-if (WIN32)
-    add_compile_definitions(GGML_SHARED GGML_BUILD LLAMA_SHARED LLAMA_BUILD)
-endif()
 
 # ----------------------------------------------------------------------------------------------
 # macOS: the deployment target is only an honest floor if no code path calls an API that is
@@ -178,7 +179,7 @@ if (APPLE)
         BUILD_WITH_INSTALL_NAME_DIR ON)
     # Export ONLY the public C API. The vendored objects were not compiled with hidden
     # visibility (they are upstream's own flags), so without this every internal C++ symbol of
-    # llama and ggml would be exported too - ~thousands of them.
+    # llama and ggml would be exported too - ~thousands of them. (Windows: exports-windows.cmake.)
     target_link_options(codebrix_llama PRIVATE
         "-Wl,-exported_symbols_list,${CMAKE_CURRENT_SOURCE_DIR}/exports-macos.txt")
 elseif (UNIX)
@@ -199,13 +200,45 @@ elseif (UNIX)
         -Wl,-z,defs)
     target_link_libraries(codebrix_llama PRIVATE m pthread dl)
 elseif (WIN32)
-    # Exports come from the dllexport directives (see the add_compile_definitions above); the
-    # static CRT keeps the DLL free of any Visual C++ Redistributable dependency, so KERNEL32
-    # (and the other in-box system DLLs) are all `dumpbin /dependents` may list.
+    # The static CRT keeps the DLL free of any Visual C++ Redistributable dependency, so
+    # KERNEL32 (and the other in-box system DLLs) are all `dumpbin /dependents` may list.
     set_property(TARGET codebrix_llama PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     foreach (_t IN LISTS _codebrix_llama_archives)
         set_property(TARGET ${_t} PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     endforeach()
+
+    # The export surface: a .def file generated from the static archives once they exist, by
+    # exports-windows.cmake (read its header). dumpbin ships with the MSVC toolset, beside the
+    # linker, whichever host/target combination vcvarsall selected - including the x64-hosted
+    # ARM64 tools of the cross route - so it is looked for there first.
+    get_filename_component(_codebrix_linker_dir "${CMAKE_LINKER}" DIRECTORY)
+    find_program(CODEBRIX_LLAMA_DUMPBIN NAMES dumpbin HINTS "${_codebrix_linker_dir}"
+                 DOC "dumpbin.exe, used to read the static archives' symbol tables for the export list")
+    if (NOT CODEBRIX_LLAMA_DUMPBIN)
+        message(FATAL_ERROR
+            "codebrix_llama: dumpbin.exe was not found (looked beside the linker, ${_codebrix_linker_dir}, and on PATH). "
+            "It ships with the MSVC C++ toolset; run from a developer environment (the platform scripts do this).")
+    endif()
+    set(_codebrix_def "${CMAKE_BINARY_DIR}/codebrix_llama-exports.def")
+    set(_codebrix_archive_args "")
+    set(_i 0)
+    foreach (_t IN LISTS _codebrix_llama_archives)
+        list(APPEND _codebrix_archive_args "-DARCHIVE_${_i}=$<TARGET_FILE:${_t}>")
+        math(EXPR _i "${_i} + 1")
+    endforeach()
+    add_custom_command(
+        OUTPUT "${_codebrix_def}"
+        COMMAND "${CMAKE_COMMAND}"
+                "-DDUMPBIN=${CODEBRIX_LLAMA_DUMPBIN}"
+                "-DOUTPUT=${_codebrix_def}"
+                "-DARCHIVE_COUNT=${_i}"
+                ${_codebrix_archive_args}
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/exports-windows.cmake"
+        DEPENDS ${_codebrix_llama_archives} "${CMAKE_CURRENT_SOURCE_DIR}/exports-windows.cmake"
+        COMMENT "codebrix_llama: generating the export list (.def) from the static archives"
+        VERBATIM)
+    # A .def among a target's sources is passed to the MSVC-style linker as /DEF:.
+    target_sources(codebrix_llama PRIVATE "${_codebrix_def}")
 endif()
 
 # ----------------------------------------------------------------------------------------------
@@ -237,6 +270,13 @@ endif()
 
 # On Windows the two tools link against the import library and need the DLL beside them at
 # run time; the platform script copies it. On Unix they carry an rpath to the build tree.
+# The Windows tools also get the static CRT: a cross-built win-arm64 ships them in a zip to be
+# run on an ARM64 machine that may have no Visual Studio, and a tool that fails to start for
+# want of VCRUNTIME140.dll would look exactly like a gate failure.
+if (WIN32)
+    set_property(TARGET smoke-test generate-test-model conformance-check
+                 PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
 if (APPLE)
     set_target_properties(generate-test-model conformance-check PROPERTIES
         BUILD_RPATH "@loader_path")

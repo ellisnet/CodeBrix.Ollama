@@ -55,10 +55,13 @@ THE STATE OF THINGS, 2026-09-15
     identifier - no library code at all. Its AGENT-README.txt is a placeholder,
     and tests/CodeBrix.Ollama.ModelRunner.Tests builds, references the library
     and links the conformance vectors but holds no test files at all.
-  * The native build tooling under llama-native-tools/ is complete, and FIVE
-    of the seven runtime identifiers have been built, gated and adopted:
-    osx-x64, osx-arm64, linux-x64, linux-arm64 and linux-riscv64. The two
-    Windows slices remain unbuilt.
+  * The native build tooling under llama-native-tools/ is complete, and all
+    SEVEN runtime identifiers are adopted. Six were built and fully gated:
+    osx-x64, osx-arm64, linux-x64, linux-arm64, linux-riscv64 and win-x64.
+    win-arm64 was cross-built on the x64 Windows machine (static checks
+    passed, never executed) and adopted by Jeremy's decision on 2026-09-15,
+    overruling the gate rule; a native rebuild on an ARM64 machine is the
+    plan if it misbehaves.
 
 Statements below about ModelRunner therefore describe its packaging and its
 native payload, not an API that exists.
@@ -100,9 +103,8 @@ REPOSITORY LAYOUT
     src/CodeBrix.Ollama.ModelRunner/    the not-yet-written library
       runtimes/<rid>/native/     the COMMITTED native libraries, each beside a
                                  copy of llama.cpp's LICENSE as
-                                 LICENSE-LlamaCpp.txt. Today that is
-                                 runtimes/osx-x64/native/ and
-                                 runtimes/osx-arm64/native/
+                                 LICENSE-LlamaCpp.txt. Today that is all
+                                 seven RIDs
       InternalsVisibleTo.cs      grants CodeBrix.Ollama.ModelRunner.Tests
 
     tests/CodeBrix.Ollama.ModelManager.Tests/   the xunit.v3 suite, offline
@@ -380,8 +382,11 @@ that only work together:
 
 AFTER ANY CHANGE TO THAT BLOCK, UNZIP THE PACKAGE AND LOOK (`unzip -l <nupkg> |
 grep runtimes`). What you want to see is runtimes/<rid>/native/ with no doubled
-path - today, exactly two entries under each of runtimes/osx-x64/native/ and
-runtimes/osx-arm64/native/: libcodebrix_llama.dylib and LICENSE-LlamaCpp.txt.
+path - today, exactly two entries under each of the seven RIDs'
+runtimes/<rid>/native/: the library (libcodebrix_llama.dylib, .so or
+codebrix_llama.dll) and LICENSE-LlamaCpp.txt. Last checked 2026-09-15 on
+Windows after adopting win-x64 and win-arm64: fourteen entries, no doubled
+path.
 
 
 THE NATIVE LIBRARIES
@@ -434,11 +439,24 @@ wrong dot-product value; and the riscv64 image (Rocky Linux 10, system gcc)
 lacked the static libstdc++ that its AlmaLinux siblings get from
 gcc-toolset-14. Each fix is in the file it belongs to and recorded in
 BUILD-PROVENANCE.txt. Nothing has yet run the arm64 or riscv64 files on real
-hardware. The other two - win-x64 and win-arm64 - are NOT BUILT, and their
-scripts, written on the Intel mini, have NEVER BEEN RUN; each script says so
-in its header. From dav1d's experience, the first real run is expected to find
-something to fix. Fix it IN THE SCRIPT, and rewrite that platform's status
-block.
+hardware. WIN-X64 was built, gated and adopted the same night on the Windows
+11 x64 machine (Visual Studio 2026, MSVC 14.51, static CRT, AVX2 baseline;
+dependencies KERNEL32 and ADVAPI32 only). Its scripts, written on the Intel
+mini, found five things on their first real runs, as dav1d's had: the gate's
+export parser, the compiler-banner capture, the clang-cl host directory, the
+allowed-dependents list, and - the substantive one - the EXPORT SURFACE:
+dllexport through upstream's LLAMA_API / GGML_API macros also exported 22
+internal C++ functions, which the Unix pattern lists never match, so on
+Windows the wrapper now generates a .def file from the built archives
+(llama-native-tools/wrapper/exports-windows.cmake). Every fix is in the file
+it belongs to and recorded in BUILD-PROVENANCE.txt. WIN-ARM64 was
+CROSS-BUILT on that x64 machine (clang-cl targeting aarch64-pc-windows-msvc),
+passed the three static checks, and by design could not run the smoke test,
+model regeneration or conformance there. Jeremy adopted it anyway on
+2026-09-15, overruling the gate rule, so it is the one shipped native that
+has NEVER BEEN EXECUTED; BUILD-PROVENANCE.txt says so in capitals. The plan
+if it misbehaves is a native run of windows\build-win-arm64.ps1 on an ARM64
+Windows machine, which runs the whole gate and replaces the cross build.
 
 EVERYTHING ELSE ABOUT THE NATIVES LIVES IN THAT FOLDER, and is not duplicated
 here on purpose:
@@ -667,7 +685,11 @@ do not describe the commit state in this file, because it goes stale.
 WHAT HAS BEEN VALIDATED, AND ON WHAT
 ------------------------------------
 Everything below was done on ONE machine: the Intel Mac mini (2018), i7-8700B,
-macOS 15.8, x86_64, .NET SDK 10.0.401.
+macOS 15.8, x86_64, .NET SDK 10.0.401. (Later the same day, on the Windows 11
+x64 machine with the same SDK: the solution built 0/0 in Release, the packed
+ModelRunner listed all seven runtimes/<rid>/native/ pairs with no doubled
+path, and the ModelManager executable ran 789/788/1 - but see the
+`dotnet test` note under WHAT HAS NOT BEEN VALIDATED.)
 
   * `dotnet build CodeBrix.Ollama.slnx -c Release` - 0 warnings, 0 errors.
   * The ModelManager suite - 789 total, 788 passed, 1 skipped, about two
@@ -687,25 +709,35 @@ macOS 15.8, x86_64, .NET SDK 10.0.401.
 
 WHAT HAS NOT BEEN VALIDATED
 ---------------------------
-  * THE MANAGED SUITE HAS NEVER BEEN RUN ON WINDOWS. ModelManager is pure
-    managed code and path handling goes through Path.Combine throughout, but
-    that is an argument, not evidence. The store lays out
-    manifests/<host>/<namespace>/<model>/<tag> as real directories, and nothing
-    has yet proved that a Windows run agrees with this one. Anyone with a
-    Windows machine should run it and report back. (Linux IS covered: on
-    2026-09-15 the solution built 0/0 with --no-incremental and the suite ran
-    789 total / 788 passed / 1 skipped on a Debian-family x64 workstation with
-    the same SDK, as the built executable.)
+  * THE MANAGED SUITE ON WINDOWS - RUN ONCE, 2026-09-15, WITH ONE OPEN
+    QUESTION. On the Windows 11 x64 machine (.NET SDK 10.0.401) the solution
+    built 0 warnings / 0 errors in Release, and the built executable
+    tests/.../bin/Release/net10.0/CodeBrix.Ollama.ModelManager.Tests.exe ran
+    789 total / 788 passed / 1 skipped in 3.7 s - the same result as macOS
+    and Linux, so the Path.Combine argument now has evidence behind it. BUT
+    `dotnet test tests/CodeBrix.Ollama.ModelManager.Tests -c Release`
+    reported "Zero tests ran", exit code 5, with and without --no-build -
+    the Microsoft.Testing.Platform runner mode that global.json selects did
+    not find the tests on this machine, while the same assembly run directly
+    found all 789. Not investigated further that night (the run was a
+    by-product of adopting the win-x64 native); whoever next works on the
+    test projects on Windows should find out why before trusting `dotnet
+    test` there. (Linux IS covered: on 2026-09-15 the solution built 0/0 with
+    --no-incremental and the suite ran 789 total / 788 passed / 1 skipped on
+    a Debian-family x64 workstation with the same SDK, as the built
+    executable.)
 
   * THE LIVE PULL TEST HAS NOT YET BEEN RUN IN THIS REPOSITORY. Say that plainly
     rather than assuming it works: CODEBRIX_OLLAMA_RUN_LIVE_TESTS=1 has never
     been set here, so the one test that reaches registry.ollama.ai has only ever
     been skipped. Running it is the first thing to do before any release.
 
-  * THE TWO WINDOWS NATIVE SLICES ARE UNBUILT and their scripts unrun, as
-    described under THE NATIVE LIBRARIES. The three Linux slices were built
-    and gated on 2026-09-15 (arm64 and riscv64 under qemu-user emulation) but
-    have not yet run on real arm64 or riscv64 hardware.
+  * THE WIN-ARM64 NATIVE SLICE HAS NEVER BEEN EXECUTED: cross-built and
+    statically checked on x64, adopted by decision, as described under THE
+    NATIVE LIBRARIES. Its first run on real ARM64 hardware is its smoke test.
+    The three Linux slices were built and gated on 2026-09-15 (arm64 and
+    riscv64 under qemu-user emulation) but have not yet run on real arm64 or
+    riscv64 hardware. win-x64 is fully gated and adopted.
 
   * ModelRunner IS NOT WRITTEN. There is no managed binding, so the committed
     macOS libraries have been verified only by llama-native-tools' own gate - by

@@ -2,9 +2,10 @@
 # build-win-x64.ps1 - build codebrix_llama.dll for the win-x64 runtime identifier
 # =============================================================================================
 #
-#   NEVER YET RUN. Written on the Intel Mac mini on 2026-09-15. Expect to fix something on the
-#   first real run; fix it IN THE SCRIPT and commit that. Then rewrite this header and
-#   README.txt's status block with what the run established.
+#   RUN FOR REAL on 2026-09-15 on the Windows 11 x64 machine (Visual Studio Professional 2026,
+#   MSVC 14.51): third run passed the whole gate and was adopted (..\BUILD-PROVENANCE.txt). The
+#   first two runs found the export parser, the cl banner capture and the export surface
+#   (see build-common.ps1 and ..\wrapper\exports-windows.cmake); all fixed in place.
 #
 # USAGE (from any PowerShell prompt - the script sets up the compiler environment itself):
 #
@@ -89,7 +90,7 @@ Write-Host "  patches applied: $patchesApplied"
 Write-Host ''
 
 Write-Host '--- building ---'
-$buildInfo = "llama.cpp $($pins['LLAMA_TAG']) ($($pins['LLAMA_COMMIT'])) | ggml $($pins['GGML_VERSION']) | $rid | built $startedAt on $((Get-CimInstance Win32_OperatingSystem).Caption) ($env:PROCESSOR_ARCHITECTURE) | $((& cl 2>&1 | Select-Object -First 1))"
+$buildInfo = "llama.cpp $($pins['LLAMA_TAG']) ($($pins['LLAMA_COMMIT'])) | ggml $($pins['GGML_VERSION']) | $rid | built $startedAt on $((Get-CimInstance Win32_OperatingSystem).Caption) ($env:PROCESSOR_ARCHITECTURE) | $(Get-ClVersionLine)"
 Invoke-WrapperBuild -WrapperDir $wrapperDir -ScratchDir $scratchDir -BuildDir $BuildRoot -Rid $rid -BuildInfo $buildInfo `
                     -CmakeOptions $pins['LLAMA_CMAKE_OPTIONS'] -ArchOptions $pins['LLAMA_CMAKE_OPTIONS_X64']
 Copy-Item -LiteralPath (Join-Path $scratchDir 'include\llama.h') -Destination (Join-Path $BuildRoot 'llama-source-header.h') -Force
@@ -162,7 +163,7 @@ Build machine
 ------------------------------------------------------------------------------
 OS               : $((Get-CimInstance Win32_OperatingSystem).Caption) ($env:PROCESSOR_ARCHITECTURE)
 Visual Studio    : $vsPath
-cl               : $((& cl 2>&1 | Select-Object -First 1))
+cl               : $(Get-ClVersionLine)
 cmake            : $((& cmake --version | Select-Object -First 1)) (pinned $($pins['CMAKE_VERSION']))
 ninja            : $((& ninja --version)) (pinned $($pins['NINJA_VERSION']))
 

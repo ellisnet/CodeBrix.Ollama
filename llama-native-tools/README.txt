@@ -70,8 +70,11 @@ FOLDER MAP
   wrapper/                OUR CMake project: builds the vendored tree as static
                           archives and links them whole-archive into ONE shared
                           library, codebrix_llama, with a restricted export
-                          list; adds two identity functions; builds the gate
-                          tools. Read its header comment for why one library
+                          list (exports-linux.map, exports-macos.txt, and on
+                          Windows a .def generated from the archives by
+                          exports-windows.cmake); adds two identity functions;
+                          builds the gate tools. Read its header comment for
+                          why one library
   patches/                local changes to the vendored source, applied at build
                           time to a scratch copy. EMPTY as of 2026-09-15
   test-vectors/           the conformance model (synthetic, generated here, NOT
@@ -112,7 +115,9 @@ WHICH README TO READ
 Each one lists the tools to install on that machine, with the exact command,
 and nothing else is needed.
 
-  >>> STATUS 2026-09-15: FIVE of the seven slices have been built and adopted.
+  >>> STATUS 2026-09-15: ALL SEVEN slices are built and adopted - six with the
+      full gate passed, and win-arm64 adopted by Jeremy's decision WITHOUT its
+      executing checks (see the end of this block).
       osx-x64 on the Intel Mac mini and osx-arm64 on the Apple Silicon Mac
       mini, full gate passed on both, both at the 13.3 macOS floor. The arm64
       run found that the original floor of 11.0 was never real (a 13.3-only
@@ -123,10 +128,21 @@ and nothing else is needed.
       LMDE laptop through the manylinux container route (arm64 and riscv64
       under qemu-user emulation), full gate passed on all three; the three
       first-run fixes (wrapper --exclude-libs, the aarch64 probe, the riscv64
-      static libstdc++) are in BUILD-PROVENANCE.txt. The two Windows scripts
-      were written on the Intel Mac and have NEVER BEEN RUN; each says so in
-      its header. Expect the first real run to find something to fix; fix it
-      IN THE SCRIPT, commit the fix, and rewrite that platform's status block. <<<
+      static libstdc++) are in BUILD-PROVENANCE.txt. win-x64 was built on the
+      Windows 11 x64 machine the same night (MSVC 14.51, Visual Studio 2026),
+      full gate passed on the third run and adopted; the first two runs found
+      five things, the largest being that dllexport through the upstream API
+      macros leaked 22 C++-mangled internal functions, so on Windows the
+      wrapper now GENERATES a .def from the archives (wrapper/
+      exports-windows.cmake) - all in BUILD-PROVENANCE.txt. win-arm64 was
+      CROSS-BUILT on that x64 machine (clang-cl): static checks passed,
+      executing checks UNRUN because x64 cannot run ARM64 code. Jeremy
+      overruled the no-adoption-without-a-gate rule and adopted it as is,
+      intending a native rebuild on an ARM64 machine if it misbehaves; that
+      DLL has never been executed. Finish its gate when an ARM64 Windows
+      machine is at hand: run the tools in output/staging/win-arm64/
+      win-arm64-gate.zip or, better, windows\build-win-arm64.ps1 natively
+      (windows/README.txt), and record the result in BUILD-PROVENANCE.txt. <<<
 
 
 THE SEVEN RUNTIME IDENTIFIERS

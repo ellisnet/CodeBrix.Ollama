@@ -2,9 +2,11 @@
 # build-win-arm64.ps1 - build codebrix_llama.dll for the win-arm64 runtime identifier
 # =============================================================================================
 #
-#   NEVER YET RUN. Written on the Intel Mac mini on 2026-09-15. Expect to fix something on the
-#   first real run; fix it IN THE SCRIPT and commit that. Then rewrite this header and
-#   README.txt's status block with what the run established.
+#   CROSS ROUTE RUN FOR REAL on 2026-09-15 on the Windows 11 x64 machine: builds, static checks
+#   pass, exits 1 with the gate incomplete as designed (..\BUILD-PROVENANCE.txt). Its one fix -
+#   choosing the x64-HOSTED clang-cl on an x64 host - is in build-common.ps1. The NATIVE route
+#   has not yet run; it is the one that yields an adoptable binary. Expect to fix something on
+#   its first run; fix it IN THE SCRIPT and rewrite this header and README.txt's status block.
 #
 # USAGE (from any PowerShell prompt - the script sets up the compiler environment itself):
 #

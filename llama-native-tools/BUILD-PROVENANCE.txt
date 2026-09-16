@@ -208,17 +208,221 @@ Adopted into src/CodeBrix.Ollama.ModelRunner/runtimes/osx-arm64/native/ : YES,
 
 
 ================================================================================
-win-x64                                                               NOT BUILT
+win-x64                                                          BUILT + PASSED
 ================================================================================
-To be built on the Windows 11 x64 machine with windows\build-win-x64.ps1
-(never yet run). MSVC, static CRT, AVX2 baseline.
+Built            : 2026-09-16 06:25:25 UTC (2026-09-15 local) - the THIRD run
+                   of the day; the first two are under First-run fixes below.
+                   The first run built a working DLL (its smoke test, model
+                   regeneration and conformance all passed) but the gate's
+                   static checks were wrong in two ways and the export surface
+                   was wrong in one; this run is the first at which every
+                   check ran, was believed, and passed.
+Built by         : windows\build-win-x64.ps1 (native, MSVC)
+Build host       : Windows 11 Pro (10.0.26200, AMD64), 12th Gen Intel Core
+                   i7-12850HX; Visual Studio Professional 2026 18.10
+                   (MSVC toolset 14.51.36231, Windows SDK 10.0.26100.0)
+Duration         : 44 s (cold: the script deletes the build tree every run)
+Network          : not used - the vendored source, the conformance model and
+                   the expected logits are all files in this repository
+Compiler         : Microsoft (R) C/C++ Optimizing Compiler Version 19.51.36257
+                   for x64; link.exe 14.51
+cmake / ninja    : 4.4.3 / 1.13.2 (both equal to the pins; installed with
+                   `pip install --user cmake==4.4.3 ninja==1.13.2` - the
+                   Visual Studio-bundled cmake on this machine is 4.3.1, below
+                   the pin, and vcvarsall did not put it ahead on PATH)
+arch options     : (none) - the x64 baseline is what GGML_NATIVE=OFF gives;
+                   on MSVC that is /arch:AVX2 plus ggml's own GGML_AVX2
+                   GGML_FMA GGML_F16C __BMI2__ definitions
+CPU baseline     : x86-64 with AVX2, FMA, F16C, BMI2 (no AVX-512)
+GPU backend      : none (CPU-only slice)
+CRT              : static (MultiThreaded, -MT on every object)
+Patches applied  : none
+
+File             : codebrix_llama.dll
+Size             : 7,017,984 bytes (a DLL carries no debug info itself; there
+                   is no strip step on Windows - the .pdb is the twin)
+SHA256           : 9f70999fcfc5bc8f835af59b6adf74c027c5c2b97db215bcb8096375aeef49bd
+                   *** expected NOT to reproduce: link.exe stamps the build
+                   time and the PDB GUID into the image (see windows/README.txt).
+                   Compare size, exports and gate result, not the hash. ***
+PE timestamp     : 6AAA367E (Tue Sep 15 23:26:06 2026 local)
+PDB identity     : RSDS {0AD07C07-2F4B-48CC-A03C-C7EF14AF342B}, age 1 - the
+                   value a debugger matches the .pdb against
+Debug symbols    : codebrix_llama.pdb, 58,265,600 bytes, sha256
+                   b14d22693507ae0708397c6265f561a2df6814b71abf3d178ce76d2654398945,
+                   stored under unstripped/win-x64/ (uncompressed: under the
+                   100 MB per-file limit). `dumpbin /pdbpath:verbose` on the
+                   DLL with the .pdb beside it reports "PDB file found".
+Dependencies     : KERNEL32.dll ADVAPI32.dll - and nothing else: no
+                   VCRUNTIME140 / MSVCP140 / api-ms-win-crt-*, so no Visual C++
+                   Redistributable is needed on a user's machine. (The gate's
+                   allowed list was trimmed to exactly these two.)
+Image flags      : Dynamic base, High Entropy VA, NX compatible (linker
+                   defaults; nothing in the wrapper turns them off)
+Exports          : 1,154 symbols, all llama_* / ggml_* / gguf_* /
+                   codebrix_llama_* - 1,147 C functions and 5 data symbols
+                   (ggml_table_f32_e8m0_half, ggml_table_f32_f16,
+                   ggml_table_f32_ue4m3, ggml_table_gelu_f16,
+                   ggml_table_gelu_quick_f16) listed by the generated .def,
+                   plus the two identity functions; all 233 LLAMA_API
+                   functions present (248/248 required incl. the extras)
+Gate             : architecture ok (8664 x64), 248/248 required exports,
+                   export surface exact, system-only dependencies, smoke test
+                   passed (75/75 entry points, 1 device: CPU, system info
+                   "SSE3 = 1 | SSSE3 = 1 | AVX = 1 | AVX2 = 1 | F16C = 1 |
+                   FMA = 1 | BMI2 = 1 | LLAMAFILE = 1 | REPACK = 1"), model
+                   regeneration byte-identical, conformance CPU: 12 positions,
+                   64 logits each, max |diff| 4.98e-08, PASSED (the same spread
+                   as linux-x64 and osx-x64: AVX2 checking an AVX2 reference)
+Build noise      : five compiler warnings (C4244 conversions, C4297 in
+                   llama_load_mode_from_str - all upstream code) and one CMake
+                   policy warning (CMP0194, "MSVC is not an assembler for
+                   language ASM", raised inside the vendored ggml tree, which
+                   enables ASM; harmless, nothing is assembled). None of it is
+                   ours to fix.
+Reproducibility  : not measured. Only one run of the final configuration has
+                   been made, and the README already expects consecutive
+                   Windows links to differ (timestamp + PDB GUID).
+First-run fixes  : the scripts had never run before this day. Three runs, in
+                   order:
+                   1. (06:16 UTC) The DLL was fine - smoke test, regeneration
+                      and conformance passed - but the gate reported EVERY
+                      required export missing and then "export surface exact
+                      (0 symbols)". Cause: with the .pdb beside the DLL,
+                      `dumpbin /exports` prints "name = name (undecorated)"
+                      on every line, and the parser's pattern was anchored at
+                      end-of-line; it parsed nothing. Fixed in build-common.ps1
+                      (the name is the first token after the RVA), and a zero
+                      parse is now itself a failure. The same run showed two
+                      more things: the build-info string carried "usage: cl
+                      [ option... ]" instead of the compiler version (cl prints
+                      its banner on stderr and usage on stdout; taking the
+                      first merged line got the wrong one - now picked by
+                      content, Get-ClVersionLine); and the parsed export list,
+                      once it could be read, held 952 names of which 22 were
+                      C++-MANGLED ("?llama_graph_reserve@@...",
+                      "?gguf_write_to_buf@@..."): upstream marks internal C++
+                      functions in src/llama-ext.h and ggml/src/ggml-impl.h
+                      with LLAMA_API / GGML_API, and the wrapper's global
+                      GGML_SHARED/GGML_BUILD/LLAMA_SHARED/LLAMA_BUILD
+                      definitions made those dllexport too. On Linux/macOS the
+                      mangled names never match the llama_*/ggml_* patterns;
+                      on Windows a dllexport cannot be undone by a .def. The
+                      wrapper now defines none of the four macros and instead
+                      GENERATES a module-definition file from the built static
+                      archives (wrapper/exports-windows.cmake: every C-linkage
+                      llama_*/ggml_*/gguf_* symbol defined in them, data
+                      symbols marked DATA) - the same rule as
+                      exports-linux.map. The three gate tools were given the
+                      static CRT at the same time, so the cross-route zip runs
+                      on an ARM64 machine without Visual Studio.
+                   2. (06:24 UTC) Failed at the link: "unresolved external
+                      symbol DATA". The generator's COMMON-symbol branch tested
+                      a capture with a second MATCHES, which clobbers
+                      CMAKE_MATCH_n, and wrote a line with an empty name.
+                      Fixed (captures copied first).
+                   3. (06:25 UTC) This build. Every check ran and passed.
+Adopted into src/CodeBrix.Ollama.ModelRunner/runtimes/win-x64/native/ : YES,
+                   2026-09-15, with llama.cpp's LICENSE beside it as
+                   LICENSE-LlamaCpp.txt. The .pdb stored under
+                   unstripped/win-x64/ (SHA256SUMS extended) in the same
+                   commit. The solution builds 0/0 with the new runtimes folder
+                   and the packed ModelRunner carries runtimes/win-x64/native/
+                   with no doubled path.
 
 
 ================================================================================
-win-arm64                                                             NOT BUILT
+win-arm64                 CROSS-BUILT, GATE INCOMPLETE, ADOPTED BY DECISION
 ================================================================================
-To be built on the Windows 11 ARM64 machine with windows\build-win-arm64.ps1
-(never yet run). clang-cl, static CRT, armv8.2-a+dotprod+fp16 baseline.
+  *** THIS BINARY HAS NEVER BEEN EXECUTED. Jeremy overruled the "no adoption
+  without a complete gate" rule on 2026-09-15 and adopted the cross build as
+  is, with the stated intention of rebuilding natively on an ARM64 machine if
+  it gives trouble. Everything below the Gate line is what IS known. ***
+Built            : 2026-09-16 06:26:50 UTC (2026-09-15 local)
+Built by         : windows\build-win-arm64.ps1 -Route CrossFromX64 (clang-cl,
+                   vcvarsall x64_arm64, target aarch64-pc-windows-msvc)
+Build host       : the same Windows 11 x64 machine as win-x64 (i7-12850HX,
+                   Visual Studio Professional 2026 18.10, MSVC toolset
+                   14.51.36231 with the ARM64 build tools, Windows SDK
+                   10.0.26100.0). NOT an ARM64 machine: this DLL has never
+                   been executed anywhere.
+Duration         : 34 s
+Network          : not used
+Compiler         : clang version 22.1.3 (Visual Studio's "C++ Clang tools for
+                   Windows", VC\Tools\Llvm\x64\bin\clang-cl.exe - the x64-HOSTED
+                   copy; see First-run fix), linking with link.exe from
+                   VC\Tools\MSVC\14.51.36231\bin\HostX64\ARM64
+cmake / ninja    : 4.4.3 / 1.13.2 (both equal to the pins)
+arch options     : -DGGML_CPU_ARM_ARCH=armv8.2-a+dotprod+fp16 (reaches the
+                   compiler as -march=armv8.2-a+dotprod+fp16; clang-cl accepts
+                   the GNU-style flag)
+extra            : -DCMAKE_C_COMPILER=<clang-cl> -DCMAKE_CXX_COMPILER=<clang-cl>
+                   -DCMAKE_SYSTEM_NAME=Windows -DCMAKE_SYSTEM_PROCESSOR=ARM64
+                   -DCMAKE_C_COMPILER_TARGET=aarch64-pc-windows-msvc
+                   -DCMAKE_CXX_COMPILER_TARGET=aarch64-pc-windows-msvc
+CPU baseline     : armv8.2-a + dotprod + fp16 (compile-time; see pins.env)
+GPU backend      : none (CPU-only slice)
+CRT              : static (MultiThreaded)
+Patches applied  : none
+
+File             : codebrix_llama.dll
+Size             : 5,332,480 bytes
+SHA256           : 82906f14e0b47d1a7fefb0c40f65905ed3f4380e5c09a3796470515699753e41
+PDB identity     : RSDS {5CC5FCFE-D2A5-4BE0-4C4C-44205044422E}, age 1;
+                   codebrix_llama.pdb 40,366,080 bytes, sha256
+                   bbcb8c26392b0238aab248673d07fbfa3e1282f4b177f0ff912e49bbfbdf10c2,
+                   stored under unstripped/win-arm64/ (SHA256SUMS extended);
+                   `dumpbin /pdbpath:verbose` reports "PDB file found"
+Dependencies     : KERNEL32.dll ADVAPI32.dll (system-only, static CRT took)
+Image flags      : Dynamic base, High Entropy VA, NX compatible
+Exports          : 1,172 symbols, all llama_* / ggml_* / gguf_* /
+                   codebrix_llama_* - 1,164 C functions and 6 data symbols from
+                   the generated .def plus the two identity functions; all
+                   233 LLAMA_API functions present (248/248 required incl.
+                   the extras). (More than x64 because the arm64 CPU kernels
+                   are a different set of C functions - the same reason
+                   linux-arm64 exports 1,173 to linux-x64's 1,155.)
+Gate             : INCOMPLETE. The three static checks passed: architecture
+                   ok (AA64 ARM64), 248/248 required exports, export surface
+                   exact, system-only dependencies. The three EXECUTING checks
+                   - smoke test, model regeneration, conformance - were NOT
+                   RUN because an x64 host cannot execute ARM64 code, and the
+                   script reports them as failures and exits 1 by design. The
+                   ARM64 gate tools themselves were built (smoke-test.exe,
+                   generate-test-model.exe, conformance-check.exe: all
+                   AA64, all static CRT, depending only on KERNEL32 and the
+                   DLL) and staged with the DLL as
+                   output/staging/win-arm64/win-arm64-gate.zip (2,788,274
+                   bytes) on the build machine.
+Build noise      : five warnings, all deprecation (-Wdeprecated-declarations
+                   for fopen/sscanf in our own gate tools, -Wexceptions in
+                   upstream llama_load_mode_from_str). No CMake policy
+                   warning on this route.
+First-run fix    : the first cross attempt (06:26:21 UTC) stopped before
+                   compiling: build-common.ps1 looked for clang-cl under
+                   VC\Tools\Llvm\ARM64\bin first, which is the ARM64-HOSTED
+                   binary and cannot start on an x64 machine ("not a valid
+                   application for this OS platform"). Get-ClangClPath now
+                   picks the host directory from the machine's own
+                   architecture (x64 host -> x64 only; ARM64 host -> ARM64,
+                   then x64 under emulation). The second attempt built.
+Adopted into src/CodeBrix.Ollama.ModelRunner/runtimes/win-arm64/native/ : YES,
+                   2026-09-15, BY JEREMY'S DECISION, WITH THE GATE INCOMPLETE
+                   (the file the gate scripts would have refused). With
+                   llama.cpp's LICENSE beside it as LICENSE-LlamaCpp.txt; the
+                   .pdb under unstripped/win-arm64/ in the same commit. The
+                   packed ModelRunner now carries all seven RIDs.
+                   What this means for anyone reading later: the first real
+                   run of this DLL on ARM64 Windows hardware - by a consumer,
+                   or by whoever runs win-arm64-gate.zip there - IS the smoke
+                   test. If it misbehaves, the expected fix is a native
+                   rebuild with windows\build-win-arm64.ps1 on an ARM64
+                   machine (Visual Studio with the ARM64 build tools and the
+                   Clang component, cmake, ninja), which runs the whole gate
+                   and replaces this entry. If it behaves, please still run
+                   the three tools from win-arm64-gate.zip (windows/README.txt,
+                   "FINISHING A CROSS-BUILT win-arm64") and record the result
+                   here, so this slice stops being the only one never gated.
 
 
 ================================================================================
