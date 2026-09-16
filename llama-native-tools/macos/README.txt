@@ -12,12 +12,13 @@ llama-native-tools/macos - building libcodebrix_llama.dylib for osx-x64 and
               reproducible except for its LC_UUID - see WHAT HAS AND HAS NOT
               BEEN VERIFIED. The CROSS route (building osx-x64 on an Apple
               Silicon Mac) has NOT been run.
-              >>> REBUILD REQUIRED. That build carries the old 11.0 floor,
-              which the osx-arm64 run later showed to be false for BOTH
-              slices (THE MINIMUM macOS VERSION, below): it weak-imports a
-              13.3-only Accelerate symbol and would crash on macOS 11.0-13.2.
-              The shipped file stays until it is rebuilt at 13.3 with this
-              same script; the wrapper now refuses to build otherwise. <<<
+              REBUILT AND RE-ADOPTED the same day at the 13.3 floor: the first
+              build carried the 11.0 floor, which the osx-arm64 run showed to
+              be false for BOTH slices (THE MINIMUM macOS VERSION, below) - it
+              weak-imported a 13.3-only Accelerate symbol. The rebuild ran
+              the unchanged script against the new pin: zero availability
+              warnings, minos 13.3, no weak imports at all, and the same
+              4.98e-08 conformance spread. 60 s with a warm ccache.
 
   osx-arm64   RUN AND VERIFIED on 2026-09-15 on the Apple Silicon Mac mini
               (M2 Pro, 10 cores): macOS 27.0, Apple clang 21.0.0, cmake
@@ -254,8 +255,8 @@ WHAT HAS AND HAS NOT BEEN VERIFIED
 Established by the osx-x64 runs on 2026-09-15 (Intel Mac mini, macOS 15.8):
 
   * The wrapper's static-archive + -force_load approach produces one dylib of
-    4,221,552 bytes (stripped and signed) with exactly the intended dependency list and
-    export surface. All 233 header-declared functions are exported.
+    4,221,552 bytes (stripped and signed; 4,198,752 for the 13.3-floor rebuild)
+    with exactly the intended dependency list and export surface. All 233 header-declared functions are exported.
   * The gate's export extraction copes with upstream's one commented-out
     LLAMA_API declaration (llama_decode_with_sampler) - comment lines are
     dropped before matching, which is why it is not on the required list.
@@ -452,12 +453,14 @@ ADOPTING A BUILT BINARY INTO THE PACKAGE
 WHAT WAS ADOPTED ON 2026-09-15
 --------------------------------------------------------------------------------
   src/CodeBrix.Ollama.ModelRunner/runtimes/osx-x64/native/libcodebrix_llama.dylib
-      sha256 b06df3a7392388dbe4b817175a776cc0438bc3844ec0943e4a365897156ed982
-      4,221,552 bytes, LC_UUID 5830F46C-EFA7-3F60-840C-45833A3F0831
+      sha256 03af0e77f6cb2fb6207d53688c796baf0d8bd9d237c7264a6e55a5bd8c5a4b76
+      4,198,752 bytes, LC_UUID E98A82F7-4F50-3E3E-955F-96CC1242669A, floor
+      13.3 - the REBUILD; it replaced the 11.0-floor file (sha256 b06df3a7...,
+      LC_UUID 5830F46C-...) adopted earlier the same day
       (a rebuild legitimately produces a different sha256 and UUID - item 1
        above; the stored unstripped twin and dSYM carry THIS UUID)
   with llama.cpp's LICENSE beside it as LICENSE-LlamaCpp.txt; signature
-  re-verified after the copy. Floor 11.0 - REBUILD REQUIRED (see STATUS).
+  re-verified after the copy.
 
   src/CodeBrix.Ollama.ModelRunner/runtimes/osx-arm64/native/libcodebrix_llama.dylib
       sha256 65339b09a95f795b075b6e9ea61d2b38fc82b9753a4efd17863e5974c8ac47c4
@@ -465,9 +468,8 @@ WHAT WAS ADOPTED ON 2026-09-15
       13.3 (same UUID caveat; the stored unstripped twin and dSYM carry it)
   with LICENSE-LlamaCpp.txt beside it; signature re-verified after the copy.
 
-  Still outstanding: the osx-x64 REBUILD at the 13.3 floor (Intel Mac mini,
-  or the cross route on the Apple Silicon Mac), and every Windows and Linux
-  RID.
+  Still outstanding: every Windows and Linux RID, and the CROSS route of
+  build-osx-x64.sh (never run).
 
 
 ================================================================================

@@ -33,16 +33,15 @@ Verify any file two ways:
 STORED SO FAR
 --------------------------------------------------------------------------------
   osx-x64    stored 2026-09-15 from the Intel Mac mini's output/ tree - the
-             5,226,136-byte unstripped dylib plus its 55 MB .dSYM bundle.
-             LC_UUID 5830F46C-EFA7-3F60-840C-45833A3F0831, verified equal on
+             5,195,632-byte unstripped dylib plus its 57 MB .dSYM bundle, from
+             the REBUILD at the 13.3 floor (the 11.0-floor twin, LC_UUID
+             5830F46C-EFA7-3F60-840C-45833A3F0831, was replaced, not kept).
+             LC_UUID E98A82F7-4F50-3E3E-955F-96CC1242669A, verified equal on
              the shipped file, the unstripped twin and the dSYM at adoption.
              IMPORTANT: this build is not UUID-reproducible (see
              ../BUILD-PROVENANCE.txt), so a fresh rebuild's twin would carry
              a different UUID, would not match the shipped binary, and must
              never be substituted for the file stored here.
-             NOTE: this twin belongs to the 11.0-floor build. osx-x64 must be
-             rebuilt at the 13.3 floor (see ../macos/README.txt), and that
-             rebuild replaces this twin, the dSYM and the shipped file together.
   osx-arm64  stored 2026-09-15 from the Apple Silicon Mac mini's output/ tree -
              the 5,524,600-byte unstripped dylib plus its 57 MB .dSYM bundle.
              LC_UUID 88DBABCC-377F-3BBB-A943-F3E67AD56808, verified equal on

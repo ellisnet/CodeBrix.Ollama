@@ -55,12 +55,23 @@ Common to every entry below
 
 
 ================================================================================
-osx-x64                       BUILT + PASSED at the 11.0 floor - REBUILD REQUIRED
+osx-x64                                                          BUILT + PASSED
 ================================================================================
-Built            : 2026-09-16 00:05:52 UTC (2026-09-15 local)
+Built            : 2026-09-16 04:07:48 UTC (2026-09-15 local) - the REBUILD at
+                   the 13.3 floor. It replaces the entry for the 11.0-floor build
+                   of 2026-09-16 00:05:52 UTC (sha256 b06df3a7..., LC_UUID
+                   5830F46C-EFA7-3F60-840C-45833A3F0831), which was adopted the
+                   same day and withdrawn when the osx-arm64 run (below) showed
+                   that it weak-imported Accelerate's cblas_sgemm$NEWLAPACK$ILP64
+                   (a 13.3+ symbol) and would have crashed at the first BLAS
+                   matmul on macOS 11.0-13.2. Everything that build established
+                   about the slice (reproducibility, the Metal NaN finding, the
+                   export surface) still holds and is kept below.
 Built by         : macos/build-osx-x64.sh (native route, Intel Mac)
-Build host       : Intel Mac mini (2018), i7-8700B, macOS 15.8 (x86_64)
-Duration         : about 4 minutes cold; 11 s with a warm ccache (this run)
+Build host       : Intel Mac mini (2018), i7-8700B, macOS 15.8 (x86_64),
+                   SDK 26.2
+Duration         : 60 s (warm ccache; the first build of the day was about
+                   4 minutes cold)
 Network          : not used - the vendored source, the conformance model and
                    the expected logits are all files in this repository
 Compiler         : Apple clang version 17.0.0 (clang-1700.6.4.2)
@@ -71,56 +82,56 @@ GPU backend      : none. Metal OFF - a CPU-only slice by decision (Jeremy,
                    2026-09-15), and necessarily so: at this commit ggml-metal
                    returned NaN for every logit on the Intel UHD 630 (verified
                    with a separate Metal-enabled trial build the same day).
-Deployment target: 11.0 (checked by the gate, not merely requested)
-                   *** SUPERSEDED 2026-09-15: the floor is now 13.3 (pins.env). This
-                   file weak-imports Accelerate's cblas_sgemm$NEWLAPACK$ILP64 (13.3+)
-                   and would crash at the first BLAS matmul on macOS 11.0-13.2 - it
-                   never really ran on anything older than 13.3. It stays in the
-                   package only until macos/build-osx-x64.sh is re-run at 13.3; that
-                   run replaces this entry, the shipped file and the unstripped twin
-                   together. Found by the osx-arm64 build below. ***
+Deployment target: 13.3 (checked by the gate, not merely requested; and PROVEN
+                   at compile time by -Werror=unguarded-availability-new - zero
+                   warnings in the build log). `nm -m` on the shipped file shows
+                   NO weak imports at all: cblas_sgemm$NEWLAPACK$ILP64 is a
+                   normal Accelerate import, as it must be at 13.3.
 
 File             : libcodebrix_llama.dylib   install name @rpath/libcodebrix_llama.dylib
-Size (stripped)  : 4,221,552 bytes as shipped (signed). The BUILD-INFO of this run said
-                   4,170,664: it measured before codesign, which adds about 50 KB.
-                   build-common.sh now measures after signing.
-Size (unstripped): 5,226,136 bytes
-SHA256           : b06df3a7392388dbe4b817175a776cc0438bc3844ec0943e4a365897156ed982
+Size (stripped)  : 4,198,752 bytes (as shipped, signed; measured after codesign)
+Size (unstripped): 5,195,632 bytes
+SHA256           : 03af0e77f6cb2fb6207d53688c796baf0d8bd9d237c7264a6e55a5bd8c5a4b76
                    *** REPRODUCIBLE EXCEPT FOR LC_UUID - see Reproducibility below.
                    A rebuild legitimately produces a different sha256. ***
-SHA256 unstripped: f24250f5191d303bbfa6ce01410cd196074ff70dc93e7403e8fdb7e7002c22a3
-LC_UUID          : 5830F46C-EFA7-3F60-840C-45833A3F0831 (NOT stable across builds;
-                   the stored unstripped twin and dSYM carry this one)
-Debug symbols    : libcodebrix_llama.dylib.dSYM, 55 MB, stored under unstripped/osx-x64/
+SHA256 unstripped: 558ce454a4289ddb76b6e3e7e81a81d988e7faa7fca3364ecd0d34bd3467eb56
+LC_UUID          : E98A82F7-4F50-3E3E-955F-96CC1242669A (NOT stable across builds;
+                   the stored unstripped twin and dSYM carry this one - verified
+                   equal on all three with dwarfdump --uuid at adoption)
+Debug symbols    : libcodebrix_llama.dylib.dSYM, 57 MB, stored under unstripped/osx-x64/
 Dependencies     : /usr/lib/libSystem.B.dylib
                    /System/Library/Frameworks/Accelerate.framework/Versions/A/Accelerate
                    /usr/lib/libc++.1.dylib
+Weak imports     : none
 Signature        : ad-hoc (codesign --sign -), applied after strip and
                    install_name_tool; re-verified after the copy into runtimes/
 Exports          : 1,159 symbols, all llama_* / ggml_* / gguf_* / codebrix_llama_*;
                    all 233 LLAMA_API functions present
-Reproducibility  : four consecutive from-scratch runs on 2026-09-15 (two with
-                   ZERO_AR_DATE=1, which changed nothing). Consecutive
-                   UNSTRIPPED builds differ in 18 bytes (the 16-byte LC_UUID
-                   at offset 1657-1672 and 2 bytes at 3519848-3519849 in the
-                   symbol-table region); the STRIPPED, signed files differ in
-                   112 bytes (UUID + the signature covering it). All code and
-                   data identical; every run passed the whole gate. Cause and
-                   reasoning: macos/README.txt, "WHAT HAS AND HAS NOT BEEN
-                   VERIFIED", item 1. Compare size, exports and gate result,
-                   not the hash.
+Reproducibility  : established on the 11.0-floor build of the same day - four
+                   consecutive from-scratch runs (two with ZERO_AR_DATE=1, which
+                   changed nothing). Consecutive UNSTRIPPED builds differ in 18
+                   bytes (the 16-byte LC_UUID and 2 bytes in the symbol-table
+                   region); the STRIPPED, signed files differ in 112 bytes (UUID
+                   + the signature covering it). All code and data identical;
+                   every run passed the whole gate. Cause and reasoning:
+                   macos/README.txt, "WHAT HAS AND HAS NOT BEEN VERIFIED", item
+                   1. Compare size, exports and gate result, not the hash. Not
+                   re-measured over repeated runs at the 13.3 floor.
 Gate             : architecture ok, 248/248 required exports, export surface
-                   exact, install name ok, system-only dependencies, minos 11.0
+                   exact, install name ok, system-only dependencies, minos 13.3
                    ok, signature ok, smoke test passed (75/75 entry points,
                    2 devices: BLAS/Accelerate + CPU, system info "AVX = 1 |
                    AVX2 = 1 | F16C = 1 | FMA = 1 | BMI2 = 1 | LLAMAFILE = 1 |
                    ACCELERATE = 1 | REPACK = 1"), model regeneration
                    byte-identical, conformance CPU: 12 positions, 64 logits
-                   each, max |diff| 4.98e-08, PASSED
+                   each, max |diff| 4.98e-08, PASSED (identical spread to the
+                   11.0-floor build: the floor changes which symbols are
+                   imported, not the arithmetic)
 Adopted into src/CodeBrix.Ollama.ModelRunner/runtimes/osx-x64/native/ : YES,
                    2026-09-15, with llama.cpp's LICENSE beside it as
                    LICENSE-LlamaCpp.txt. Unstripped twin + dSYM stored under
-                   unstripped/osx-x64/ (SHA256SUMS extended) in the same commit.
+                   unstripped/osx-x64/ (SHA256SUMS regenerated) in the same
+                   commit, replacing the 11.0-floor twin.
 
 
 ================================================================================

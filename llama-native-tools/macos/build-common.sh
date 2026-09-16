@@ -13,9 +13,9 @@
 #
 # STATUS: build-osx-x64.sh was run for real on the Intel Mac mini on 2026-09-15 (native route),
 #         and build-osx-arm64.sh on the Apple Silicon Mac mini the same day; both passed. The
-#         x64 build predates the floor change to 13.3 and must be rebuilt. The CROSS route of
-#         build-osx-x64.sh has NOT been run yet - see README.txt, "WHAT HAS AND HAS NOT BEEN
-#         VERIFIED".
+#         x64 slice was then rebuilt and re-adopted at the 13.3 floor the same day. The CROSS
+#         route of build-osx-x64.sh has NOT been run yet - see README.txt, "WHAT HAS AND HAS NOT
+#         BEEN VERIFIED".
 # ==============================================================================================
 
 set -euo pipefail

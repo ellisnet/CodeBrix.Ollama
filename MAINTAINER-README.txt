@@ -99,7 +99,8 @@ REPOSITORY LAYOUT
       runtimes/<rid>/native/     the COMMITTED native libraries, each beside a
                                  copy of llama.cpp's LICENSE as
                                  LICENSE-LlamaCpp.txt. Today that is
-                                 runtimes/osx-x64/native/ only
+                                 runtimes/osx-x64/native/ and
+                                 runtimes/osx-arm64/native/
       InternalsVisibleTo.cs      grants CodeBrix.Ollama.ModelRunner.Tests
 
     tests/CodeBrix.Ollama.ModelManager.Tests/   the xunit.v3 suite, offline
@@ -377,8 +378,8 @@ that only work together:
 
 AFTER ANY CHANGE TO THAT BLOCK, UNZIP THE PACKAGE AND LOOK (`unzip -l <nupkg> |
 grep runtimes`). What you want to see is runtimes/<rid>/native/ with no doubled
-path - today, exactly two entries under runtimes/osx-x64/native/:
-libcodebrix_llama.dylib and LICENSE-LlamaCpp.txt.
+path - today, exactly two entries under each of runtimes/osx-x64/native/ and
+runtimes/osx-arm64/native/: libcodebrix_llama.dylib and LICENSE-LlamaCpp.txt.
 
 
 THE NATIVE LIBRARIES
@@ -411,12 +412,18 @@ FOLDER, where a file named plainly LICENSE collides with any other package that
 ships one there.
 
 WHICH RIDS EXIST TODAY, per llama-native-tools/BUILD-PROVENANCE.txt: OSX-X64
-ONLY, built, gated and adopted on 2026-09-15 on the Intel Mac mini. The other
-six - osx-arm64, win-x64, win-arm64, linux-x64, linux-arm64 and linux-riscv64 -
-are NOT BUILT, and their scripts, written on the Intel mini, have NEVER BEEN
-RUN; each script says so in its header. From dav1d's experience, each platform's
-first real run is expected to find something to fix. Fix it IN THE SCRIPT, and
-rewrite that platform's status block.
+and OSX-ARM64, both built, gated and adopted on 2026-09-15 - x64 on the Intel
+Mac mini (CPU only), arm64 on the Apple Silicon Mac mini (CPU + Metal). Both
+carry a macOS floor of 13.3. The arm64 run found that the original 11.0 floor
+was never real - both slices weak-imported a 13.3-only Accelerate symbol and
+would have crashed at the first BLAS matmul on macOS 11.0 to 13.2 - so the pin
+was raised, the wrapper now fails the build on any unguarded use of an API
+newer than the floor, and the x64 slice was rebuilt and re-adopted the same
+day. The other five - win-x64, win-arm64, linux-x64, linux-arm64 and
+linux-riscv64 - are NOT BUILT, and their scripts, written on the Intel mini,
+have NEVER BEEN RUN; each script says so in its header. From dav1d's
+experience, each platform's first real run is expected to find something to
+fix. Fix it IN THE SCRIPT, and rewrite that platform's status block.
 
 EVERYTHING ELSE ABOUT THE NATIVES LIVES IN THAT FOLDER, and is not duplicated
 here on purpose:
@@ -440,7 +447,9 @@ about its origin. The osx-x64 slice is CPU-only by decision AND by necessity: at
 the vendored commit, ggml-metal returned NaN for every logit on that machine's
 Intel UHD 630. And osx-x64 is reproducible EXCEPT for its LC_UUID, so a rebuild
 legitimately produces a different sha256 - compare size, exports and gate
-result, not the hash.
+result, not the hash. The macOS floor is a symbol question, not a stamp: the
+minos value says where dyld will load the file, and only the compile-time
+availability check proves that every symbol it calls exists there.
 
 
 PROVENANCE AND PORTED SOURCES
@@ -642,12 +651,15 @@ macOS 15.8, x86_64, .NET SDK 10.0.401.
     running the built executable directly.
   * Both packages packed and unzipped. Each carries the five packed root files
     and lib/net10.0, each nuspec carries an EMPTY net10.0 dependency group, and
-    the ModelRunner package carries runtimes/osx-x64/native/ with no doubled
-    path.
+    the ModelRunner package carries runtimes/osx-x64/native/ and
+    runtimes/osx-arm64/native/ with no doubled path.
   * The osx-x64 native: built, full gate passed (architecture, 248/248 required
     exports, exact export surface, install name, system-only dependencies,
-    minos 11.0, signature, smoke test, byte-identical model regeneration, and
-    conformance at max |diff| 4.98e-08), adopted, twin and dSYM stored.
+    minos 13.3, signature, smoke test, byte-identical model regeneration, and
+    conformance at max |diff| 4.98e-08), adopted, twin and dSYM stored. The
+    osx-arm64 native was built and gated the same way on the Apple Silicon
+    Mac mini, including the Metal conformance pass; its record is in
+    BUILD-PROVENANCE.txt.
 
 WHAT HAS NOT BEEN VALIDATED
 ---------------------------
@@ -663,11 +675,11 @@ WHAT HAS NOT BEEN VALIDATED
     been set here, so the one test that reaches registry.ollama.ai has only ever
     been skipped. Running it is the first thing to do before any release.
 
-  * THE SIX OTHER NATIVE SLICES ARE UNBUILT and their scripts unrun, as
-    described under THE NATIVE LIBRARIES.
+  * THE FIVE WINDOWS AND LINUX NATIVE SLICES ARE UNBUILT and their scripts
+    unrun, as described under THE NATIVE LIBRARIES.
 
   * ModelRunner IS NOT WRITTEN. There is no managed binding, so the committed
-    osx-x64 library has been verified only by llama-native-tools' own gate - by
+    macOS libraries have been verified only by llama-native-tools' own gate - by
     C programs, never yet from .NET. The first thing the binding will prove or
     disprove is that the runtimes/<rid>/native/ probing finds the file the
     packing block puts there, which is exactly why that block also stages the
