@@ -70,7 +70,7 @@ GPU backend      : none. Metal OFF - a CPU-only slice by decision (Jeremy,
 Deployment target: 11.0 (checked by the gate, not merely requested)
 
 File             : libcodebrix_llama.dylib   install name @rpath/libcodebrix_llama.dylib
-Size (stripped)  : 4,170,664 bytes
+Size (stripped)  : 4,221,552 bytes (signed; 4,170,664 before the ad-hoc signature)
 Size (unstripped): 5,226,136 bytes
 SHA256           : b06df3a7392388dbe4b817175a776cc0438bc3844ec0943e4a365897156ed982
                    *** REPRODUCIBLE EXCEPT FOR LC_UUID - see Reproducibility below.

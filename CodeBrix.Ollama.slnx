@@ -1,0 +1,20 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path=".gitignore" />
+    <File Path="AGENT-README.txt" />
+    <File Path="EXTRAS-README.txt" />
+    <File Path="global.json" />
+    <File Path="icon-codebrix-128.png" />
+    <File Path="LICENSE" />
+    <File Path="MAINTAINER-README.txt" />
+    <File Path="README-INDEX.txt" />
+    <File Path="README.md" />
+    <File Path="THIRD-PARTY-NOTICES.txt" />
+  </Folder>
+  <Folder Name="/Tests/">
+    <Project Path="tests/CodeBrix.Ollama.ModelManager.Tests/CodeBrix.Ollama.ModelManager.Tests.csproj" />
+    <Project Path="tests/CodeBrix.Ollama.ModelRunner.Tests/CodeBrix.Ollama.ModelRunner.Tests.csproj" />
+  </Folder>
+  <Project Path="src/CodeBrix.Ollama.ModelManager/CodeBrix.Ollama.ModelManager.csproj" />
+  <Project Path="src/CodeBrix.Ollama.ModelRunner/CodeBrix.Ollama.ModelRunner.csproj" />
+</Solution>

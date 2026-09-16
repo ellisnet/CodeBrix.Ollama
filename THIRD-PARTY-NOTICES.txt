@@ -2,15 +2,15 @@ THIRD-PARTY SOFTWARE NOTICES AND INFORMATION
 
 CodeBrix.Ollama is a pair of .NET libraries for downloading, managing and
 running large language models in-process: CodeBrix.Ollama.ModelManager (a model
-store and registry client) and CodeBrix.Ollama.ModelRunner (a managed binding
-over a self-built native inference library). As of 2026-09-15 the repository
-holds the native build tooling and the first native library; the managed
-libraries are not yet written, and this file will grow entries for the code
-they port (from the Ollama server, LLamaSharp and possibly OllamaSharp - all
-MIT) when that happens.
+store and registry client, written) and CodeBrix.Ollama.ModelRunner (a managed
+binding over a self-built native inference library, not yet written). As of
+2026-09-15 the repository holds the native build tooling, the first native
+library, and the ModelManager library, which is a partial port of the Ollama
+server's Go code (entry 3). Entries for the code ModelRunner ports (LLamaSharp
+and possibly OllamaSharp, both MIT) will be added when it is written.
 
-Two distinct things in this repository come from other people today, and both
-are covered below:
+Three distinct things in this repository come from other people today, and all
+three are covered below:
 
   1. THE VENDORED SOURCE. llama-native-tools/llama.cpp/ is an unmodified
      snapshot of the build-sufficient subset of the upstream llama.cpp source
@@ -24,6 +24,12 @@ are covered below:
      libcodebrix_llama.so / codebrix_llama.dll compiled from exactly that
      source, one per runtime identifier (osx-x64 as of 2026-09-15; six more
      to come).
+
+  3. THE PORTED MANAGED CODE. src/CodeBrix.Ollama.ModelManager/ contains C#
+     code ported by hand from the Ollama server's Go source: model-name
+     parsing, the GGUF metadata reader, the Modelfile parser, the registry
+     protocol and blob downloader, and the manifest/blob store layout. Every
+     ported file names its upstream source in its first line.
 
 Both are governed by the licences reproduced in full below. Every one of them -
 MIT, and the Apache License 2.0 (with and without the LLVM exception) - is
@@ -467,8 +473,152 @@ Software.
 
 
 ================================================================================
+3. Ollama  (the model server whose Go code CodeBrix.Ollama.ModelManager ports)
+================================================================================
+
+Project:        Ollama
+Source URL:     https://github.com/ollama/ollama
+Version:        v0.34.2-rc0 (git describe), commit
+                a43fad18b088095de20fbd7a8f0de50824cf5d27, 2026-09-15
+Authors:        Ollama and contributors (https://github.com/ollama/ollama/graphs/contributors)
+Copyright:      Copyright (c) Ollama
+License:        MIT (reproduced verbatim below)
+
+WHAT WAS INCORPORATED
+    Nothing from Ollama is vendored, compiled, linked or downloaded. What was
+    taken is LOGIC: a set of Go source files was read and re-expressed by hand
+    as C# in src/CodeBrix.Ollama.ModelManager/. The result is a port, not a
+    translation - the C# is organised around this library's own public API,
+    uses the .NET base class library throughout, and drops everything about
+    Ollama's server (HTTP routes, scheduling, inference, cloud proxying,
+    safetensors conversion, template rendering, authentication key signing).
+    The reference clone lives at ~/GitHome/ollama at the commit above and is
+    consulted, never referenced by the build.
+
+    Scope of incorporation, upstream Go file -> our C# file(s). Every C# file
+    listed carries, as its first line, the header
+        // Ported from Ollama (https://github.com/ollama/ollama), MIT License,
+        //   Copyright (c) Ollama. Source: <upstream path> at commit a43fad18.
+    (on one line in the source), which is how this list was compiled:
+
+      types/model/name.go
+          -> Names/ModelName.cs
+      fs/gguf/gguf.go, keyvalue.go, metadata.go, tensor.go, file_type.go
+          -> Gguf/GgufMetadata.cs, GgufReader.cs, GgufReadOptions.cs,
+             GgufValue.cs, GgufValueType.cs, GgufTensorInfo.cs,
+             GgufTensorType.cs, GgufTensorTypes.cs, GgufFileType.cs,
+             GgufFileTypes.cs
+      parser/parser.go (+ the parameter typing of api/types.go FormatParams)
+          -> Modelfile/Modelfile.cs, ModelfileCommand.cs,
+             ModelfileParserState.cs
+      manifest/paths.go, manifest.go, layer.go
+          -> Store/ModelStorePaths.cs, ManifestFiles.cs, LayerFactory.cs
+      server/images.go (PullModel, GetModel, CopyModel, deleteUnusedLayers,
+      PruneLayers, makeRequest*, parseRegistryChallenge, Model.String,
+      capability inference), server/create.go, server/model.go,
+      x/create/manifest.go (ApplyModelfileLayers)
+          -> Store/ModelStore.cs, LayerPruner.cs, ModelCapabilities.cs,
+             ModelLayerReader.cs; Registry/RegistryClient.cs,
+             RegistryChallenge.cs
+      server/download.go (blobDownload: parts, resume, stall detection,
+      retries, backoff)
+          -> Registry/BlobDownload.cs, BlobDownloadPart.cs,
+             BlobDownloadState.cs
+      format/format.go (HumanNumber)
+          -> Store/HumanFormat.cs
+
+    Test tables ported from upstream's *_test.go files (name_test.go, the
+    fs/gguf tests, parser_test.go, images_test.go, auth_test.go) live in the
+    correspondingly named files under tests/CodeBrix.Ollama.ModelManager.Tests/
+    and carry the same header naming the test file they came from.
+
+    Files in the library WITHOUT the header contain no Ollama logic: the
+    exception types and JSON helper under Common/, the public DTOs and options
+    under Store/ (ModelStoreOptions, ModelManifest, ModelLayer, MediaTypes,
+    ModelConfig, ModelParameters, ModelMessage, ModelInfo, ModelSummary,
+    ResolvedModel, PullProgress, CreateOptions, ModelCapability, IModelStore,
+    StoredManifest, Sha256Digest), Modelfile/GoBool.cs (Go's strconv.ParseBool
+    spellings, standard-library semantics) and Registry/
+    RegistryManifestResponse.cs. The on-disk format they describe (manifest
+    JSON shape, config JSON field names, params and messages JSON, the
+    blobs/sha256-<hex> and manifests/<host>/<namespace>/<model>/<tag> layout,
+    the media type strings) is Ollama's format, kept identical on purpose so a
+    store directory is interchangeable with a real Ollama install.
+
+MODIFICATIONS MADE DURING THE PORT
+    - Go's package-level functions and global state became instance methods
+      on ModelStore / RegistryClient with explicit ModelStoreOptions; the
+      store directory is a parameter, not an environment lookup (the
+      OLLAMA_MODELS default is preserved as the default value only).
+    - Resumable downloads keep ONE JSON sidecar per blob
+      (<blob>.codebrix-parts.json) and one data file (<blob>.codebrix-partial)
+      instead of Ollama's "-partial" and "-partial-<n>" files, so this
+      library's in-progress files never collide with a co-located Ollama
+      server's. Consequently Ollama's own partial files are never read, and
+      PruneLayers' deletion of unrecognised files in blobs/ was narrowed to
+      this library's own sidecar names.
+    - The process-wide download de-duplication (blobDownloadManager, the
+      acquire/release reference counting) and the sparse-file hint were not
+      ported; one call downloads one blob.
+    - Registry authentication: only the bearer-token retry after a 401
+      challenge is ported. Ollama's ed25519 key signing (auth.go) is not.
+    - Manifests and blobs are written to a temporary file and renamed into
+      place; Ollama writes in place.
+    - GGUF reading is a single eager forward pass producing an immutable
+      snapshot; the lazy iterator machinery (lazy.go), the tensor-data
+      section reader and the multi-shard Model aggregation (model.go) were not
+      ported. Reflection-based value conversion (keyvalue.go) became explicit
+      type switches. Ollama's unexported tensor-type identifiers are exposed.
+    - Modelfile parsing: file hashing, glob expansion, "~" expansion and
+      safetensors/PyTorch directory detection (parser.go CreateRequest) were
+      not ported; typed parameter values use int32 where Go uses int64.
+    - Create: safetensors import, create-time quantization, DRAFT models,
+      split-GGUF grouping, Ollama's built-in template auto-detection
+      (template.Named) and its Go-template validation were not ported; the
+      template text is stored as written. LoRA ADAPTER files ARE accepted
+      (older Ollama behaviour), whereas the upstream commit rejects them.
+    - Capability inference keeps the GGUF- and template-text-based rules and
+      drops the renderer/parser/model-family special cases and the Go-template
+      syntax-tree walk for thinking tags.
+    - Push (upload.go), the safetensors transfer path (x/transfer), logging
+      (slog) and every HTTP handler were not ported.
+    - Nullable annotations and Go error wrapping became this library's
+      exception types (ModelManagerException and subclasses); Go's byte-based
+      string validation became char-based with identical results for the
+      ASCII-only grammar.
+
+----- Ollama licence (MIT), reproduced verbatim from LICENSE -----
+
+MIT License
+
+Copyright (c) Ollama
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+================================================================================
 INVENTORY: HOW THIS FILE WAS COMPILED, AND HOW TO RE-CHECK IT
 ================================================================================
+(This section covers entries 1 and 2, the vendored llama.cpp snapshot. Entry 3
+is checked differently: `grep -rl "Ported from Ollama" src/` lists every ported
+C# file, and that list must match the scope table in entry 3.)
+
 On 2026-09-15 the vendored snapshot was inventoried mechanically, not by
 reading around in it. The snapshot holds 1,468 files (1,467 from upstream plus
 the added UPSTREAM.txt); 59 of them carry a copyright notice.
