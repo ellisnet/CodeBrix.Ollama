@@ -47,11 +47,15 @@ Common to every entry below
                     dependencies, platform floor (glibc / minos / static CRT),
                     signature (macOS), dlopen smoke test (75 entry points +
                     backend init + device enumeration), model regeneration
-                    byte-identical to the committed asset, conformance.
+                    byte-identical to the committed asset, conformance. On
+                    macOS, additionally at COMPILE time (from 2026-09-15):
+                    -Werror=unguarded-availability-new, so no API newer than
+                    the floor can be called unguarded - see macos/README.txt,
+                    THE MINIMUM macOS VERSION.
 
 
 ================================================================================
-osx-x64                                                            BUILT + PASSED
+osx-x64                       BUILT + PASSED at the 11.0 floor - REBUILD REQUIRED
 ================================================================================
 Built            : 2026-09-16 00:05:52 UTC (2026-09-15 local)
 Built by         : macos/build-osx-x64.sh (native route, Intel Mac)
@@ -68,9 +72,18 @@ GPU backend      : none. Metal OFF - a CPU-only slice by decision (Jeremy,
                    returned NaN for every logit on the Intel UHD 630 (verified
                    with a separate Metal-enabled trial build the same day).
 Deployment target: 11.0 (checked by the gate, not merely requested)
+                   *** SUPERSEDED 2026-09-15: the floor is now 13.3 (pins.env). This
+                   file weak-imports Accelerate's cblas_sgemm$NEWLAPACK$ILP64 (13.3+)
+                   and would crash at the first BLAS matmul on macOS 11.0-13.2 - it
+                   never really ran on anything older than 13.3. It stays in the
+                   package only until macos/build-osx-x64.sh is re-run at 13.3; that
+                   run replaces this entry, the shipped file and the unstripped twin
+                   together. Found by the osx-arm64 build below. ***
 
 File             : libcodebrix_llama.dylib   install name @rpath/libcodebrix_llama.dylib
-Size (stripped)  : 4,170,664 bytes
+Size (stripped)  : 4,221,552 bytes as shipped (signed). The BUILD-INFO of this run said
+                   4,170,664: it measured before codesign, which adds about 50 KB.
+                   build-common.sh now measures after signing.
 Size (unstripped): 5,226,136 bytes
 SHA256           : b06df3a7392388dbe4b817175a776cc0438bc3844ec0943e4a365897156ed982
                    *** REPRODUCIBLE EXCEPT FOR LC_UUID - see Reproducibility below.
@@ -111,13 +124,76 @@ Adopted into src/CodeBrix.Ollama.ModelRunner/runtimes/osx-x64/native/ : YES,
 
 
 ================================================================================
-osx-arm64                                                             NOT BUILT
+osx-arm64                                                          BUILT + PASSED
 ================================================================================
-To be built on the Apple Silicon Mac mini with macos/build-osx-arm64.sh
-(never yet run). Expected arch options: -DGGML_CPU_ARM_ARCH=armv8.2-a+dotprod+fp16
--DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple.
-The gate for this slice includes the Metal conformance pass, which will be the
-first GPU verification of the reference logits.
+Built            : 2026-09-16 03:51:11 UTC (2026-09-15 local)
+Built by         : macos/build-osx-arm64.sh (native build, Apple Silicon Mac)
+Build host       : Apple Silicon Mac mini, M2 Pro (10 cores), macOS 27.0 (arm64),
+                   Xcode 27.0
+Duration         : 30 s cold (this run); 44 s on the first run the same day
+Network          : not used - the vendored source, the conformance model and
+                   the expected logits are all files in this repository
+Compiler         : Apple clang version 21.0.0 (clang-2100.3.34.2)
+cmake / ninja    : 4.4.3 / 1.13.2 (both equal to the pins)
+arch options     : -DGGML_CPU_ARM_ARCH=armv8.2-a+dotprod+fp16 -DGGML_METAL=ON
+                   -DGGML_METAL_EMBED_LIBRARY=ON -DGGML_BLAS=ON -DGGML_BLAS_VENDOR=Apple
+CPU baseline     : armv8.2-a + dotprod + fp16
+GPU backend      : Metal, shader library embedded in the dylib (no .metallib
+                   ships beside it; compiled at first load - 9 s on the M2 Pro
+                   the first time, 0.03 s afterwards from macOS's shader
+                   cache). Verified by the gate's Metal conformance pass.
+Deployment target: 13.3 (checked by the gate, not merely requested; and PROVEN
+                   at compile time by -Werror=unguarded-availability-new - zero
+                   warnings). This is the run that raised the floor from 11.0:
+                   the first run, at 11.0, passed every gate check but its build
+                   log showed cblas_sgemm$NEWLAPACK$ILP64 (13.3+) and
+                   -[MTLSharedEvent waitUntilSignaledValue:timeoutMS:] (12.0+)
+                   called unguarded, i.e. weak-imported. That run was NOT
+                   adopted. Reasoning: macos/README.txt, THE MINIMUM macOS
+                   VERSION; the pin: linux/pins.env MACOS_MIN_VERSION.
+
+File             : libcodebrix_llama.dylib   install name @rpath/libcodebrix_llama.dylib
+Size (stripped)  : 4,307,696 bytes (as shipped, signed)
+Size (unstripped): 5,524,600 bytes
+SHA256           : 65339b09a95f795b075b6e9ea61d2b38fc82b9753a4efd17863e5974c8ac47c4
+                   *** Expected to be reproducible except for LC_UUID, as osx-x64
+                   is; not yet measured over repeated runs on this slice. ***
+SHA256 unstripped: 2a59d2717dca40aa9ad52eee19fa7d35278f9fe8bb99111882dc807c8e77e455
+LC_UUID          : 88DBABCC-377F-3BBB-A943-F3E67AD56808 (NOT stable across builds;
+                   the stored unstripped twin and dSYM carry this one)
+Debug symbols    : libcodebrix_llama.dylib.dSYM, 57 MB, stored under unstripped/osx-arm64/
+Dependencies     : /System/Library/Frameworks/Accelerate.framework/Versions/A/Accelerate
+                   /usr/lib/libSystem.B.dylib
+                   /System/Library/Frameworks/Foundation.framework/Versions/C/Foundation
+                   /System/Library/Frameworks/Metal.framework/Versions/A/Metal
+                   /System/Library/Frameworks/MetalKit.framework/Versions/A/MetalKit
+                   /usr/lib/libc++.1.dylib
+                   /System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation
+                   /usr/lib/libobjc.A.dylib
+Weak imports     : only _OBJC_CLASS_$_MTLResidencySetDescriptor (macOS 15 feature,
+                   guarded by @available in ggml-metal) and libSystem's
+                   __availability_version_check - both correct
+Signature        : ad-hoc (codesign --sign -), applied after strip and
+                   install_name_tool; re-verified after the copy into runtimes/
+Exports          : 1,392 symbols, all llama_* / ggml_* / gguf_* / codebrix_llama_*;
+                   all 233 LLAMA_API functions present
+Gate             : architecture ok, 248/248 required exports, export surface
+                   exact, install name ok, system-only dependencies (Metal
+                   list), minos 13.3 ok, signature ok, smoke test passed (75/75
+                   entry points, 3 devices: MTL0 Apple M2 Pro + BLAS/Accelerate
+                   + CPU, system info "MTL : EMBED_LIBRARY = 1 | CPU : NEON = 1
+                   | ARM_FMA = 1 | FP16_VA = 1 | DOTPROD = 1 | LLAMAFILE = 1 |
+                   ACCELERATE = 1 | REPACK = 1"), model regeneration
+                   byte-identical, conformance CPU: 12 positions, 64 logits
+                   each, max |diff| 1.43e-04, PASSED; conformance Metal (all
+                   layers offloaded): max |diff| 1.14e-04, PASSED. Both spreads
+                   are the expected cross-architecture rounding against the
+                   AVX2-generated reference (the x64 CPU path's 4.98e-08 was
+                   AVX2 checking AVX2); argmax exact at every position.
+Adopted into src/CodeBrix.Ollama.ModelRunner/runtimes/osx-arm64/native/ : YES,
+                   2026-09-15, with llama.cpp's LICENSE beside it as
+                   LICENSE-LlamaCpp.txt. Unstripped twin + dSYM stored under
+                   unstripped/osx-arm64/ (SHA256SUMS extended) in the same commit.
 
 
 ================================================================================

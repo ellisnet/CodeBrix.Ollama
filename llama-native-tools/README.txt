@@ -110,9 +110,14 @@ WHICH README TO READ
 Each one lists the tools to install on that machine, with the exact command,
 and nothing else is needed.
 
-  >>> STATUS 2026-09-15: ONE of the seven slices has been built and adopted -
-      osx-x64, on the Intel Mac mini, full gate passed. The other six scripts
-      were written on that machine and have NEVER BEEN RUN; each says so in its
+  >>> STATUS 2026-09-15: TWO of the seven slices have been built and adopted -
+      osx-x64 on the Intel Mac mini and osx-arm64 on the Apple Silicon Mac
+      mini, full gate passed on both. The arm64 run found that the macOS floor
+      of 11.0 was never real (a 13.3-only Accelerate symbol was weak-imported
+      by BOTH slices); the floor is now 13.3 and the wrapper enforces it at
+      compile time. The osx-x64 file in the package predates that and MUST BE
+      REBUILT - see macos/README.txt. The five Windows and Linux scripts were
+      written on the Intel Mac and have NEVER BEEN RUN; each says so in its
       header. The expectation, from dav1d's experience, is that each platform's
       first real run finds something to fix. Fix it IN THE SCRIPT, commit the
       fix, and rewrite that platform's status block. <<<

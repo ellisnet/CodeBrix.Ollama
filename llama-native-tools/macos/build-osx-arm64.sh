@@ -3,11 +3,14 @@
 # build-osx-arm64.sh - build libcodebrix_llama.dylib for the osx-arm64 runtime identifier
 # ==============================================================================================
 #
-#   NEVER YET RUN. Written on the Intel Mac mini on 2026-09-15, where it cannot execute (it
-#   refuses to run on anything but an Apple Silicon Mac). Everything it does that differs from
-#   build-osx-x64.sh - the arm64 baseline flag, Metal ON, the Metal conformance pass - is an
-#   assumption until the first real run. Expect to fix something; fix it IN THE SCRIPT and
-#   commit that. Then rewrite this header and README.txt with what the run established.
+#   RUN AND VERIFIED on 2026-09-15 on the Apple Silicon Mac mini (M2 Pro, macOS 27.0, Apple
+#   clang 21.0.0, cmake 4.4.3, ninja 1.13.2). Written on the Intel Mac mini the same day, it ran
+#   UNCHANGED and passed all eleven gate checks on its first run: the arm64 baseline flag, Metal
+#   ON with the embedded shader library, the Metal conformance pass and the arm64 export check
+#   all behaved. What the run found was in the build log, not the gate: three
+#   unguarded-availability warnings showing the 11.0 floor was never real (README.txt, THE
+#   MINIMUM macOS VERSION). pins.env now says 13.3 and the wrapper fails the build on any such
+#   warning; the second run, at 13.3, is the one adopted. 30 s cold on 10 cores.
 #
 # USAGE
 #     cd llama-native-tools/macos

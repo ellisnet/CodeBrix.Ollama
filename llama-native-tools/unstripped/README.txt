@@ -40,7 +40,15 @@ STORED SO FAR
              ../BUILD-PROVENANCE.txt), so a fresh rebuild's twin would carry
              a different UUID, would not match the shipped binary, and must
              never be substituted for the file stored here.
-  (the other six RIDs: not yet built)
+             NOTE: this twin belongs to the 11.0-floor build. osx-x64 must be
+             rebuilt at the 13.3 floor (see ../macos/README.txt), and that
+             rebuild replaces this twin, the dSYM and the shipped file together.
+  osx-arm64  stored 2026-09-15 from the Apple Silicon Mac mini's output/ tree -
+             the 5,524,600-byte unstripped dylib plus its 57 MB .dSYM bundle.
+             LC_UUID 88DBABCC-377F-3BBB-A943-F3E67AD56808, verified equal on
+             the shipped file, the unstripped twin and the dSYM at adoption.
+             Same UUID caveat as osx-x64: a rebuild's twin is a different file.
+  (the other five RIDs: not yet built)
 
 THE RULE
 --------------------------------------------------------------------------------
@@ -50,7 +58,7 @@ SHA256SUMS is extended. A binary here that no longer matches the shipped one's
 build-id/LC_UUID is stale and must be replaced, never kept alongside.
 
 SIZE NOTE. These twins are several times the size of the shipped library
-(the shipped osx-x64 dylib is about 4.7 MB; its unstripped mate plus dSYM is
+(the shipped osx-x64 dylib is about 4.2 MB; its unstripped mate plus dSYM is
 larger still). Seven RIDs will put on the order of 100 MB into git history.
 Jeremy accepted that on 2026-09-15 for the crash-triage value.
 ================================================================================
