@@ -17,10 +17,12 @@
 #                                    Only for establishing a new test-vectors/EXPECTED.txt;
 #                                    a normal build must never use it.
 #
-#   NEVER YET RUN. Written on the Intel Mac mini on 2026-09-15 (no container engine there);
-#   modelled line by line on CodeBrix.VideoPlayback.Dav1d's dav1d-native-tools/linux/build.sh,
-#   which has run on all three architectures. Expect to fix something on the first real run;
-#   fix it IN THE SCRIPT and commit that. Then rewrite this header and README.txt.
+#   RUN 2026-09-15 on the x86_64 LMDE 7 laptop with podman 5.4.2: x64 natively, arm64 and
+#   riscv64 under qemu-user emulation - all three built, gated and adopted. This script itself
+#   needed no change; the first-run fixes were in wrapper/CMakeLists.txt (--exclude-libs),
+#   Containerfile.aarch64 (the probe's arithmetic) and Containerfile.riscv64 (libstdc++-static).
+#   See BUILD-PROVENANCE.txt for each. Modelled line by line on
+#   CodeBrix.VideoPlayback.Dav1d's dav1d-native-tools/linux/build.sh.
 #
 # WHAT THIS DOES, IN ONE PARAGRAPH
 #   For each architecture it makes sure a derived build image exists (base manylinux image +

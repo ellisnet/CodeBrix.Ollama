@@ -1,11 +1,10 @@
-// Ported from Ollama (https://github.com/ollama/ollama), MIT License, Copyright (c) Ollama. Source: types/model/name_test.go at commit a43fad18.
 using System;
 using System.IO;
 using CodeBrix.Ollama.ModelManager;
 using SilverAssertions;
 using Xunit;
 
-namespace CodeBrix.Ollama.ModelManager.Tests;
+namespace CodeBrix.Ollama.ModelManager.Tests; //was previously: ollama/ollama types/model/name_test.go;
 
 /// <summary>
 /// Conformance tests for <see cref="ModelName"/>. The case tables are ported from Ollama's
@@ -67,7 +66,7 @@ public sealed class ModelNameTests
         Part350 + "/" + Part80 + "/" + Part80 + ":" + Part80,
         Part350, Part80, Part80, Part80, null,
         Part350, Part80, Part80, Part80)]
-    public void ParseBare_SplitsIntoParts_ForEveryUpstreamCase(
+    public void ParseBare_splits_into_parts_for_every_upstream_case(
         string input,
         string expectedHost,
         string expectedNamespace,
@@ -139,7 +138,7 @@ public sealed class ModelNameTests
     [InlineData("host:https/namespace/model:tag", true)]
     // colon in a non-host part before the tag
     [InlineData("host/name:space/model:tag", false)]
-    public void IsValid_MatchesUpstream_AndValidNamesRoundTrip(string input, bool expected)
+    public void IsValid_matches_upstream_and_valid_names_round_trip(string input, bool expected)
     {
         //Act
         ModelName name = ModelName.ParseBare(input);
@@ -154,7 +153,7 @@ public sealed class ModelNameTests
     }
 
     [Fact]
-    public void Parse_WithModelOnly_FillsDefaults()
+    public void Parse_with_model_only_fills_defaults()
     {
         //Act
         ModelName name = ModelName.Parse("xx");
@@ -166,7 +165,7 @@ public sealed class ModelNameTests
     }
 
     [Fact]
-    public void ParseBare_WithNull_ReturnsEmptyName()
+    public void ParseBare_with_null_returns_empty_name()
     {
         //Act
         ModelName name = ModelName.ParseBare(null);
@@ -180,7 +179,7 @@ public sealed class ModelNameTests
     [InlineData("n/m:")]
     [InlineData("mm:")]
     [InlineData("//")]
-    public void ParseBare_WithPromisedButEmptyPart_UsesMissingPart(string input)
+    public void ParseBare_with_promised_but_empty_part_uses_missing_part(string input)
     {
         //Act
         ModelName name = ModelName.ParseBare(input);
@@ -192,7 +191,7 @@ public sealed class ModelNameTests
     }
 
     [Fact]
-    public void ParseBare_WithDigestSuffix_LeavesDigestAttached()
+    public void ParseBare_with_digest_suffix_leaves_digest_attached()
     {
         //Act
         ModelName name = ModelName.ParseBare("h/n/m:t@sha256-1000");
@@ -216,7 +215,7 @@ public sealed class ModelNameTests
     [InlineData("-a", false)]
     [InlineData(Part350, true)]
     [InlineData(Part350 + "3", false)]
-    public void IsValid_ChecksHostPartRules(string host, bool expected)
+    public void IsValid_checks_host_part_rules(string host, bool expected)
     {
         //Act
         var name = new ModelName(host, "nn", "mm", "tt", null);
@@ -235,7 +234,7 @@ public sealed class ModelNameTests
     [InlineData("m:m", false)]
     [InlineData(Part80, true)]
     [InlineData(Part80 + "8", false)]
-    public void IsValid_ChecksModelPartRules(string model, bool expected)
+    public void IsValid_checks_model_part_rules(string model, bool expected)
     {
         //Act
         var name = new ModelName("hh", "nn", model, "tt", null);
@@ -252,7 +251,7 @@ public sealed class ModelNameTests
     [InlineData("-t", false)]
     [InlineData(Part80, true)]
     [InlineData(Part80 + "8", false)]
-    public void IsValid_ChecksTagPartRules(string tag, bool expected)
+    public void IsValid_checks_tag_part_rules(string tag, bool expected)
     {
         //Act
         var name = new ModelName("hh", "nn", "mm", tag, null);
@@ -282,13 +281,13 @@ public sealed class ModelNameTests
     [InlineData("himynameisreallyreallyreallyreallylongbutitshouldstillbevalid", true)]
     [InlineData(Part80, true)]
     [InlineData(Part80 + "8", false)]
-    public void IsValidNamespace_MatchesUpstream(string value, bool expected)
+    public void IsValidNamespace_matches_upstream(string value, bool expected)
     {
         ModelName.IsValidNamespace(value).Should().Be(expected);
     }
 
     [Fact]
-    public void IsValidNamespace_WithNull_ReturnsFalse()
+    public void IsValidNamespace_with_null_returns_false()
     {
         ModelName.IsValidNamespace(null).Should().BeFalse();
     }
@@ -301,7 +300,7 @@ public sealed class ModelNameTests
     [Theory]
     [InlineData("host/namespace/model/tag", "host", "namespace", "model", "tag")]
     [InlineData("host:port/namespace/model/tag", "host:port", "namespace", "model", "tag")]
-    public void ParseFromRelativePath_WithFourValidParts_ReturnsName(
+    public void ParseFromRelativePath_with_four_valid_parts_returns_name(
         string relativePath,
         string expectedHost,
         string expectedNamespace,
@@ -330,13 +329,13 @@ public sealed class ModelNameTests
     [InlineData("/path/to/random/file")]
     [InlineData("")]
     [InlineData(null)]
-    public void ParseFromRelativePath_WithUnusablePath_ReturnsDefault(string relativePath)
+    public void ParseFromRelativePath_with_unusable_path_returns_default(string relativePath)
     {
         ModelName.ParseFromRelativePath(relativePath).Should().Be(default(ModelName));
     }
 
     [Fact]
-    public void ToRelativePath_RoundTripsThroughParseFromRelativePath()
+    public void ToRelativePath_round_trips_through_parse_from_relative_path()
     {
         //Arrange
         ModelName name = ModelName.Parse("model");
@@ -351,7 +350,7 @@ public sealed class ModelNameTests
     }
 
     [Fact]
-    public void ToRelativePath_WhenNotFullyQualified_Throws()
+    public void ToRelativePath_when_not_fully_qualified_throws()
     {
         //Arrange
         ModelName name = ModelName.ParseBare("model");
@@ -374,7 +373,7 @@ public sealed class ModelNameTests
     [InlineData("host/namespace/model:tag", "host/namespace/model:tag")]
     [InlineData("host/library/model:tag", "host/library/model:tag")]
     [InlineData("REGISTRY.OLLAMA.AI/LIBRARY/model:tag", "model:tag")]
-    public void DisplayShortest_MatchesUpstream(string input, string expected)
+    public void DisplayShortest_matches_upstream(string input, string expected)
     {
         ModelName.ParseBare(input).DisplayShortest().Should().Be(expected);
     }
@@ -382,7 +381,7 @@ public sealed class ModelNameTests
     [Theory]
     [InlineData("host/namespace/model:tag", "namespace/model")]
     [InlineData("model", "library/model")]
-    public void DisplayNamespaceModel_JoinsNamespaceAndModel(string input, string expected)
+    public void DisplayNamespaceModel_joins_namespace_and_model(string input, string expected)
     {
         ModelName.Parse(input).DisplayNamespaceModel().Should().Be(expected);
     }
@@ -397,7 +396,7 @@ public sealed class ModelNameTests
     [InlineData("host/namespace/model", "host", "namespace", "model", "latest", "https")]
     [InlineData("h/n/m:t", "h", "n", "m", "t", "https")]
     [InlineData("scheme://h/n/m:t", "h", "n", "m", "t", "scheme")]
-    public void Merge_PrefersThePresentPartsOfTheFirstName(
+    public void Merge_prefers_the_present_parts_of_the_first_name(
         string input,
         string expectedHost,
         string expectedNamespace,
@@ -417,7 +416,7 @@ public sealed class ModelNameTests
     }
 
     [Fact]
-    public void Merge_TakesTheModelFromTheFirstNameOnly()
+    public void Merge_takes_the_model_from_the_first_name_only()
     {
         //Arrange
         var first = new ModelName(null, null, null, null, null);
@@ -443,13 +442,13 @@ public sealed class ModelNameTests
     [InlineData("host/namespace/model:tag", "host/namespace/model:tag", true)]
     [InlineData("host/namespace/model:tag", "host/namespace/model:other", false)]
     [InlineData("host/namespace/model:tag", "other/namespace/model:tag", false)]
-    public void EqualsIgnoreCase_ComparesPartsWithoutCase(string first, string second, bool expected)
+    public void EqualsIgnoreCase_compares_parts_without_case(string first, string second, bool expected)
     {
         ModelName.ParseBare(first).EqualsIgnoreCase(ModelName.ParseBare(second)).Should().Be(expected);
     }
 
     [Fact]
-    public void Equals_IsOrdinalAndIgnoresTheProtocolScheme()
+    public void Equals_is_ordinal_and_ignores_the_protocol_scheme()
     {
         //Arrange
         var lower = new ModelName("h", "n", "m", "t", "https");
@@ -464,7 +463,7 @@ public sealed class ModelNameTests
     }
 
     [Fact]
-    public void EqualityOperators_MatchEquals()
+    public void EqualityOperators_match_equals()
     {
         //Arrange
         ModelName first = ModelName.Parse("model");
@@ -488,7 +487,7 @@ public sealed class ModelNameTests
     [InlineData("model", "https", "registry.ollama.ai")]
     [InlineData("http://host/namespace/model:tag", "http", "host")]
     [InlineData("https://host:8080/namespace/model:tag", "https", "host")]
-    public void BaseUrl_BuildsTheRegistryAddress(string input, string expectedScheme, string expectedHost)
+    public void BaseUrl_builds_the_registry_address(string input, string expectedScheme, string expectedHost)
     {
         //Act
         Uri baseUrl = ModelName.Parse(input).BaseUrl();
@@ -499,7 +498,7 @@ public sealed class ModelNameTests
     }
 
     [Fact]
-    public void BaseUrl_WithPort_KeepsThePort()
+    public void BaseUrl_with_port_keeps_the_port()
     {
         ModelName.Parse("https://host:8080/namespace/model:tag").BaseUrl().Port.Should().Be(8080);
     }
@@ -509,7 +508,7 @@ public sealed class ModelNameTests
     // ---------------------------------------------------------------------
 
     [Fact]
-    public void Default_HoldsTheDefaultPartsAndNoModel()
+    public void Default_holds_the_default_parts_and_no_model()
     {
         //Act
         ModelName name = ModelName.Default;
@@ -524,7 +523,7 @@ public sealed class ModelNameTests
     }
 
     [Fact]
-    public void CreateDefaults_BuildsTheDefaultsForTheParseOverload()
+    public void CreateDefaults_builds_the_defaults_for_the_parse_overload()
     {
         //Arrange
         ModelName defaults = ModelName.CreateDefaults("hf.co", "team", "v1", "http");
@@ -539,7 +538,7 @@ public sealed class ModelNameTests
     }
 
     [Fact]
-    public void Parse_WithDefaults_KeepsThePartsTheNameSupplies()
+    public void Parse_with_defaults_keeps_the_parts_the_name_supplies()
     {
         //Arrange
         ModelName defaults = ModelName.CreateDefaults("hf.co", "team", "v1", "http");
@@ -558,7 +557,7 @@ public sealed class ModelNameTests
     [InlineData("", false)]
     [InlineData("^", false)]
     [InlineData("mm:", false)]
-    public void TryParse_ReportsWhetherTheParsedNameIsValid(string input, bool expected)
+    public void TryParse_reports_whether_the_parsed_name_is_valid(string input, bool expected)
     {
         //Act
         bool parsed = ModelName.TryParse(input, out ModelName name);
@@ -569,7 +568,7 @@ public sealed class ModelNameTests
     }
 
     [Fact]
-    public void Constructor_TreatsEmptyPartsAsAbsent()
+    public void Constructor_treats_empty_parts_as_absent()
     {
         //Act
         var name = new ModelName(string.Empty, string.Empty, string.Empty, string.Empty, string.Empty);

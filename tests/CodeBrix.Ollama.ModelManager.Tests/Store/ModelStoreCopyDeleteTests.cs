@@ -14,7 +14,7 @@ namespace CodeBrix.Ollama.ModelManager.Tests;
 public sealed class ModelStoreCopyDeleteTests
 {
     [Fact]
-    public async Task CopyAsync_CreatesASecondManifestThatSharesEveryBlob()
+    public async Task CopyAsync_creates_a_second_manifest_that_shares_every_blob()
     {
         //Arrange
         using var directory = new TempStoreDirectory();
@@ -38,7 +38,7 @@ public sealed class ModelStoreCopyDeleteTests
     }
 
     [Fact]
-    public async Task CopyAsync_WithTheSameName_DoesNothing()
+    public async Task CopyAsync_with_the_same_name_does_nothing()
     {
         //Arrange
         using var directory = new TempStoreDirectory();
@@ -57,7 +57,7 @@ public sealed class ModelStoreCopyDeleteTests
     }
 
     [Fact]
-    public async Task CopyAsync_WithAnAbsentSource_ThrowsModelNotFound()
+    public async Task CopyAsync_with_an_absent_source_throws_model_not_found()
     {
         //Arrange
         using var directory = new TempStoreDirectory();
@@ -72,7 +72,7 @@ public sealed class ModelStoreCopyDeleteTests
     }
 
     [Fact]
-    public async Task DeleteAsync_WithACopyStillPresent_KeepsTheSharedBlobs()
+    public async Task DeleteAsync_with_a_copy_still_present_keeps_the_shared_blobs()
     {
         //Arrange
         using var directory = new TempStoreDirectory();
@@ -94,7 +94,7 @@ public sealed class ModelStoreCopyDeleteTests
     }
 
     [Fact]
-    public async Task DeleteAsync_OfTheLastName_RemovesEveryBlob()
+    public async Task DeleteAsync_of_the_last_name_removes_every_blob()
     {
         //Arrange
         using var directory = new TempStoreDirectory();
@@ -115,7 +115,7 @@ public sealed class ModelStoreCopyDeleteTests
     }
 
     [Fact]
-    public async Task DeleteAsync_WithAnAbsentModel_ThrowsModelNotFound()
+    public async Task DeleteAsync_with_an_absent_model_throws_model_not_found()
     {
         //Arrange
         using var directory = new TempStoreDirectory();

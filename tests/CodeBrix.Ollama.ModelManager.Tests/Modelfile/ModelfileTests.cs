@@ -1,4 +1,3 @@
-// Ported from Ollama (https://github.com/ollama/ollama), MIT License, Copyright (c) Ollama. Source: parser/parser_test.go at commit a43fad18.
 using System;
 using System.IO;
 using System.Text;
@@ -6,7 +5,7 @@ using System.Threading.Tasks;
 using SilverAssertions;
 using Xunit;
 
-namespace CodeBrix.Ollama.ModelManager.Tests;
+namespace CodeBrix.Ollama.ModelManager.Tests; //was previously: ollama/ollama parser/parser_test.go;
 
 /// <summary>
 /// Tests for <see cref="Modelfile"/>, ported from Ollama's parser/parser_test.go at commit
@@ -30,7 +29,7 @@ public sealed class ModelfileTests
 
     /// <summary>A complete Modelfile produces one command per line, in order.</summary>
     [Fact]
-    public void Parse_WithFullFile_ReturnsExpectedCommands()
+    public void Parse_with_full_file_returns_expected_commands()
     {
         //Arrange
         var input = "\nFROM model1\nADAPTER adapter1\nLICENSE MIT\nPARAMETER param1 value1\n"
@@ -57,7 +56,7 @@ public sealed class ModelfileTests
 
     /// <summary>A DRAFT command is kept and rendered back.</summary>
     [Fact]
-    public void Parse_WithDraft_KeepsTheDraftCommand()
+    public void Parse_with_draft_keeps_the_draft_command()
     {
         //Act
         var modelfile = Modelfile.Parse("\nFROM base\nDRAFT ./assistant\n");
@@ -70,7 +69,7 @@ public sealed class ModelfileTests
 
     /// <summary>Spacing around arguments is trimmed unless the argument is quoted.</summary>
     [Fact]
-    public void Parse_WithExtraSpacing_TrimsUnquotedArguments()
+    public void Parse_with_extra_spacing_trims_unquoted_arguments()
     {
         //Arrange
         var input = "\nFROM \"     model 1\"\nADAPTER      adapter3\nLICENSE \"MIT       \"\n"
@@ -101,7 +100,7 @@ public sealed class ModelfileTests
     [InlineData("PARAMETER param1 value1\nFROM foo", "[param1=value1][model=foo]")]
     [InlineData("PARAMETER what the \nFROM lemons make lemonade ",
         "[what=the][model=lemons make lemonade]")]
-    public void Parse_WithFromLine_ReturnsExpectedCommands(string input, string expected)
+    public void Parse_with_from_line_returns_expected_commands(string input, string expected)
     {
         //Act
         var modelfile = Modelfile.Parse(input);
@@ -116,7 +115,7 @@ public sealed class ModelfileTests
     [InlineData("")]
     [InlineData("PARAMETER param1 value1")]
     [InlineData("# just a comment\n")]
-    public void Parse_WithoutFromLine_Throws(string input)
+    public void Parse_without_from_line_throws(string input)
     {
         //Act
         var exception = Catch(input);
@@ -129,7 +128,7 @@ public sealed class ModelfileTests
 
     /// <summary>A PARAMETER without a value ends the file early.</summary>
     [Fact]
-    public void Parse_WithParameterMissingValue_ThrowsUnexpectedEof()
+    public void Parse_with_parameter_missing_value_throws_unexpected_eof()
     {
         //Act
         var exception = Catch("\nFROM foo\nPARAMETER param1\n");
@@ -142,7 +141,7 @@ public sealed class ModelfileTests
 
     /// <summary>An unknown keyword is reported with the line it was found on.</summary>
     [Fact]
-    public void Parse_WithBadCommand_ThrowsWithLineNumber()
+    public void Parse_with_bad_command_throws_with_line_number()
     {
         //Act
         var exception = Catch("\nFROM foo\nBADCOMMAND param1 value1\n");
@@ -155,7 +154,7 @@ public sealed class ModelfileTests
 
     /// <summary>A keyword holding a character that is not a letter is an invalid command.</summary>
     [Fact]
-    public void Parse_WithNonLetterInKeyword_Throws()
+    public void Parse_with_non_letter_in_keyword_throws()
     {
         //Act
         var exception = Catch("FROM foo\nSYS.TEM hello\n");
@@ -168,7 +167,7 @@ public sealed class ModelfileTests
 
     /// <summary>RENDERER is kept as its own command.</summary>
     [Fact]
-    public void Parse_WithRenderer_KeepsTheRendererCommand()
+    public void Parse_with_renderer_keeps_the_renderer_command()
     {
         //Act
         var modelfile = Modelfile.Parse("\nFROM foo\nRENDERER renderer1\n");
@@ -180,7 +179,7 @@ public sealed class ModelfileTests
 
     /// <summary>PARSER is kept as its own command.</summary>
     [Fact]
-    public void Parse_WithParser_KeepsTheParserCommand()
+    public void Parse_with_parser_keeps_the_parser_command()
     {
         //Act
         var modelfile = Modelfile.Parse("\nFROM foo\nPARSER parser1\n");
@@ -192,7 +191,7 @@ public sealed class ModelfileTests
 
     /// <summary>REQUIRES is kept as its own command, exactly as written.</summary>
     [Fact]
-    public void Parse_WithRequires_KeepsTheRequiresCommand()
+    public void Parse_with_requires_keeps_the_requires_command()
     {
         //Act
         var modelfile = Modelfile.Parse("\nFROM foo\nREQUIRES 0.14.0\n");
@@ -217,7 +216,7 @@ public sealed class ModelfileTests
     [InlineData("\nFROM foo\nMESSAGE system \"\"\"\n"
         + "You are a multiline file parser. Always parse things.\n\"\"\"\n\t\t\t",
         "[model=foo][message=system: \nYou are a multiline file parser. Always parse things.\n]")]
-    public void Parse_WithMessages_ReturnsExpectedCommands(string input, string expected)
+    public void Parse_with_messages_returns_expected_commands(string input, string expected)
     {
         //Act
         var modelfile = Modelfile.Parse(input);
@@ -228,7 +227,7 @@ public sealed class ModelfileTests
 
     /// <summary>Only the three known roles are accepted.</summary>
     [Fact]
-    public void Parse_WithInvalidMessageRole_ThrowsWithLineNumber()
+    public void Parse_with_invalid_message_role_throws_with_line_number()
     {
         //Act
         var exception = Catch("\nFROM foo\nMESSAGE badguy I'm a bad guy!\n");
@@ -245,7 +244,7 @@ public sealed class ModelfileTests
     [Theory]
     [InlineData("\nFROM foo\nMESSAGE system\n", "unexpected EOF: system")]
     [InlineData("\nFROM foo\nMESSAGE system", "unexpected EOF")]
-    public void Parse_WithIncompleteMessage_ThrowsUnexpectedEof(string input, string expectedMessage)
+    public void Parse_with_incomplete_message_throws_unexpected_eof(string input, string expectedMessage)
     {
         //Act
         var exception = Catch(input);
@@ -277,7 +276,7 @@ public sealed class ModelfileTests
         "[model=foo][system=''\"'\"\"'\"\"'\"'''''\"\"'\"\"']")]
     [InlineData("\nFROM foo\nTEMPLATE \"\"\"\n{{ .Prompt }}\n\"\"\"",
         "[model=foo][template=\n{{ .Prompt }}\n]")]
-    public void Parse_WithQuotedValues_ReturnsExpectedCommands(string input, string expected)
+    public void Parse_with_quoted_values_returns_expected_commands(string input, string expected)
     {
         //Act
         var modelfile = Modelfile.Parse(input);
@@ -291,7 +290,7 @@ public sealed class ModelfileTests
     [Theory]
     [InlineData("\nFROM foo\nSYSTEM \"\"\"This is a multiline system.\"\"\n\t\t\t")]
     [InlineData("\nFROM foo\nSYSTEM \"\n\t\t\t")]
-    public void Parse_WithUnclosedQuote_ThrowsUnexpectedEof(string input)
+    public void Parse_with_unclosed_quote_throws_unexpected_eof(string input)
     {
         //Act
         var exception = Catch(input);
@@ -337,7 +336,7 @@ public sealed class ModelfileTests
     [InlineData("stop <|endoftext|>", "stop", "<|endoftext|>")]
     [InlineData("stop <|eot_id|>", "stop", "<|eot_id|>")]
     [InlineData("stop </s>", "stop", "</s>")]
-    public void Parse_WithParameterLine_ReturnsExpectedCommand(string line, string expectedName,
+    public void Parse_with_parameter_line_returns_expected_command(string line, string expectedName,
         string expectedValue)
     {
         //Act
@@ -349,7 +348,7 @@ public sealed class ModelfileTests
 
     /// <summary>Comment lines are skipped.</summary>
     [Fact]
-    public void Parse_WithComment_SkipsTheCommentLine()
+    public void Parse_with_comment_skips_the_comment_line()
     {
         //Act
         var modelfile = Modelfile.Parse("\n# comment\nFROM foo\n\t");
@@ -360,7 +359,7 @@ public sealed class ModelfileTests
 
     /// <summary>A comment after a command is skipped too.</summary>
     [Fact]
-    public void Parse_WithTrailingComment_SkipsTheCommentLine()
+    public void Parse_with_trailing_comment_skips_the_comment_line()
     {
         //Act
         var modelfile = Modelfile.Parse("FROM foo\n# a comment about the system prompt\nSYSTEM hi\n");
@@ -386,7 +385,7 @@ public sealed class ModelfileTests
         + "MESSAGE system \"\"\"\nYou are a store greeter. Always respond with \"Hello!\".\n\"\"\"\n"
         + "MESSAGE user Hey there!\nMESSAGE assistant Hello, I want to parse all the things!\n")]
     [InlineData("\nFROM foo\nSYSTEM \"\"\n")]
-    public void ToString_RoundTripsThroughParse(string input)
+    public void ToString_round_trips_through_parse(string input)
     {
         //Arrange
         var modelfile = Modelfile.Parse(input);
@@ -401,7 +400,7 @@ public sealed class ModelfileTests
 
     /// <summary>Every rendered command line ends with a newline.</summary>
     [Fact]
-    public void ToString_EndsEveryLineWithANewline()
+    public void ToString_ends_every_line_with_a_newline()
     {
         //Act
         var text = Modelfile.Parse("FROM foo\nPARAMETER temperature 0.5\n").ToString();
@@ -412,7 +411,7 @@ public sealed class ModelfileTests
 
     /// <summary>A leading byte order mark is ignored.</summary>
     [Fact]
-    public void Parse_WithByteOrderMark_IgnoresIt()
+    public void Parse_with_byte_order_mark_ignores_it()
     {
         //Act
         var modelfile = Modelfile.Parse("﻿FROM bob\nSYSTEM You are a bom file.\n");
@@ -423,7 +422,7 @@ public sealed class ModelfileTests
 
     /// <summary>Multi-byte characters, including ones outside the basic plane, survive parsing.</summary>
     [Fact]
-    public void Parse_WithMultiByteCharacters_KeepsThem()
+    public void Parse_with_multi_byte_characters_keeps_them()
     {
         //Act
         var modelfile = Modelfile.Parse("FROM test\n\tSYSTEM 你好👋");
@@ -434,7 +433,7 @@ public sealed class ModelfileTests
 
     /// <summary>Carriage return and line feed pairs end a line the same way a line feed does.</summary>
     [Fact]
-    public void Parse_WithCarriageReturnLineFeed_ParsesEveryCommand()
+    public void Parse_with_carriage_return_line_feed_parses_every_command()
     {
         //Act
         var modelfile = Modelfile.Parse("FROM foo\r\nSYSTEM You are a bot.\r\n"
@@ -449,7 +448,7 @@ public sealed class ModelfileTests
     /// Windows line endings reports twice the line number. This matches Ollama.
     /// </summary>
     [Fact]
-    public void Parse_WithCarriageReturnLineFeed_CountsBothCharactersAsLines()
+    public void Parse_with_carriage_return_line_feed_counts_both_characters_as_lines()
     {
         //Act
         var exception = Catch("FROM foo\r\nBADCOMMAND x\r\n");
@@ -461,7 +460,7 @@ public sealed class ModelfileTests
 
     /// <summary>A reader is read to the end and parsed.</summary>
     [Fact]
-    public void Parse_WithTextReader_ParsesTheWholeText()
+    public void Parse_with_text_reader_parses_the_whole_text()
     {
         //Arrange
         using var reader = new StringReader("FROM foo\nSYSTEM hi\n");
@@ -475,7 +474,7 @@ public sealed class ModelfileTests
 
     /// <summary>Null text is rejected.</summary>
     [Fact]
-    public void Parse_WithNullText_Throws()
+    public void Parse_with_null_text_throws()
     {
         //Arrange
         Action act = () => Modelfile.Parse((string)null);
@@ -486,7 +485,7 @@ public sealed class ModelfileTests
 
     /// <summary>A null reader is rejected.</summary>
     [Fact]
-    public void Parse_WithNullReader_Throws()
+    public void Parse_with_null_reader_throws()
     {
         //Arrange
         Action act = () => Modelfile.Parse((TextReader)null);
@@ -498,7 +497,7 @@ public sealed class ModelfileTests
     /// <summary>A UTF-8 file on disk is read and parsed.</summary>
     /// <returns>A task.</returns>
     [Fact]
-    public async Task ReadFileAsync_WithUtf8File_ParsesIt()
+    public async Task ReadFileAsync_with_utf8_file_parses_it()
     {
         await RoundTripFileAsync(new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
     }
@@ -506,7 +505,7 @@ public sealed class ModelfileTests
     /// <summary>A UTF-8 file that starts with a byte order mark is read and parsed.</summary>
     /// <returns>A task.</returns>
     [Fact]
-    public async Task ReadFileAsync_WithUtf8ByteOrderMark_ParsesIt()
+    public async Task ReadFileAsync_with_utf8_byte_order_mark_parses_it()
     {
         await RoundTripFileAsync(new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
     }
@@ -514,7 +513,7 @@ public sealed class ModelfileTests
     /// <summary>A little-endian UTF-16 file is read and parsed, as Ollama's BOM override does.</summary>
     /// <returns>A task.</returns>
     [Fact]
-    public async Task ReadFileAsync_WithUtf16LittleEndianFile_ParsesIt()
+    public async Task ReadFileAsync_with_utf16_little_endian_file_parses_it()
     {
         await RoundTripFileAsync(new UnicodeEncoding(bigEndian: false, byteOrderMark: true));
     }
@@ -522,7 +521,7 @@ public sealed class ModelfileTests
     /// <summary>A big-endian UTF-16 file is read and parsed, as Ollama's BOM override does.</summary>
     /// <returns>A task.</returns>
     [Fact]
-    public async Task ReadFileAsync_WithUtf16BigEndianFile_ParsesIt()
+    public async Task ReadFileAsync_with_utf16_big_endian_file_parses_it()
     {
         await RoundTripFileAsync(new UnicodeEncoding(bigEndian: true, byteOrderMark: true));
     }
@@ -530,7 +529,7 @@ public sealed class ModelfileTests
     /// <summary>A null path is rejected.</summary>
     /// <returns>A task.</returns>
     [Fact]
-    public async Task ReadFileAsync_WithNullPath_Throws()
+    public async Task ReadFileAsync_with_null_path_throws()
     {
         //Arrange
         Func<Task> act = () => Modelfile.ReadFileAsync(null, TestContext.Current.CancellationToken);
@@ -541,7 +540,7 @@ public sealed class ModelfileTests
 
     /// <summary>The typed views report what each command carries.</summary>
     [Fact]
-    public void Parse_WithEveryCommand_FillsTheTypedViews()
+    public void Parse_with_every_command_fills_the_typed_views()
     {
         //Arrange
         var input = "FROM base.gguf\nFROM projector.gguf\nADAPTER adapter1\nADAPTER adapter2\n"
@@ -575,7 +574,7 @@ public sealed class ModelfileTests
 
     /// <summary>A message with no ": " separator keeps the whole argument as the role.</summary>
     [Fact]
-    public void Messages_WithoutSeparator_KeepsTheWholeArgumentAsTheRole()
+    public void Messages_without_separator_keeps_the_whole_argument_as_the_role()
     {
         //Arrange
         var commands = new[]
@@ -595,7 +594,7 @@ public sealed class ModelfileTests
 
     /// <summary>The constructor rejects a null command list.</summary>
     [Fact]
-    public void Constructor_WithNullCommands_Throws()
+    public void Constructor_with_null_commands_throws()
     {
         //Arrange
         Action act = () => new Modelfile(null);
@@ -616,7 +615,7 @@ public sealed class ModelfileTests
     [InlineData("two\nlines with \"quotes\"", "\"\"\"two\nlines with \"quotes\"\"\"\"")]
     [InlineData(" \"both\" ", "\"\"\" \"both\" \"\"\"")]
     [InlineData("", "")]
-    public void Quote_QuotesOnlyWhenNeeded(string value, string expected)
+    public void Quote_quotes_only_when_needed(string value, string expected)
     {
         //Act
         var quoted = Modelfile.Quote(value);
@@ -637,7 +636,7 @@ public sealed class ModelfileTests
     [InlineData("\"\"\"with \"one\" inside\"\"\"", "with \"one\" inside")]
     [InlineData("'single'", "'single'")]
     [InlineData("\"'\"", "'")]
-    public void TryUnquote_RemovesMatchingQuotes(string value, string expected)
+    public void TryUnquote_removes_matching_quotes(string value, string expected)
     {
         //Act
         var unquoted = Modelfile.TryUnquote(value, out var result);
@@ -657,7 +656,7 @@ public sealed class ModelfileTests
     [InlineData("\"\"\"\"\"")]
     [InlineData("\"\"\"unterminated")]
     [InlineData("\"\"\"unterminated\"\"")]
-    public void TryUnquote_WithUnclosedQuote_ReturnsFalse(string value)
+    public void TryUnquote_with_unclosed_quote_returns_false(string value)
     {
         //Act
         var unquoted = Modelfile.TryUnquote(value, out var result);

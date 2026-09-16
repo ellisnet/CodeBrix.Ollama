@@ -1,4 +1,3 @@
-// Ported from Ollama (https://github.com/ollama/ollama), MIT License, Copyright (c) Ollama. Source: fs/gguf/gguf.go at commit a43fad18.
 using System;
 using System.IO;
 using System.Security.Cryptography;
@@ -7,7 +6,7 @@ using System.Threading.Tasks;
 using SilverAssertions;
 using Xunit;
 
-namespace CodeBrix.Ollama.ModelManager.Tests;
+namespace CodeBrix.Ollama.ModelManager.Tests; //was previously: ollama/ollama fs/gguf/gguf.go;
 
 /// <summary>
 /// Covers reading a GGUF header end to end: every value type, architecture-qualified lookup, omitted arrays,
@@ -19,7 +18,7 @@ public sealed class GgufMetadataTests
     private const int MaxArrayElements = 64 << 20;
 
     [Fact]
-    public async Task ReadAsync_ReadsEveryScalarType()
+    public async Task ReadAsync_reads_every_scalar_type()
     {
         //Arrange
         var builder = new GgufTestFileBuilder()
@@ -60,7 +59,7 @@ public sealed class GgufMetadataTests
     }
 
     [Fact]
-    public async Task ReadAsync_ReadsEveryArrayType()
+    public async Task ReadAsync_reads_every_array_type()
     {
         //Arrange
         var builder = new GgufTestFileBuilder()
@@ -99,7 +98,7 @@ public sealed class GgufMetadataTests
     }
 
     [Fact]
-    public async Task ReadAsync_KeepsKeysAndTensorsInFileOrder()
+    public async Task ReadAsync_keeps_keys_and_tensors_in_file_order()
     {
         //Arrange
         var builder = new GgufTestFileBuilder()
@@ -131,7 +130,7 @@ public sealed class GgufMetadataTests
     }
 
     [Fact]
-    public async Task GetValue_QualifiesKeysByArchitecture()
+    public async Task GetValue_qualifies_keys_by_architecture()
     {
         //Arrange
         var builder = new GgufTestFileBuilder()
@@ -154,7 +153,7 @@ public sealed class GgufMetadataTests
     }
 
     [Fact]
-    public async Task GetUInt64_ReadsSplitKeys_BothExactAndQualified()
+    public async Task GetUInt64_reads_split_keys_both_exact_and_qualified()
     {
         //Arrange
         var builder = new GgufTestFileBuilder()
@@ -171,7 +170,7 @@ public sealed class GgufMetadataTests
     }
 
     [Fact]
-    public async Task ReadAsync_SkipsArraysLongerThanTheLimit_AndListsTheirKeys()
+    public async Task ReadAsync_skips_arrays_longer_than_the_limit_and_lists_their_keys()
     {
         //Arrange
         var builder = new GgufTestFileBuilder()
@@ -210,7 +209,7 @@ public sealed class GgufMetadataTests
     }
 
     [Fact]
-    public async Task ReadAsync_RetainsEveryArray_WhenTheLimitIsNegative()
+    public async Task ReadAsync_retains_every_array_when_the_limit_is_negative()
     {
         //Arrange
         var builder = new GgufTestFileBuilder()
@@ -226,7 +225,7 @@ public sealed class GgufMetadataTests
     }
 
     [Fact]
-    public async Task HeadCounts_DefaultToOne_ForEmptyArrays()
+    public async Task HeadCounts_default_to_one_for_empty_arrays()
     {
         //Arrange
         var builder = new GgufTestFileBuilder()
@@ -243,7 +242,7 @@ public sealed class GgufMetadataTests
     }
 
     [Fact]
-    public async Task HeadCounts_ReadScalarValues()
+    public async Task HeadCounts_read_scalar_values()
     {
         //Arrange
         var builder = new GgufTestFileBuilder()
@@ -260,7 +259,7 @@ public sealed class GgufMetadataTests
     }
 
     [Fact]
-    public async Task HeadCounts_FallBackToTheDefault_ForNegativeValues()
+    public async Task HeadCounts_fall_back_to_the_default_for_negative_values()
     {
         //Arrange
         var builder = new GgufTestFileBuilder()
@@ -275,7 +274,7 @@ public sealed class GgufMetadataTests
     }
 
     [Fact]
-    public async Task Convenience_UsesDefaults_WhenTheKeysAreAbsent()
+    public async Task Convenience_uses_defaults_when_the_keys_are_absent()
     {
         //Arrange
         var builder = new GgufTestFileBuilder().AddUInt32("unrelated.key", 1);
@@ -301,7 +300,7 @@ public sealed class GgufMetadataTests
     }
 
     [Fact]
-    public async Task Convenience_ReadsTheGeneralKeysAndTheChatTemplate()
+    public async Task Convenience_reads_the_general_keys_and_the_chat_template()
     {
         //Arrange
         var builder = new GgufTestFileBuilder()
@@ -321,7 +320,7 @@ public sealed class GgufMetadataTests
     }
 
     [Fact]
-    public async Task ReadAsync_DefaultsAlignmentToThirtyTwo()
+    public async Task ReadAsync_defaults_alignment_to_thirty_two()
     {
         //Arrange
         var builder = new GgufTestFileBuilder()
@@ -339,7 +338,7 @@ public sealed class GgufMetadataTests
     }
 
     [Fact]
-    public async Task ReadAsync_UsesAnUnsignedDeclaredAlignment()
+    public async Task ReadAsync_uses_an_unsigned_declared_alignment()
     {
         //Arrange
         var builder = new GgufTestFileBuilder()
@@ -356,7 +355,7 @@ public sealed class GgufMetadataTests
     }
 
     [Fact]
-    public async Task ReadAsync_ReadsABigEndianFile()
+    public async Task ReadAsync_reads_a_big_endian_file()
     {
         //Arrange
         var builder = new GgufTestFileBuilder(3, true)
@@ -377,7 +376,7 @@ public sealed class GgufMetadataTests
     }
 
     [Fact]
-    public async Task ReadAsync_ReadsAVersionOneFile()
+    public async Task ReadAsync_reads_a_version_one_file()
     {
         //Arrange
         var builder = new GgufTestFileBuilder(1)
@@ -394,7 +393,7 @@ public sealed class GgufMetadataTests
     }
 
     [Fact]
-    public async Task ReadAsync_SkipsOmittedArrays_InAVersionOneFile()
+    public async Task ReadAsync_skips_omitted_arrays_in_a_version_one_file()
     {
         //Arrange
         var builder = new GgufTestFileBuilder(1)
@@ -410,7 +409,7 @@ public sealed class GgufMetadataTests
     }
 
     [Fact]
-    public async Task ReadAsync_ReadsFromAPathOnDisk()
+    public async Task ReadAsync_reads_from_a_path_on_disk()
     {
         //Arrange
         string directory = CreateTempDirectory();
@@ -439,7 +438,7 @@ public sealed class GgufMetadataTests
     }
 
     [Fact]
-    public async Task ReadAsync_SkipsTensorValidation_ForAStreamWithoutALength()
+    public async Task ReadAsync_skips_tensor_validation_for_a_stream_without_a_length()
     {
         //Arrange
         byte[] bytes = new GgufTestFileBuilder()
@@ -463,7 +462,7 @@ public sealed class GgufMetadataTests
     }
 
     [Fact]
-    public async Task ReadAsync_SkipsTensorValidation_WhenTheOptionIsOff()
+    public async Task ReadAsync_skips_tensor_validation_when_the_option_is_off()
     {
         //Arrange
         byte[] bytes = new GgufTestFileBuilder()
@@ -484,7 +483,7 @@ public sealed class GgufMetadataTests
     }
 
     [Fact]
-    public async Task ReadAsync_RejectsTensorDataBeyondTheEndOfTheFile()
+    public async Task ReadAsync_rejects_tensor_data_beyond_the_end_of_the_file()
     {
         //Arrange
         byte[] bytes = new GgufTestFileBuilder()
@@ -502,7 +501,7 @@ public sealed class GgufMetadataTests
     }
 
     [Fact]
-    public async Task ReadAsync_RejectsATensorOffsetThatOverflows()
+    public async Task ReadAsync_rejects_a_tensor_offset_that_overflows()
     {
         //Arrange
         byte[] bytes = RawBytes(writer =>
@@ -523,7 +522,7 @@ public sealed class GgufMetadataTests
     }
 
     [Fact]
-    public async Task ReadAsync_RejectsAFileThatIsNotGguf()
+    public async Task ReadAsync_rejects_a_file_that_is_not_gguf()
     {
         //Arrange
         var bytes = new byte[24];
@@ -537,7 +536,7 @@ public sealed class GgufMetadataTests
     }
 
     [Fact]
-    public async Task ReadAsync_RejectsAnUnsupportedVersion()
+    public async Task ReadAsync_rejects_an_unsupported_version()
     {
         //Arrange
         byte[] bytes = RawBytes(writer =>
@@ -556,7 +555,7 @@ public sealed class GgufMetadataTests
     }
 
     [Fact]
-    public async Task ReadAsync_RejectsAnUnsupportedValueType()
+    public async Task ReadAsync_rejects_an_unsupported_value_type()
     {
         //Arrange
         byte[] bytes = new GgufTestFileBuilder()
@@ -572,7 +571,7 @@ public sealed class GgufMetadataTests
     }
 
     [Fact]
-    public async Task ReadAsync_RejectsAnUnsupportedArrayElementType()
+    public async Task ReadAsync_rejects_an_unsupported_array_element_type()
     {
         //Arrange
         byte[] bytes = RawBytes(writer =>
@@ -592,7 +591,7 @@ public sealed class GgufMetadataTests
     }
 
     [Fact]
-    public async Task ReadAsync_RejectsAZeroAlignment()
+    public async Task ReadAsync_rejects_a_zero_alignment()
     {
         //Arrange
         byte[] bytes = new GgufTestFileBuilder()
@@ -608,7 +607,7 @@ public sealed class GgufMetadataTests
     }
 
     [Fact]
-    public async Task ReadAsync_RejectsAnAlignmentThatIsNotAnInteger()
+    public async Task ReadAsync_rejects_an_alignment_that_is_not_an_integer()
     {
         //Arrange
         byte[] bytes = new GgufTestFileBuilder()
@@ -624,7 +623,7 @@ public sealed class GgufMetadataTests
     }
 
     [Fact]
-    public async Task ReadAsync_RejectsTooManyTensorDimensions()
+    public async Task ReadAsync_rejects_too_many_tensor_dimensions()
     {
         //Arrange
         byte[] bytes = RawBytes(writer =>
@@ -642,7 +641,7 @@ public sealed class GgufMetadataTests
     }
 
     [Fact]
-    public async Task ReadAsync_RejectsATensorWhoseElementCountOverflows()
+    public async Task ReadAsync_rejects_a_tensor_whose_element_count_overflows()
     {
         //Arrange
         byte[] bytes = RawBytes(writer =>
@@ -664,7 +663,7 @@ public sealed class GgufMetadataTests
     }
 
     [Fact]
-    public async Task ReadAsync_RejectsATruncatedHeader()
+    public async Task ReadAsync_rejects_a_truncated_header()
     {
         //Arrange
         byte[] bytes = RawBytes(writer =>
@@ -682,7 +681,7 @@ public sealed class GgufMetadataTests
     }
 
     [Fact]
-    public async Task ReadAsync_RejectsAnOversizedString()
+    public async Task ReadAsync_rejects_an_oversized_string()
     {
         //Arrange
         byte[] bytes = RawBytes(writer =>
@@ -699,7 +698,7 @@ public sealed class GgufMetadataTests
     }
 
     [Fact]
-    public async Task ReadAsync_RejectsAnOversizedArray()
+    public async Task ReadAsync_rejects_an_oversized_array()
     {
         //Arrange
         byte[] bytes = RawBytes(writer =>
@@ -719,7 +718,7 @@ public sealed class GgufMetadataTests
     }
 
     [Fact]
-    public async Task ReadAsync_RejectsAnItemCountLargerThanTheAddressSpace()
+    public async Task ReadAsync_rejects_an_item_count_larger_than_the_address_space()
     {
         //Arrange
         byte[] bytes = RawBytes(writer =>
@@ -738,7 +737,7 @@ public sealed class GgufMetadataTests
     }
 
     [Fact]
-    public async Task ReadAsync_DoesNotPreallocateADeclaredItemCount()
+    public async Task ReadAsync_does_not_preallocate_a_declared_item_count()
     {
         //Arrange
         byte[] bytes = RawBytes(writer =>
@@ -757,7 +756,7 @@ public sealed class GgufMetadataTests
     }
 
     [Fact]
-    public async Task ReadAsync_DoesNotPreallocateADeclaredArray()
+    public async Task ReadAsync_does_not_preallocate_a_declared_array()
     {
         //Arrange
         byte[] bytes = RawBytes(writer =>
@@ -777,7 +776,7 @@ public sealed class GgufMetadataTests
     }
 
     [Fact]
-    public async Task ReadAsync_RejectsAVersionOneStringWithZeroLength()
+    public async Task ReadAsync_rejects_a_version_one_string_with_zero_length()
     {
         //Arrange
         byte[] bytes = RawBytes(writer =>
@@ -794,7 +793,7 @@ public sealed class GgufMetadataTests
     }
 
     [Fact]
-    public async Task ReadAsync_RejectsAVersionOneStringWithoutATerminator()
+    public async Task ReadAsync_rejects_a_version_one_string_without_a_terminator()
     {
         //Arrange
         byte[] bytes = RawBytes(writer =>
@@ -815,7 +814,7 @@ public sealed class GgufMetadataTests
     }
 
     [Fact]
-    public async Task ReadAsync_RejectsASkippedVersionOneStringWithoutATerminator()
+    public async Task ReadAsync_rejects_a_skipped_version_one_string_without_a_terminator()
     {
         //Arrange
         byte[] bytes = RawBytes(writer =>
@@ -837,7 +836,7 @@ public sealed class GgufMetadataTests
     }
 
     [Fact]
-    public async Task ReadAsync_ThrowsForANullPathOrStream()
+    public async Task ReadAsync_throws_for_a_null_path_or_stream()
     {
         //Arrange
         Func<Task> nullPath = async () =>
@@ -855,7 +854,7 @@ public sealed class GgufMetadataTests
     }
 
     [Fact]
-    public async Task ReadAsync_ReadsTheConformanceTestVector()
+    public async Task ReadAsync_reads_the_conformance_test_vector()
     {
         //Arrange
         string path = Path.Combine(AppContext.BaseDirectory, "test-vectors", "codebrix-conformance-tiny.gguf");

@@ -1,8 +1,7 @@
-// Ported from Ollama (https://github.com/ollama/ollama), MIT License, Copyright (c) Ollama. Source: server/download.go at commit a43fad18.
 using System.Collections.Generic;
 using System.Text.Json.Serialization;
 
-namespace CodeBrix.Ollama.ModelManager;
+namespace CodeBrix.Ollama.ModelManager; //was previously: ollama/ollama server/download.go;
 
 /// <summary>
 /// The sidecar document written beside a partially downloaded blob. It records which byte ranges the

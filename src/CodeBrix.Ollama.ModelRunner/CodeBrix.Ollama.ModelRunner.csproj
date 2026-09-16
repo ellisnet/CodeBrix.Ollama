@@ -62,7 +62,7 @@
     <Product>CodeBrix.Ollama.ModelRunner</Product>
     <Title>CodeBrix.Ollama.ModelRunner</Title>
     <Authors>Jeremy Ellis</Authors>
-    <Description>A cross-platform, zero-dependency .NET library that runs a GGUF LLM model in-process and exposes it to the application through an interface contract: completion, streaming chat, embeddings, tool calling, grammar-constrained output, tokenization and model metadata. Binds a self-built llama.cpp engine through hand-written P/Invoke, with native libraries for Windows x64 and ARM64, macOS Intel and Apple Silicon, and Linux x64, ARM64 and RISC-V 64. No server and no external Ollama installation; pair with CodeBrix.Ollama.ModelManager to resolve model names to files.</Description>
+    <Description>A cross-platform, zero-dependency .NET library that runs a GGUF LLM model in-process and exposes it to the application through an interface contract: completion, streaming chat, embeddings, tool calling, grammar-constrained output, tokenization and model metadata. Binds a self-built native inference engine through hand-written P/Invoke, with native libraries for Windows x64 and ARM64, macOS Intel and Apple Silicon, and Linux x64, ARM64 and RISC-V 64. No server and no external Ollama installation; pair with CodeBrix.Ollama.ModelManager to resolve model names to files.</Description>
     <Copyright>Copyright (c) 2026 Jeremy Ellis and contributors</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/ellisnet/CodeBrix.Ollama</PackageProjectUrl>
@@ -73,7 +73,7 @@
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
     <IsPackable>true</IsPackable>
-    <PackageTags>ollama;llm;gguf;llama.cpp;inference;chat;embeddings;ai;local-ai;native;CodeBrix</PackageTags>
+    <PackageTags>ollama;llm;gguf;inference;chat;embeddings;ai;local-ai;native;CodeBrix</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>

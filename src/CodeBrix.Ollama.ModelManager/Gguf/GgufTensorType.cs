@@ -1,5 +1,4 @@
-// Ported from Ollama (https://github.com/ollama/ollama), MIT License, Copyright (c) Ollama. Source: fs/gguf/tensor.go at commit a43fad18.
-namespace CodeBrix.Ollama.ModelManager;
+namespace CodeBrix.Ollama.ModelManager; //was previously: ollama/ollama fs/gguf/tensor.go;
 
 /// <summary>
 /// The ggml tensor type ids that a GGUF tensor descriptor can carry. The numbers are the ggml type ids and

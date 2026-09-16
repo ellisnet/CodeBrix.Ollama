@@ -1,8 +1,7 @@
-// Ported from Ollama (https://github.com/ollama/ollama), MIT License, Copyright (c) Ollama. Source: parser/parser_test.go and api/types.go at commit a43fad18.
 using SilverAssertions;
 using Xunit;
 
-namespace CodeBrix.Ollama.ModelManager.Tests;
+namespace CodeBrix.Ollama.ModelManager.Tests; //was previously: ollama/ollama parser/parser_test.go and api/types.go;
 
 /// <summary>
 /// Tests for <see cref="Modelfile.GetParameters"/>, which applies the typing Ollama's
@@ -12,7 +11,7 @@ public sealed class ModelfileParametersTests
 {
     /// <summary>Every parameter Ollama types as an integer lands on its typed property.</summary>
     [Fact]
-    public void GetParameters_WithIntegerParameters_MapsEveryOne()
+    public void GetParameters_with_integer_parameters_maps_every_one()
     {
         //Arrange
         var modelfile = Modelfile.Parse("FROM foo\nPARAMETER num_keep 1\nPARAMETER seed 2\n"
@@ -39,7 +38,7 @@ public sealed class ModelfileParametersTests
 
     /// <summary>Every parameter Ollama types as a float lands on its typed property.</summary>
     [Fact]
-    public void GetParameters_WithFloatParameters_MapsEveryOne()
+    public void GetParameters_with_float_parameters_maps_every_one()
     {
         //Arrange
         var modelfile = Modelfile.Parse("FROM foo\nPARAMETER top_p 0.9\nPARAMETER min_p 0.05\n"
@@ -68,7 +67,7 @@ public sealed class ModelfileParametersTests
     [InlineData("-0.25", -0.25f)]
     [InlineData("+2.5", 2.5f)]
     [InlineData("1e-2", 0.01f)]
-    public void GetParameters_WithFloatValue_ReadsItWithTheInvariantCulture(string value,
+    public void GetParameters_with_float_value_reads_it_with_the_invariant_culture(string value,
         float expected)
     {
         //Act
@@ -81,7 +80,7 @@ public sealed class ModelfileParametersTests
 
     /// <summary>A negative integer is accepted, as Go's ParseInt accepts it.</summary>
     [Fact]
-    public void GetParameters_WithNegativeInteger_ReadsIt()
+    public void GetParameters_with_negative_integer_reads_it()
     {
         //Act
         var parameters = Modelfile.Parse("FROM foo\nPARAMETER num_predict -1\n").GetParameters();
@@ -106,7 +105,7 @@ public sealed class ModelfileParametersTests
     [InlineData("f", false)]
     [InlineData("F", false)]
     [InlineData("0", false)]
-    public void GetParameters_WithUseMmap_ReadsGoBooleanSpellings(string value, bool expected)
+    public void GetParameters_with_use_mmap_reads_go_boolean_spellings(string value, bool expected)
     {
         //Act
         var parameters = Modelfile.Parse("FROM foo\nPARAMETER use_mmap " + value + "\n")
@@ -118,7 +117,7 @@ public sealed class ModelfileParametersTests
 
     /// <summary>Repeated stop values are collected in the order they were written.</summary>
     [Fact]
-    public void GetParameters_WithRepeatedStop_CollectsEveryValueInOrder()
+    public void GetParameters_with_repeated_stop_collects_every_value_in_order()
     {
         //Arrange
         var modelfile = Modelfile.Parse("FROM foo\nPARAMETER stop \"### User:\"\n"
@@ -133,7 +132,7 @@ public sealed class ModelfileParametersTests
 
     /// <summary>A repeated parameter that is not stop keeps the value written last.</summary>
     [Fact]
-    public void GetParameters_WithRepeatedName_KeepsTheLastValue()
+    public void GetParameters_with_repeated_name_keeps_the_last_value()
     {
         //Act
         var parameters = Modelfile
@@ -145,7 +144,7 @@ public sealed class ModelfileParametersTests
 
     /// <summary>A file without PARAMETER lines produces parameters with nothing set.</summary>
     [Fact]
-    public void GetParameters_WithNoParameters_LeavesEverythingUnset()
+    public void GetParameters_with_no_parameters_leaves_everything_unset()
     {
         //Act
         var parameters = Modelfile.Parse("FROM foo\n").GetParameters();
@@ -171,7 +170,7 @@ public sealed class ModelfileParametersTests
     [InlineData("mirostat", "1")]
     [InlineData("mirostat_tau", "5.0")]
     [InlineData("mirostat_eta", "0.1")]
-    public void GetParameters_WithDeprecatedParameter_DropsIt(string name, string value)
+    public void GetParameters_with_deprecated_parameter_drops_it(string name, string value)
     {
         //Arrange
         var modelfile = Modelfile.Parse(
@@ -193,7 +192,7 @@ public sealed class ModelfileParametersTests
     [InlineData("num_gqa")]
     [InlineData("rope_frequency_base")]
     [InlineData("param1")]
-    public void GetParameters_WithUnknownParameter_Throws(string name)
+    public void GetParameters_with_unknown_parameter_throws(string name)
     {
         //Act
         var exception = Catch("FROM foo\nPARAMETER " + name + " 1\n");
@@ -206,7 +205,7 @@ public sealed class ModelfileParametersTests
 
     /// <summary>A value that is not an integer is reported.</summary>
     [Fact]
-    public void GetParameters_WithBadIntegerValue_Throws()
+    public void GetParameters_with_bad_integer_value_throws()
     {
         //Act
         var exception = Catch("FROM foo\nPARAMETER num_ctx many\n");
@@ -218,7 +217,7 @@ public sealed class ModelfileParametersTests
 
     /// <summary>A value that is not a float is reported.</summary>
     [Fact]
-    public void GetParameters_WithBadFloatValue_Throws()
+    public void GetParameters_with_bad_float_value_throws()
     {
         //Act
         var exception = Catch("FROM foo\nPARAMETER temperature warm\n");
@@ -230,7 +229,7 @@ public sealed class ModelfileParametersTests
 
     /// <summary>A value that is not one of Go's boolean spellings is reported.</summary>
     [Fact]
-    public void GetParameters_WithBadBooleanValue_Throws()
+    public void GetParameters_with_bad_boolean_value_throws()
     {
         //Act
         var exception = Catch("FROM foo\nPARAMETER use_mmap maybe\n");
@@ -242,7 +241,7 @@ public sealed class ModelfileParametersTests
 
     /// <summary>An integer too large for the store's 32-bit fields is reported.</summary>
     [Fact]
-    public void GetParameters_WithOutOfRangeInteger_Throws()
+    public void GetParameters_with_out_of_range_integer_throws()
     {
         //Act
         var exception = Catch("FROM foo\nPARAMETER seed 4294967296\n");

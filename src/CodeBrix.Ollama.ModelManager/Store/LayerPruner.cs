@@ -1,11 +1,10 @@
-// Ported from Ollama (https://github.com/ollama/ollama), MIT License, Copyright (c) Ollama. Source: server/images.go at commit a43fad18.
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace CodeBrix.Ollama.ModelManager;
+namespace CodeBrix.Ollama.ModelManager; //was previously: ollama/ollama server/images.go;
 
 /// <summary>
 /// Removes blobs no manifest names any more. Blobs are shared between models, so a blob may only be

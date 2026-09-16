@@ -1,8 +1,7 @@
-// Ported from Ollama (https://github.com/ollama/ollama), MIT License, Copyright (c) Ollama. Source: format/format.go at commit a43fad18.
 using System;
 using System.Globalization;
 
-namespace CodeBrix.Ollama.ModelManager;
+namespace CodeBrix.Ollama.ModelManager; //was previously: ollama/ollama format/format.go;
 
 /// <summary>
 /// The human-readable number formatting Ollama writes into a model's config layer. A parameter count

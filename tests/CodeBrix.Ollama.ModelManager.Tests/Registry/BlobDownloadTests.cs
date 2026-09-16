@@ -49,7 +49,7 @@ public sealed class BlobDownloadTests : IDisposable
     }
 
     [Fact]
-    public async Task DownloadBlobAsync_SplitsTheBlobIntoParts_AndReassemblesItExactly()
+    public async Task DownloadBlobAsync_splits_the_blob_into_parts_and_reassembles_it_exactly()
     {
         //Arrange
         using var handler = new FakeRegistryHandler();
@@ -73,7 +73,7 @@ public sealed class BlobDownloadTests : IDisposable
     }
 
     [Fact]
-    public async Task DownloadBlobAsync_WithUnknownSize_AsksTheRegistryForIt()
+    public async Task DownloadBlobAsync_with_unknown_size_asks_the_registry_for_it()
     {
         //Arrange
         using var handler = new FakeRegistryHandler();
@@ -92,7 +92,7 @@ public sealed class BlobDownloadTests : IDisposable
     }
 
     [Fact]
-    public async Task DownloadBlobAsync_AfterAnInterruptedRun_ResumesFromTheSidecar()
+    public async Task DownloadBlobAsync_after_an_interrupted_run_resumes_from_the_sidecar()
     {
         //Arrange
         using var handler = new FakeRegistryHandler();
@@ -126,7 +126,7 @@ public sealed class BlobDownloadTests : IDisposable
     }
 
     [Fact]
-    public async Task DownloadBlobAsync_WithAStalledPart_RetriesThatPart()
+    public async Task DownloadBlobAsync_with_a_stalled_part_retries_that_part()
     {
         //Arrange
         using var handler = new FakeRegistryHandler();
@@ -146,7 +146,7 @@ public sealed class BlobDownloadTests : IDisposable
     }
 
     [Fact]
-    public async Task DownloadBlobAsync_WithARedirectToAnotherHost_KeepsTheTokenOffThatHost()
+    public async Task DownloadBlobAsync_with_a_redirect_to_another_host_keeps_the_token_off_that_host()
     {
         //Arrange
         using var handler = new FakeRegistryHandler
@@ -174,7 +174,7 @@ public sealed class BlobDownloadTests : IDisposable
     }
 
     [Fact]
-    public async Task DownloadBlobAsync_WithBytesThatDoNotMatchTheDigest_ThrowsAndRemovesThePartialFiles()
+    public async Task DownloadBlobAsync_with_bytes_that_do_not_match_the_digest_throws_and_removes_the_partial_files()
     {
         //Arrange
         using var handler = new FakeRegistryHandler();
@@ -200,7 +200,7 @@ public sealed class BlobDownloadTests : IDisposable
     }
 
     [Fact]
-    public async Task DownloadBlobAsync_WhenCancelled_LeavesThePartialFilesInPlace()
+    public async Task DownloadBlobAsync_when_cancelled_leaves_the_partial_files_in_place()
     {
         //Arrange
         using var handler = new FakeRegistryHandler();
@@ -230,7 +230,7 @@ public sealed class BlobDownloadTests : IDisposable
     }
 
     [Fact]
-    public async Task DownloadBlobAsync_ReportsProgressThatOnlyGrowsAndEndsAtTheTotal()
+    public async Task DownloadBlobAsync_reports_progress_that_only_grows_and_ends_at_the_total()
     {
         //Arrange
         using var handler = new FakeRegistryHandler();
@@ -261,7 +261,7 @@ public sealed class BlobDownloadTests : IDisposable
     }
 
     [Fact]
-    public async Task DownloadBlobAsync_WithTheFileAlreadyInPlace_MakesNoRequests()
+    public async Task DownloadBlobAsync_with_the_file_already_in_place_makes_no_requests()
     {
         //Arrange
         using var handler = new FakeRegistryHandler();
@@ -285,7 +285,7 @@ public sealed class BlobDownloadTests : IDisposable
     }
 
     [Fact]
-    public async Task DownloadBlobAsync_WithAServerThatIgnoresRanges_FailsAfterItsRetries()
+    public async Task DownloadBlobAsync_with_a_server_that_ignores_ranges_fails_after_its_retries()
     {
         //Arrange
         using var handler = new FakeRegistryHandler { IgnoreRangeRequests = true };

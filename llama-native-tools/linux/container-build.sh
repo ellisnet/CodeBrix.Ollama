@@ -22,7 +22,8 @@
 # subset, /work/wrapper is our CMake project, /work/test-vectors holds the conformance assets.
 # There is nothing to download.
 #
-#   NEVER YET RUN - see build.sh.
+#   RUN 2026-09-15 for all three RIDs (see build.sh and BUILD-PROVENANCE.txt); unchanged by
+#   the first-run fixes, which were in the wrapper and two Containerfiles.
 # ==============================================================================================
 
 set -euo pipefail

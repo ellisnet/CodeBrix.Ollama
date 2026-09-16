@@ -1,4 +1,3 @@
-// Ported from Ollama (https://github.com/ollama/ollama), MIT License, Copyright (c) Ollama. Source: server/images.go, server/create.go, server/model.go and x/create/manifest.go at commit a43fad18.
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -12,7 +11,7 @@ using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
 
-namespace CodeBrix.Ollama.ModelManager;
+namespace CodeBrix.Ollama.ModelManager; //was previously: ollama/ollama server/images.go, server/create.go, server/model.go and x/create/manifest.go;
 
 /// <summary>
 /// The default <see cref="IModelStore"/>: a local model store in Ollama's on-disk layout, fed from any

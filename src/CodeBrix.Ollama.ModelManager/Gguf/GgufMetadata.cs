@@ -1,11 +1,10 @@
-// Ported from Ollama (https://github.com/ollama/ollama), MIT License, Copyright (c) Ollama. Source: fs/gguf/metadata.go at commit a43fad18.
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace CodeBrix.Ollama.ModelManager;
+namespace CodeBrix.Ollama.ModelManager; //was previously: ollama/ollama fs/gguf/metadata.go;
 
 /// <summary>
 /// The metadata of one GGUF file: key-values and tensor descriptors, never tensor data.

@@ -1,4 +1,3 @@
-// Ported from Ollama (https://github.com/ollama/ollama), MIT License, Copyright (c) Ollama. Source: manifest/layer.go at commit a43fad18.
 using System;
 using System.IO;
 using System.Security.Cryptography;
@@ -6,7 +5,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace CodeBrix.Ollama.ModelManager;
+namespace CodeBrix.Ollama.ModelManager; //was previously: ollama/ollama manifest/layer.go;
 
 /// <summary>
 /// Creates the blobs a manifest points at and reads them back. A blob is content addressed: its file

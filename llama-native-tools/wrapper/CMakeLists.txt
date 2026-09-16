@@ -188,12 +188,15 @@ elseif (UNIX)
     #                                      in pins.env) - a user's distro libstdc++ is never a
     #                                      compatibility question
     #   -Wl,-z,defs                        an undefined symbol fails the link here, not at dlopen
-    #   -Wl,--exclude-libs,ALL             belt and braces with the version script
+    # NOT -Wl,--exclude-libs,ALL. It looked like belt and braces with the version script, but on
+    # ELF that option marks every symbol coming from a static archive as HIDDEN, and hidden
+    # visibility beats a version script's `global:` list - the first linux-x64 run (2026-09-15)
+    # produced a library that exported only the two codebrix_llama_* functions, and the gate
+    # tools failed to link against it. The version script alone gives the exact surface wanted.
     target_link_options(codebrix_llama PRIVATE
         "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exports-linux.map"
         -static-libstdc++ -static-libgcc
-        -Wl,-z,defs
-        -Wl,--exclude-libs,ALL)
+        -Wl,-z,defs)
     target_link_libraries(codebrix_llama PRIVATE m pthread dl)
 elseif (WIN32)
     # Exports come from the dllexport directives (see the add_compile_definitions above); the

@@ -14,7 +14,7 @@ namespace CodeBrix.Ollama.ModelManager.Tests;
 public sealed class ModelStoreResolveTests
 {
     [Fact]
-    public async Task ResolveAsync_WithAPulledModel_ReturnsPathsThatExist()
+    public async Task ResolveAsync_with_a_pulled_model_returns_paths_that_exist()
     {
         //Arrange
         using var directory = new TempStoreDirectory();
@@ -40,7 +40,7 @@ public sealed class ModelStoreResolveTests
     }
 
     [Fact]
-    public async Task ResolveAsync_WithoutExtraLayers_ReturnsEmptyListsAndNoDraft()
+    public async Task ResolveAsync_without_extra_layers_returns_empty_lists_and_no_draft()
     {
         //Arrange
         using var directory = new TempStoreDirectory();
@@ -61,7 +61,7 @@ public sealed class ModelStoreResolveTests
     }
 
     [Fact]
-    public async Task ResolveAsync_WithAProjector_ReturnsTheProjectorPath()
+    public async Task ResolveAsync_with_a_projector_returns_the_projector_path()
     {
         //Arrange
         using var directory = new TempStoreDirectory();
@@ -81,7 +81,7 @@ public sealed class ModelStoreResolveTests
     }
 
     [Fact]
-    public async Task ResolveAsync_WithAnAbsentModel_ThrowsModelNotFound()
+    public async Task ResolveAsync_with_an_absent_model_throws_model_not_found()
     {
         //Arrange
         using var directory = new TempStoreDirectory();

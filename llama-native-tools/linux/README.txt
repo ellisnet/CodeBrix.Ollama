@@ -3,13 +3,17 @@ llama-native-tools/linux - building libcodebrix_llama.so for linux-x64,
                            linux-arm64 and linux-riscv64
 ================================================================================
 
->>> STATUS: NEVER YET RUN. These scripts were written on the Intel Mac mini on
-    2026-09-15, where there is no container engine, modelled line by line on
-    CodeBrix.VideoPlayback.Dav1d's dav1d-native-tools/linux/ - which HAS run on
-    all three architectures - with meson replaced by our CMake wrapper project.
-    Expect to fix something on the first real run. Fix it IN THE SCRIPT and
-    commit that; then rewrite this status block and BUILD-PROVENANCE.txt with
-    what the run established. <<<
+>>> STATUS 2026-09-15: ALL THREE SLICES BUILT, GATED AND ADOPTED - on the
+    x86_64 LMDE 7 laptop with podman 5.4.2: linux-x64 natively (24 s in the
+    container), linux-arm64 and linux-riscv64 under qemu-user emulation (334 s
+    and 311 s), exactly the route dav1d-native-tools took. Three things needed
+    fixing on the first runs, none of them in build.sh or container-build.sh:
+    the wrapper's -Wl,--exclude-libs,ALL (hid every export on ELF), the
+    aarch64 Containerfile probe's expected value, and the riscv64 image's
+    missing static libstdc++. Each is recorded in BUILD-PROVENANCE.txt under
+    "First-run fix". The scripts were written on the Intel Mac mini the same
+    day, modelled line by line on CodeBrix.VideoPlayback.Dav1d's
+    dav1d-native-tools/linux/, with meson replaced by our CMake wrapper. <<<
 
 WHAT THIS IS
 --------------------------------------------------------------------------------
@@ -156,10 +160,11 @@ USAGE
                                                 test-vectors/EXPECTED.txt - see
                                                 ../test-vectors/README.txt.
 
-  Timings: unknown until the first run. For scale, the osx-x64 build on a
-  6-core Intel Mac mini took about 4 minutes cold and 51 seconds with a warm
-  compiler cache; the container has no cache, so expect the cold figure or
-  worse, times however many cores the box has fewer than six.
+  Timings (2026-09-15, 24-core x86_64 laptop, 24 jobs): linux-x64 24 s inside
+  the container natively; linux-arm64 334 s and linux-riscv64 311 s under
+  qemu-user emulation; building a derived image the first time adds about one
+  minute (x86_64) to two minutes (emulated). For scale, the osx-x64 build on a
+  6-core Intel Mac mini took about 4 minutes cold.
 
   DO NOT RUN TWO COPIES OF build.sh AT ONCE. Both rewrite ../output/SHA256SUMS
   at the end, so a run that finishes while another is still writing its .xz
@@ -261,13 +266,17 @@ pip cannot find a cmake or ninja wheel for this architecture (riscv64 most likel
     packages instead (dnf install cmake ninja-build), record the versions that
     gives in BUILD-PROVENANCE.txt, and say so in the commit.
 
-The link fails with undefined references to __cxa_* / std:: symbols
-    -static-libstdc++ needs the static libstdc++.a, which the manylinux gcc
-    toolset ships. If a different image lacks it, install its libstdc++-static
-    package in the Containerfile, or - as a documented deviation - drop the two
-    -static-lib* flags in ../wrapper/CMakeLists.txt AND add libstdc++.so.6 and
-    libgcc_s.so.1 to ALLOWED_DEPS. The second choice raises the package's
-    compatibility bar to the user's distro libstdc++; say so in
+The link fails with "cannot find -lstdc++" or undefined __cxa_* / std:: symbols
+    -static-libstdc++ needs the static libstdc++.a. The AlmaLinux 8 images
+    (x86_64, aarch64) get it from gcc-toolset-14's libstdc++-devel; the Rocky
+    Linux 10 riscv64 image does NOT ship it with the compiler - it is the
+    separate libstdc++-static package in the enabled CRB repository, and
+    Containerfile.riscv64 installs it (this was the first-run riscv64 failure
+    on 2026-09-15). If a future image lacks it, install its libstdc++-static
+    package in the Containerfile the same way, or - as a documented deviation -
+    drop the two -static-lib* flags in ../wrapper/CMakeLists.txt AND add
+    libstdc++.so.6 and libgcc_s.so.1 to ALLOWED_DEPS. The second choice raises
+    the package's compatibility bar to the user's distro libstdc++; say so in
     BUILD-PROVENANCE.txt.
 
 (arm64) the gate passes but Q4/Q8 inference is slow on the target board
@@ -376,10 +385,17 @@ ADOPTING A BUILT BINARY INTO THE PACKAGE
      The file must keep the name libcodebrix_llama.so - unversioned.
      LibraryImport("codebrix_llama") probes exactly that name.
 
-  3. Do NOT copy unstripped/ into the package. It does have a home: copy
-     ../output/<rid>/unstripped/libcodebrix_llama.so to ../unstripped/<rid>/
-     and extend ../unstripped/SHA256SUMS, in the SAME commit that adopts the
-     binary. See ../unstripped/README.txt for the rule and the build-id check.
+  3. Do NOT copy unstripped/ into the package. It does have a home, and on
+     Linux it is stored COMPRESSED (an unstripped llama.cpp ELF is 80-115 MB,
+     over GitHub's per-file limit; Jeremy's decision, 2026-09-15):
+
+       xz -T0 -9e -k ../output/<rid>/unstripped/libcodebrix_llama.so
+       mkdir -p ../unstripped/<rid>
+       mv ../output/<rid>/unstripped/libcodebrix_llama.so.xz ../unstripped/<rid>/
+       ( cd ../unstripped && sha256sum <rid>/libcodebrix_llama.so.xz >> SHA256SUMS )
+
+     in the SAME commit that adopts the binary. See ../unstripped/README.txt
+     for the rule, the STORED SO FAR entry to add, and the build-id check.
 
   4. Record the build in ../BUILD-PROVENANCE.txt - copy the values straight out
      of BUILD-INFO.txt.

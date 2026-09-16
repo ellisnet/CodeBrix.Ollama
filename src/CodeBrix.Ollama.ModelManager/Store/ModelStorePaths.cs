@@ -1,10 +1,9 @@
-// Ported from Ollama (https://github.com/ollama/ollama), MIT License, Copyright (c) Ollama. Source: manifest/paths.go at commit a43fad18.
 using System;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace CodeBrix.Ollama.ModelManager;
+namespace CodeBrix.Ollama.ModelManager; //was previously: ollama/ollama manifest/paths.go;
 
 /// <summary>
 /// Every path inside a model store directory, computed the way Ollama computes it, so a directory this

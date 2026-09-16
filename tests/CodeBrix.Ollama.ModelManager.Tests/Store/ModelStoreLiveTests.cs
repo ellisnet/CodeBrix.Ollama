@@ -19,7 +19,7 @@ public sealed class ModelStoreLiveTests
     private const string ModelName = "smollm:135m";
 
     [EnvGatedFact("CODEBRIX_OLLAMA_RUN_LIVE_TESTS")]
-    public async Task PullAsync_FromTheRealRegistry_DownloadsResolvesListsAndDeletesTheModel()
+    public async Task PullAsync_from_the_real_registry_downloads_resolves_lists_and_deletes_the_model()
     {
         //Arrange
         using var directory = new TempStoreDirectory();

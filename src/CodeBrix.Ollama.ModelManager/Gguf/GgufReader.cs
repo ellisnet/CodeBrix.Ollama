@@ -1,4 +1,3 @@
-// Ported from Ollama (https://github.com/ollama/ollama), MIT License, Copyright (c) Ollama. Source: fs/gguf/gguf.go at commit a43fad18.
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
@@ -8,7 +7,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace CodeBrix.Ollama.ModelManager;
+namespace CodeBrix.Ollama.ModelManager; //was previously: ollama/ollama fs/gguf/gguf.go;
 
 /// <summary>
 /// The sequential GGUF header parser behind <see cref="GgufMetadata"/>. It reads the magic, the version, the

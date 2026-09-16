@@ -15,7 +15,7 @@ namespace CodeBrix.Ollama.ModelManager.Tests;
 public sealed class ModelStoreListShowTests
 {
     [Fact]
-    public async Task ListAsync_AfterPullingTwoModels_ReturnsBothNewestFirst()
+    public async Task ListAsync_after_pulling_two_models_returns_both_newest_first()
     {
         //Arrange
         using var directory = new TempStoreDirectory();
@@ -44,7 +44,7 @@ public sealed class ModelStoreListShowTests
     }
 
     [Fact]
-    public async Task ListAsync_WithAMissingConfigBlob_StillListsTheModel()
+    public async Task ListAsync_with_a_missing_config_blob_still_lists_the_model()
     {
         //Arrange
         using var directory = new TempStoreDirectory();
@@ -66,7 +66,7 @@ public sealed class ModelStoreListShowTests
     }
 
     [Fact]
-    public async Task ListAsync_WithAnEmptyStore_ReturnsNothing()
+    public async Task ListAsync_with_an_empty_store_returns_nothing()
     {
         //Arrange
         using var directory = new TempStoreDirectory();
@@ -81,7 +81,7 @@ public sealed class ModelStoreListShowTests
     }
 
     [Fact]
-    public async Task ExistsAsync_ReportsWhetherTheManifestIsThere()
+    public async Task ExistsAsync_reports_whether_the_manifest_is_there()
     {
         //Arrange
         using var directory = new TempStoreDirectory();
@@ -101,7 +101,7 @@ public sealed class ModelStoreListShowTests
     }
 
     [Fact]
-    public async Task ShowAsync_WithAPulledModel_DecodesEveryLayer()
+    public async Task ShowAsync_with_a_pulled_model_decodes_every_layer()
     {
         //Arrange
         using var directory = new TempStoreDirectory();
@@ -127,7 +127,7 @@ public sealed class ModelStoreListShowTests
     }
 
     [Fact]
-    public async Task ShowAsync_WithAPulledModel_ReadsTheGgufMetadata()
+    public async Task ShowAsync_with_a_pulled_model_reads_the_gguf_metadata()
     {
         //Arrange
         using var directory = new TempStoreDirectory();
@@ -150,7 +150,7 @@ public sealed class ModelStoreListShowTests
     }
 
     [Fact]
-    public async Task ShowAsync_WithAToolChatTemplate_InfersCompletionAndTools()
+    public async Task ShowAsync_with_a_tool_chat_template_infers_completion_and_tools()
     {
         //Arrange
         using var directory = new TempStoreDirectory();
@@ -171,7 +171,7 @@ public sealed class ModelStoreListShowTests
     }
 
     [Fact]
-    public async Task ShowAsync_WithAProjector_InfersVision()
+    public async Task ShowAsync_with_a_projector_infers_vision()
     {
         //Arrange
         using var directory = new TempStoreDirectory();
@@ -192,7 +192,7 @@ public sealed class ModelStoreListShowTests
     }
 
     [Fact]
-    public async Task ShowAsync_WithAPulledModel_RendersTheModelfileText()
+    public async Task ShowAsync_with_a_pulled_model_renders_the_modelfile_text()
     {
         //Arrange
         using var directory = new TempStoreDirectory();
@@ -216,7 +216,7 @@ public sealed class ModelStoreListShowTests
     }
 
     [Fact]
-    public async Task ShowAsync_WithAnAbsentModel_ThrowsModelNotFound()
+    public async Task ShowAsync_with_an_absent_model_throws_model_not_found()
     {
         //Arrange
         using var directory = new TempStoreDirectory();
@@ -231,7 +231,7 @@ public sealed class ModelStoreListShowTests
     }
 
     [Fact]
-    public async Task ShowAsync_WithABlankName_ThrowsArgumentException()
+    public async Task ShowAsync_with_a_blank_name_throws_argument_exception()
     {
         //Arrange
         using var directory = new TempStoreDirectory();
@@ -246,7 +246,7 @@ public sealed class ModelStoreListShowTests
     }
 
     [Fact]
-    public async Task ShowAsync_WithAnUnparsableName_ThrowsInvalidModelName()
+    public async Task ShowAsync_with_an_unparsable_name_throws_invalid_model_name()
     {
         //Arrange
         using var directory = new TempStoreDirectory();

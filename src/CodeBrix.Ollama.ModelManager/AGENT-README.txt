@@ -1,6 +1,6 @@
 ================================================================================
 AGENT-README: CodeBrix.Ollama.ModelManager
-A Guide for AI Coding Agents -- CONSUMING the
+A Guide for AI Coding Agents - CONSUMING the
 CodeBrix.Ollama.ModelManager.MitLicenseForever NuGet package
 ================================================================================
 
@@ -38,49 +38,14 @@ synchronous wrappers over the async work.
 Target framework: .NET 10 or later; no netstandard and no .NET Framework
 target. Source: https://github.com/ellisnet/CodeBrix.Ollama
 
-WHAT THIS PACKAGE IS NOT
-------------------------
-  - NOT an Ollama client. It never talks to a running `ollama serve`, never
-    calls /api/generate or /api/chat, never starts or looks for a daemon. It
-    talks to a model REGISTRY over HTTPS and to the FILE SYSTEM, nothing else.
-    It is NOT a server either: no listener, no port, no endpoint.
-  - It does NOT run models: no inference, no tokenizer, no embeddings, no
-    native code, no GPU. It hands you file paths. It does NOT need Ollama
-    installed either -- no binary is looked for, no process started, no
-    configuration file of Ollama's read.
-  - It does NOT convert safetensors: a manifest carrying safetensors layers is
-    refused by the pull, and a create can only import GGUF files. It does NOT
-    render templates either -- a prompt template is returned as stored text,
-    and evaluating Go text/template syntax is somebody else's job.
-
-WHERE THE STORE LIVES
----------------------
-With default options the directory is resolved once, in the ModelStore
-constructor, by ModelStoreOptions.ResolveDefaultStoreDirectory: the
-OLLAMA_MODELS environment variable when it is set and not blank, otherwise
-<user profile>/.ollama/models. That is deliberately the directory a local
-Ollama install uses, and the two can share it in both directions. Blob file
-names are identical (sha256-<64 lowercase hex>), so a model pulled by Ollama is
-a cache hit here and the other way round. The manifest layout and the manifest
-BYTES are identical: a pull writes the exact bytes the registry served, and a
-create serializes JSON the way Go's encoder does, compact with a trailing
-newline. The sidecars this library writes during a download carry a
-".codebrix-" segment -- <blob>.codebrix-partial and <blob>.codebrix-parts.json
--- while Ollama's own are <blob>-partial and <blob>-partial-N, so the two
-downloaders can never write to the same file.
-
-Set ModelStoreOptions.StoreDirectory for a private store; the path is expanded
-with Path.GetFullPath, exposed as IModelStore.StoreDirectory, and need not
-exist, since the two subdirectories are created on first write.
-
 HOW THIS RELATES TO CodeBrix.Ollama.ModelRunner
 -----------------------------------------------
 The same repository produces a second, SEPARATE package,
 CodeBrix.Ollama.ModelRunner.MitLicenseForever, which loads a GGUF file and runs
-it in-process. It is still being written and is NOT published yet; do not add a
-PackageReference to it on the strength of this document. The two packages are
-independent -- neither references the other, and neither is or contains an HTTP
-server. The seam between them is ResolveAsync: the paths in the ResolvedModel
+it in-process. It has its own AGENT-README, and nothing in this document
+describes its API. The two packages are independent -- neither references the
+other, and neither is or contains an HTTP server. The seam between them is
+ResolveAsync: the paths in the ResolvedModel
 it returns (ModelPath, ModelShardPaths, ProjectorPaths, AdapterPaths and
 DraftPath) are ordinary files, and they are what ANY in-process GGUF runner
 loads -- ModelRunner, another binding, or your own.
@@ -133,44 +98,56 @@ Parser (the PARSER command's argument). ModelName is a readonly struct, and
 default(ModelName) has every part null and IsValid false.
 
 
-QUICK START
-===========
-    using System;
-    using System.Threading.Tasks;
-    using CodeBrix.Ollama.ModelManager;
+CORE API REFERENCE
+==================
+The entry point is ModelStore, the one implementation of IModelStore:
 
-    // Defaults: OLLAMA_MODELS, else ~/.ollama/models; registry.ollama.ai
-    using var store = new ModelStore();
-
-    // 1. PULL. Nothing is requested until the enumerator is iterated.
-    await foreach (PullProgress progress in store.PullAsync("smollm:135m"))
+    using var store = new ModelStore();                     // Ollama's defaults
+    using var store = new ModelStore(new ModelStoreOptions  // a store of your own
     {
-        Console.WriteLine(progress.Digest == null
-            ? progress.Status
-            : $"{progress.Status} {progress.Percent:F1}%");
-    }
-    // pulling manifest / pulling 4d2b8b0d1b2a 0.0% ... 100.0% /
-    // verifying sha256 digest / writing manifest / success
+        StoreDirectory = "/data/models",
+    });
 
-    // 2. RESOLVE. This is what an in-process runner opens.
-    ResolvedModel resolved = await store.ResolveAsync("smollm:135m");
-    Console.WriteLine(resolved.ModelPath);
-    // /Users/me/.ollama/models/blobs/sha256-4d2b8b0d1b2a...
-
-    // 3. SHOW. Manifest, decoded layers, GGUF header, capabilities.
-    ModelInfo info = await store.ShowAsync("smollm:135m");
-    Console.WriteLine($"{info.DisplayName}  {info.Size:N0} bytes");
-    Console.WriteLine($"{info.Config.ModelFamily} {info.Config.FileType} " +
-                      $"ctx {info.Metadata.ContextLength}");
-    Console.WriteLine(string.Join(", ", info.Capabilities));
-
-    // 4. LIST and DELETE.
-    var models = await store.ListAsync();   // IReadOnlyList<ModelSummary>
-    await store.DeleteAsync("smollm:135m");
 
 ModelStore is IDisposable: disposing releases the registry client and its
 pooled connections and leaves the store directory alone. Create one and keep it
 -- every operation after Dispose throws ObjectDisposedException.
+
+Every operation takes a model NAME as a string, and every operation that
+touches the disk or the network is async and takes a CancellationToken last,
+with a default. The reference below is organised by what you hand the store
+and what it hands back:
+
+    WHERE THE STORE LIVES           the directory, and sharing it with Ollama
+    MODEL NAMES                     the name grammar and the ModelName struct
+    CONFIGURING THE STORE           every ModelStoreOptions property
+    THE IModelStore OPERATIONS      pull, list, exists, show, resolve, copy,
+                                    delete, prune and create, one by one
+    MODELFILES                      Modelfile.Parse and the typed views
+    GGUF METADATA                   GgufMetadata.ReadAsync and the header model
+    THE DATA TYPES                  manifests, layers, config and parameters
+    THE ERROR MODEL                 every exception and when it is thrown
+    THREAD SAFETY AND CONCURRENCY   what is and is not coordinated
+
+WHERE THE STORE LIVES
+---------------------
+With default options the directory is resolved once, in the ModelStore
+constructor, by ModelStoreOptions.ResolveDefaultStoreDirectory: the
+OLLAMA_MODELS environment variable when it is set and not blank, otherwise
+<user profile>/.ollama/models. That is deliberately the directory a local
+Ollama install uses, and the two can share it in both directions. Blob file
+names are identical (sha256-<64 lowercase hex>), so a model pulled by Ollama is
+a cache hit here and the other way round. The manifest layout and the manifest
+BYTES are identical: a pull writes the exact bytes the registry served, and a
+create serializes JSON the way Go's encoder does, compact with a trailing
+newline. The sidecars this library writes during a download carry a
+".codebrix-" segment -- <blob>.codebrix-partial and <blob>.codebrix-parts.json
+-- while Ollama's own are <blob>-partial and <blob>-partial-N, so the two
+downloaders can never write to the same file.
+
+Set ModelStoreOptions.StoreDirectory for a private store; the path is expanded
+with Path.GetFullPath, exposed as IModelStore.StoreDirectory, and need not
+exist, since the two subdirectories are created on first write.
 
 
 MODEL NAMES
@@ -888,47 +865,225 @@ What the code guarantees, and nothing more:
     blob the other pull just published is safe.
 
 
-WHAT THIS PACKAGE DOES NOT DO
-=============================
-Do NOT reach for this package to:
+COMPLETE EXAMPLES
+=================
+Every name below exists in the package exactly as described above. Each
+example is a complete method body: put it in an async Main (the MINIMUM
+VIABLE PROJECT TEMPLATE shows one) with these usings:
 
-  - PUSH a model. No upload, no manifest PUT, no blob POST; everything here is
-    read-only against the registry.
-  - Authenticate to a PRIVATE Ollama registry. Ollama signs its requests with
-    an ed25519 key pair and exchanges the challenge for a token at the realm
-    the registry names; none of that is implemented, and the only credential
-    available is a bearer token you supply, offered only after a 401.
-  - Handle SAFETENSORS. Refused by PullAsync, skipped when a manifest is read,
-    impossible to import on create, and never converted to GGUF.
-  - Create a model with a DRAFT line. The parser keeps DRAFT commands and
-    Modelfile.Drafts exposes them, but CreateAsync refuses them. A draft layer
-    in a PULLED manifest is fine and surfaces as ResolvedModel.DraftPath.
-  - RENDER a prompt template. Template is the template TEXT; there is no Go
-    text/template engine, no variable binding and no chat formatting. Nor is a
-    template auto-detected on create: Ollama looks up a built-in one by model
-    family when a Modelfile gives none, and those are not shipped here, so a
-    created model has a template only when TEMPLATE says so or it inherited one.
-  - Group a SPLIT GGUF. Extra model-weights layers come back in ModelShardPaths
-    in manifest order; the split.* keys are readable through GgufMetadata but
-    are not used to order, group or validate the shards.
-  - Run a model, tokenize, embed or constrain output with a grammar. That is
-    the separate CodeBrix.Ollama.ModelRunner package, still in progress.
-  - Talk to `ollama serve`. No client for Ollama's HTTP API, no /api/tags, no
-    model unloading, no keep-alive. No history, no key pair, no settings and no
-    OLLAMA_HOST either: OLLAMA_MODELS is the one environment variable read.
-  - Garbage-collect a store on its own. Blobs are removed by DeleteAsync, by
-    the pruning PullAsync and CreateAsync do for the name they just wrote, and
-    by PruneAsync when you call it; nothing runs in the background.
-  - Offer synchronous APIs, or run on .NET below 10.0.
+    using System;
+    using System.Threading.Tasks;
+    using CodeBrix.Ollama.ModelManager;
 
-This package IS for: keeping a local, Ollama-compatible model store; pulling
-models into it with resumable, verified downloads; listing, describing,
-copying, deleting and deriving models; parsing and writing Modelfiles; reading
-GGUF headers; and turning a name into the paths a runner opens.
+EXAMPLE 1 - PULL, RESOLVE, SHOW, LIST, DELETE
+---------------------------------------------
+    // Defaults: OLLAMA_MODELS, else ~/.ollama/models; registry.ollama.ai
+    using var store = new ModelStore();
+
+    // 1. PULL. Nothing is requested until the enumerator is iterated.
+    await foreach (PullProgress progress in store.PullAsync("smollm:135m"))
+    {
+        Console.WriteLine(progress.Digest == null
+            ? progress.Status
+            : $"{progress.Status} {progress.Percent:F1}%");
+    }
+    // pulling manifest / pulling 4d2b8b0d1b2a 0.0% ... 100.0% /
+    // verifying sha256 digest / writing manifest / success
+
+    // 2. RESOLVE. This is what an in-process runner opens.
+    ResolvedModel resolved = await store.ResolveAsync("smollm:135m");
+    Console.WriteLine(resolved.ModelPath);
+    // /Users/me/.ollama/models/blobs/sha256-4d2b8b0d1b2a...
+
+    // 3. SHOW. Manifest, decoded layers, GGUF header, capabilities.
+    ModelInfo info = await store.ShowAsync("smollm:135m");
+    Console.WriteLine($"{info.DisplayName}  {info.Size:N0} bytes");
+    Console.WriteLine($"{info.Config.ModelFamily} {info.Config.FileType} " +
+                      $"ctx {info.Metadata.ContextLength}");
+    Console.WriteLine(string.Join(", ", info.Capabilities));
+
+    // 4. LIST and DELETE.
+    var models = await store.ListAsync();   // IReadOnlyList<ModelSummary>
+    await store.DeleteAsync("smollm:135m");
+
+EXAMPLE 2 - CREATE A DERIVED MODEL FROM A MODELFILE
+---------------------------------------------------
+    using var store = new ModelStore();
+
+    // FROM names a model already in the store (pulled in Example 1) or a GGUF
+    // file on disk. NOTHING is downloaded by CreateAsync.
+    Modelfile modelfile = Modelfile.Parse(
+        "FROM smollm:135m\n" +
+        "SYSTEM You are a terse assistant.\n" +
+        "PARAMETER temperature 0.2\n" +
+        "PARAMETER stop <|im_end|>\n");
+
+    await store.CreateAsync("my-smollm:v1", modelfile);
+
+    ModelInfo derived = await store.ShowAsync("my-smollm:v1");
+    Console.WriteLine(derived.System);                  // You are a terse assistant.
+    Console.WriteLine(derived.Parameters.Temperature);  // 0.2
+    Console.WriteLine(derived.ModelfileText);           // FROM <blob path> ...
+
+    // From a GGUF file on disk instead. A relative path resolves against
+    // CreateOptions.BaseDirectory, not the process's current directory.
+    Modelfile fromFile = Modelfile.Parse("FROM ./mistral-7b-instruct.Q4_K_M.gguf\n");
+    await store.CreateAsync("mistral-local:q4", fromFile,
+        new CreateOptions { BaseDirectory = "/models/downloads" });
+
+EXAMPLE 3 - A PRIVATE STORE, A HUGGING FACE PULL, AND A GGUF HEADER
+-------------------------------------------------------------------
+    using var store = new ModelStore(new ModelStoreOptions
+    {
+        StoreDirectory = "/data/models",   // created on first write
+        MaxConcurrentParts = 8,            // byte ranges of one blob in flight
+    });
+
+    string name = "hf.co/HuggingFaceTB/smollm-360M-instruct-v0.2-Q8_0-GGUF";
+    if (!await store.ExistsAsync(name))
+    {
+        await foreach (PullProgress progress in store.PullAsync(name))
+        {
+            if (progress.Digest != null)
+                Console.Write($"\r{progress.Status} {progress.Percent,5:F1}%   ");
+            else
+                Console.WriteLine(progress.Status);
+        }
+    }
+
+    // Read the weights file's header directly: key-values and tensor
+    // descriptors only, never tensor data, so this is cheap at any file size.
+    ResolvedModel resolved = await store.ResolveAsync(name);
+    GgufMetadata header = await GgufMetadata.ReadAsync(resolved.ModelPath,
+        new GgufReadOptions { MaxArraySize = -1 });   // keep the vocabulary too
+    Console.WriteLine($"{header.Architecture} {header.FileTypeName} " +
+                      $"ctx {header.ContextLength} tensors {header.Tensors.Count}");
+    string[] vocabulary = header.GetValue("tokenizer.ggml.tokens")?.AsStringArray();
+    Console.WriteLine($"{vocabulary?.Length ?? 0} tokens");
+
+EXAMPLE 4 - HANDLING THE ERRORS A PULL CAN RAISE
+------------------------------------------------
+    using var store = new ModelStore(new ModelStoreOptions
+    {
+        BearerToken = Environment.GetEnvironmentVariable("MY_REGISTRY_TOKEN"),
+    });
+
+    try
+    {
+        await foreach (PullProgress _ in store.PullAsync("registry.example.com/team/model:v1")) { }
+    }
+    catch (ModelNotFoundException ex)
+    {
+        Console.Error.WriteLine($"No such model on the registry: {ex.ModelName}");
+    }
+    catch (RegistryException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+    {
+        Console.Error.WriteLine("The registry wants credentials it did not get.");
+    }
+    catch (DigestMismatchException ex)
+    {
+        // The bad file is already deleted; pulling again re-downloads that layer.
+        Console.Error.WriteLine($"Corrupt download: expected {ex.ExpectedDigest}, got {ex.ActualDigest}");
+    }
+    catch (ModelManagerException ex)
+    {
+        // Everything else the library raises: a safetensors manifest, a
+        // transport failure that survived every retry, an http:// name ...
+        Console.Error.WriteLine(ex.Message);
+    }
 
 
-COMMON MISTAKES
-===============
+MINIMUM VIABLE PROJECT TEMPLATE
+===============================
+A complete, working console application. Both files as shown compile and run:
+the first run pulls a small model, later runs find it in the store.
+
+MyModelTool.csproj
+
+    <Project Sdk="Microsoft.NET.Sdk">
+
+      <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net10.0</TargetFramework>
+        <Nullable>disable</Nullable>
+        <ImplicitUsings>disable</ImplicitUsings>
+      </PropertyGroup>
+
+      <ItemGroup>
+        <PackageReference Include="CodeBrix.Ollama.ModelManager.MitLicenseForever" />
+      </ItemGroup>
+
+    </Project>
+
+Program.cs
+
+    using System;
+    using System.Threading.Tasks;
+    using CodeBrix.Ollama.ModelManager;
+
+    namespace MyModelTool;
+
+    internal static class Program
+    {
+        private static async Task<int> Main(string[] args)
+        {
+            string name = args.Length > 0 ? args[0] : "smollm:135m";
+
+            using var store = new ModelStore();
+
+            if (!await store.ExistsAsync(name))
+            {
+                await foreach (PullProgress progress in store.PullAsync(name))
+                {
+                    Console.WriteLine(progress.Digest == null
+                        ? progress.Status
+                        : $"{progress.Status} {progress.Percent:F0}%");
+                }
+            }
+
+            ResolvedModel model = await store.ResolveAsync(name);
+            Console.WriteLine($"Weights:  {model.ModelPath}");
+            Console.WriteLine($"Template: {(model.Template == null ? "(none)" : "present")}");
+            Console.WriteLine($"Context:  {model.Parameters?.NumCtx ?? 0}");
+            return 0;
+        }
+    }
+
+
+PERFORMANCE TIPS
+================
+  - CREATE ONE ModelStore AND KEEP IT. The registry client and its pooled
+    HTTP connections are created lazily on the first pull and live until
+    Dispose; a store per call throws that away every time. Every read
+    operation is safe to call concurrently on the one instance.
+  - ASK ExistsAsync BEFORE PullAsync when you only need the model present. A
+    pull of a complete model is cheap but not free: the manifest is fetched
+    again, every blob is confirmed and the manifest is rewritten.
+  - PREFER ListAsync TO ShowAsync FOR A WHOLE STORE. ListAsync reads only the
+    manifest and the small config blob; ShowAsync opens the weights GGUF and
+    every projector to read their headers. ResolveAsync opens no weights file
+    at all and is the cheap way to get paths.
+  - TUNE THE DOWNLOAD TO THE LINK, NOT THE CPU. MaxConcurrentParts is the
+    number of byte ranges of ONE blob in flight; MinPartSize and MaxPartSize
+    clamp the range size. On a fast, stable link fewer, larger ranges cost
+    less per byte; on a flaky one more, smaller ranges lose less per stall.
+    A stalled range is reissued after StallTimeout without consuming a retry.
+  - PULL DIFFERENT MODELS IN PARALLEL, NEVER THE SAME MODEL TWICE. Distinct
+    models share no partial files; two pulls of one model share everything
+    and are undefined.
+  - LEAVE GgufReadOptions.MaxArraySize AT ITS DEFAULT unless you need the
+    token vocabulary: the default keeps every ordinary key and skips only the
+    arrays that hold a whole vocabulary. ReadAsync never reads tensor data,
+    whatever you set.
+  - KEEP ProgressInterval AT ITS DEFAULT OR LONGER. Every layer report is a
+    channel write and a consumer wake-up; a display does not need more than
+    ten a second.
+  - CopyAsync MOVES NO BLOB BYTES: only the manifest is copied and every blob
+    is shared, so giving a model a second name costs a few hundred bytes.
+
+
+COMMON PITFALLS TO AVOID
+========================
  1. DO NOT confuse the package id with the namespace. Package:
     CodeBrix.Ollama.ModelManager.MitLicenseForever; namespace:
     CodeBrix.Ollama.ModelManager, one namespace for every public type, so
@@ -985,6 +1140,143 @@ COMMON MISTAKES
     parallel are fine.
 
 
+WHAT THIS PACKAGE DOES NOT DO
+=============================
+Do NOT reach for this package to:
+
+  - PUSH a model. No upload, no manifest PUT, no blob POST; everything here is
+    read-only against the registry.
+  - Authenticate to a PRIVATE Ollama registry. Ollama signs its requests with
+    an ed25519 key pair and exchanges the challenge for a token at the realm
+    the registry names; none of that is implemented, and the only credential
+    available is a bearer token you supply, offered only after a 401.
+  - Handle SAFETENSORS. Refused by PullAsync, skipped when a manifest is read,
+    impossible to import on create, and never converted to GGUF.
+  - Create a model with a DRAFT line. The parser keeps DRAFT commands and
+    Modelfile.Drafts exposes them, but CreateAsync refuses them. A draft layer
+    in a PULLED manifest is fine and surfaces as ResolvedModel.DraftPath.
+  - RENDER a prompt template. Template is the template TEXT; there is no Go
+    text/template engine, no variable binding and no chat formatting. Nor is a
+    template auto-detected on create: Ollama looks up a built-in one by model
+    family when a Modelfile gives none, and those are not shipped here, so a
+    created model has a template only when TEMPLATE says so or it inherited one.
+  - Group a SPLIT GGUF. Extra model-weights layers come back in ModelShardPaths
+    in manifest order; the split.* keys are readable through GgufMetadata but
+    are not used to order, group or validate the shards.
+  - Run a model, tokenize, embed or constrain output with a grammar. That is
+    the separate CodeBrix.Ollama.ModelRunner package. There is no native code
+    and no GPU anywhere in this one; it hands you file paths.
+  - Listen on a port or talk to a daemon. It is not a server -- no listener,
+    no endpoint -- and it does not need Ollama installed: no binary is looked
+    for, no process started, no configuration file of Ollama's read.
+  - Talk to `ollama serve`. No client for Ollama's HTTP API, no /api/tags, no
+    model unloading, no keep-alive. No history, no key pair, no settings and no
+    OLLAMA_HOST either: OLLAMA_MODELS is the one environment variable read.
+  - Garbage-collect a store on its own. Blobs are removed by DeleteAsync, by
+    the pruning PullAsync and CreateAsync do for the name they just wrote, and
+    by PruneAsync when you call it; nothing runs in the background.
+  - Offer synchronous APIs, or run on .NET below 10.0.
+
+This package IS for: keeping a local, Ollama-compatible model store; pulling
+models into it with resumable, verified downloads; listing, describing,
+copying, deleting and deriving models; parsing and writing Modelfiles; reading
+GGUF headers; and turning a name into the paths a runner opens.
+
+
+WORKING EXAMPLES ON GITHUB
+==========================
+
+The test suite is the largest body of compiling, working usage of this
+package. It runs OFFLINE: an in-memory registry double (an HttpMessageHandler
+supplied through ModelStoreOptions.HttpMessageHandler) and a temporary store
+directory stand in for the network and the disk, so every test is a worked
+example you can run without a connection:
+
+    https://github.com/ellisnet/CodeBrix.Ollama/tree/main/tests/CodeBrix.Ollama.ModelManager.Tests
+
+Feature-to-test-file map:
+
+  Model names: the grammar, defaults, validation, display forms and relative
+  paths, against upstream's own case tables
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Names/ModelNameTests.cs
+
+  Pulling: the status stream in order, manifest bytes kept verbatim, cache
+  hits, layer replacement and pruning, safetensors refusal, digest mismatch,
+  cancellation, Hugging Face names
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Store/ModelStorePullTests.cs
+
+  The registry client: manifest and blob addresses, the user agent, 404 and
+  401 handling, bearer-token retry, the http:// refusal
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Registry/RegistryClientTests.cs
+
+  Blob downloads: byte-range splitting, resume from the sidecar, stalled
+  parts, redirects that keep the token off another host, digest failures,
+  monotonic progress, servers that ignore ranges
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Registry/BlobDownloadTests.cs
+
+  WWW-Authenticate challenge parsing
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Registry/RegistryChallengeTests.cs
+
+  Resolving a name to files, shards, projectors and drafts
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Store/ModelStoreResolveTests.cs
+
+  Listing and showing, decoded layers, GGUF metadata, rendered Modelfile
+  text, the argument and name errors
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Store/ModelStoreListShowTests.cs
+
+  Capability inference from config, weights, projectors and templates
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Store/ModelCapabilitiesTests.cs
+
+  Copy and delete, and which shared blobs survive
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Store/ModelStoreCopyDeleteTests.cs
+
+  Creating from a Modelfile: FROM a file or a model, template override and
+  parameter merge, shared blobs, pruning on replace, adapter and DRAFT
+  refusals
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Store/ModelStoreCreateTests.cs
+
+  Layers: blobs from streams, bytes, text, files and existing blobs
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Store/LayerFactoryTests.cs
+
+  Pruning: unreferenced blobs, the grace period, this library's own sidecars
+  and nothing else
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Store/ModelStorePruneTests.cs
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Store/LayerPrunerTests.cs
+
+  The store layout, manifest files and digests
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Store/ModelStorePathsTests.cs
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Store/ManifestFilesTests.cs
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Store/Sha256DigestTests.cs
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Store/HumanFormatTests.cs
+
+  Modelfile parsing against upstream's cases: commands, quoting, line
+  numbers, the typed parameters and their errors, Go boolean spellings
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Modelfile/ModelfileTests.cs
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Modelfile/ModelfileCommandTests.cs
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Modelfile/ModelfileParametersTests.cs
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Modelfile/GoBoolTests.cs
+
+  GGUF headers: every scalar and array type, key qualification, omitted
+  arrays, the convenience properties, tensor arithmetic and the type tables
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Gguf/GgufMetadataTests.cs
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Gguf/GgufValueTests.cs
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Gguf/GgufTensorInfoTests.cs
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Gguf/GgufTensorTypesTests.cs
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Gguf/GgufFileTypesTests.cs
+
+  The one live test, gated behind CODEBRIX_OLLAMA_RUN_LIVE_TESTS=1, that
+  pulls a real model from registry.ollama.ai and then resolves, lists and
+  deletes it
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Store/ModelStoreLiveTests.cs
+
+  Test infrastructure worth copying into your own tests: the registry double,
+  a GGUF file builder, a fake model builder and a temporary store directory
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Infrastructure/FakeRegistryHandler.cs
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Infrastructure/GgufTestFileBuilder.cs
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Infrastructure/FakeModelBuilder.cs
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Infrastructure/TempStoreDirectory.cs
+
+
 QUICK REFERENCE CARD
 ====================
 
@@ -1015,7 +1307,9 @@ ERRORS      ModelManagerException: DigestMismatchException, GgufFormatException,
             InvalidModelNameException, ModelfileParseException,
             ModelNotFoundException, RegistryException
 RUNNER      ResolvedModel.ModelPath is what an in-process GGUF runner loads.
-            CodeBrix.Ollama.ModelRunner is a separate package, in progress.
+            CodeBrix.Ollama.ModelRunner is a separate package with its own
+            AGENT-README.
 
 
 ================================================================================
+END OF AGENT-README

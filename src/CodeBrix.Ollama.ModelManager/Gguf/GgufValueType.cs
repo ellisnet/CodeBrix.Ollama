@@ -1,5 +1,4 @@
-// Ported from Ollama (https://github.com/ollama/ollama), MIT License, Copyright (c) Ollama. Source: fs/gguf/gguf.go at commit a43fad18.
-namespace CodeBrix.Ollama.ModelManager;
+namespace CodeBrix.Ollama.ModelManager; //was previously: ollama/ollama fs/gguf/gguf.go;
 
 /// <summary>
 /// The type tag that a GGUF file stores beside every key-value, in the numeric order the format defines.

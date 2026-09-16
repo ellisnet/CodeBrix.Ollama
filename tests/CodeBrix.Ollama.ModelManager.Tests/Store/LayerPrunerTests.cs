@@ -16,7 +16,7 @@ public sealed class LayerPrunerTests
 {
     /// <summary>A blob a manifest still names survives; one nothing names does not.</summary>
     [Fact]
-    public async Task RemoveUnreferencedAsync_KeepsReferencedAndDeletesTheRest()
+    public async Task RemoveUnreferencedAsync_keeps_referenced_and_deletes_the_rest()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -40,7 +40,7 @@ public sealed class LayerPrunerTests
 
     /// <summary>A blob only the config layer names is still in use.</summary>
     [Fact]
-    public async Task RemoveUnreferencedAsync_TreatsTheConfigLayerAsAReference()
+    public async Task RemoveUnreferencedAsync_treats_the_config_layer_as_a_reference()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -61,7 +61,7 @@ public sealed class LayerPrunerTests
 
     /// <summary>A blob another model shares stays even when one of the models is gone.</summary>
     [Fact]
-    public async Task RemoveUnreferencedAsync_KeepsBlobsSharedWithAnotherModel()
+    public async Task RemoveUnreferencedAsync_keeps_blobs_shared_with_another_model()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -82,7 +82,7 @@ public sealed class LayerPrunerTests
 
     /// <summary>With nothing to consider there is nothing to do.</summary>
     [Fact]
-    public async Task RemoveUnreferencedAsync_WithNoCandidates_ReturnsEmpty()
+    public async Task RemoveUnreferencedAsync_with_no_candidates_returns_empty()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -99,7 +99,7 @@ public sealed class LayerPrunerTests
 
     /// <summary>A corrupt manifest does not block the collection of blobs nothing else names.</summary>
     [Fact]
-    public async Task RemoveUnreferencedAsync_IgnoresCorruptManifests()
+    public async Task RemoveUnreferencedAsync_ignores_corrupt_manifests()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -123,7 +123,7 @@ public sealed class LayerPrunerTests
 
     /// <summary>A blob written more recently than the grace period is left alone.</summary>
     [Fact]
-    public async Task PruneAllAsync_HonoursTheGracePeriod()
+    public async Task PruneAllAsync_honours_the_grace_period()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -145,7 +145,7 @@ public sealed class LayerPrunerTests
 
     /// <summary>An old blob a manifest still names is not collected.</summary>
     [Fact]
-    public async Task PruneAllAsync_KeepsOldButReferencedBlobs()
+    public async Task PruneAllAsync_keeps_old_but_referenced_blobs()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -169,7 +169,7 @@ public sealed class LayerPrunerTests
 
     /// <summary>This library's own partial-download leftovers are cleaned up once they are old enough.</summary>
     [Fact]
-    public async Task PruneAllAsync_DeletesThisLibrarysOwnSidecars()
+    public async Task PruneAllAsync_deletes_this_librarys_own_sidecars()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -194,7 +194,7 @@ public sealed class LayerPrunerTests
 
     /// <summary>A sidecar that is still within the grace period is a download in progress and stays.</summary>
     [Fact]
-    public async Task PruneAllAsync_KeepsFreshSidecars()
+    public async Task PruneAllAsync_keeps_fresh_sidecars()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -217,7 +217,7 @@ public sealed class LayerPrunerTests
     /// is, because the same directory may belong to a real Ollama install.
     /// </summary>
     [Fact]
-    public async Task PruneAllAsync_NeverDeletesForeignFiles()
+    public async Task PruneAllAsync_never_deletes_foreign_files()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -246,7 +246,7 @@ public sealed class LayerPrunerTests
 
     /// <summary>An empty store has nothing to prune.</summary>
     [Fact]
-    public async Task PruneAllAsync_ForMissingBlobsDirectory_ReturnsEmpty()
+    public async Task PruneAllAsync_for_missing_blobs_directory_returns_empty()
     {
         //Arrange
         using var store = new TempStoreDirectory();

@@ -14,7 +14,7 @@ namespace CodeBrix.Ollama.ModelManager.Tests;
 public sealed class ModelStorePruneTests
 {
     [Fact]
-    public async Task PruneAsync_RemovesOldUnreferencedBlobsAndOwnSidecarsOnly()
+    public async Task PruneAsync_removes_old_unreferenced_blobs_and_own_sidecars_only()
     {
         //Arrange
         using var directory = new TempStoreDirectory();
@@ -54,7 +54,7 @@ public sealed class ModelStorePruneTests
     }
 
     [Fact]
-    public async Task PruneAsync_WithANegativeGracePeriod_Throws()
+    public async Task PruneAsync_with_a_negative_grace_period_throws()
     {
         //Arrange
         using var directory = new TempStoreDirectory();

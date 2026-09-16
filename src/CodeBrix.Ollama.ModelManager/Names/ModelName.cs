@@ -1,9 +1,8 @@
-// Ported from Ollama (https://github.com/ollama/ollama), MIT License, Copyright (c) Ollama. Source: types/model/name.go at commit a43fad18.
 using System;
 using System.IO;
 using System.Text;
 
-namespace CodeBrix.Ollama.ModelManager;
+namespace CodeBrix.Ollama.ModelManager; //was previously: ollama/ollama types/model/name.go;
 
 /// <summary>
 /// A structured representation of a model name string, in the form

@@ -1,4 +1,3 @@
-// Ported from Ollama (https://github.com/ollama/ollama), MIT License, Copyright (c) Ollama. Source: server/images_test.go at commit a43fad18.
 using System;
 using System.Collections.Generic;
 using System.Net;
@@ -8,7 +7,7 @@ using System.Threading.Tasks;
 using SilverAssertions;
 using Xunit;
 
-namespace CodeBrix.Ollama.ModelManager.Tests;
+namespace CodeBrix.Ollama.ModelManager.Tests; //was previously: ollama/ollama server/images_test.go;
 
 /// <summary>
 /// Covers the registry client against the in-memory registry: the addresses it builds, the manifest it
@@ -20,7 +19,7 @@ public sealed class RegistryClientTests
     private const string Repository = "library/test";
 
     [Fact]
-    public void GetManifestUri_BuildsTheV2ManifestAddress()
+    public void GetManifestUri_builds_the_v2_manifest_address()
     {
         //Arrange
         using var handler = new FakeRegistryHandler();
@@ -34,7 +33,7 @@ public sealed class RegistryClientTests
     }
 
     [Fact]
-    public void GetBlobUri_BuildsTheV2BlobAddress()
+    public void GetBlobUri_builds_the_v2_blob_address()
     {
         //Arrange
         using var handler = new FakeRegistryHandler();
@@ -48,7 +47,7 @@ public sealed class RegistryClientTests
     }
 
     [Fact]
-    public void UserAgent_NamesTheLibraryTheOperatingSystemAndTheArchitecture()
+    public void UserAgent_names_the_library_the_operating_system_and_the_architecture()
     {
         //Arrange
         using var handler = new FakeRegistryHandler();
@@ -63,7 +62,7 @@ public sealed class RegistryClientTests
     }
 
     [Fact]
-    public async Task GetManifestAsync_WithKnownModel_ParsesTheLayers()
+    public async Task GetManifestAsync_with_known_model_parses_the_layers()
     {
         //Arrange
         using var handler = new FakeRegistryHandler();
@@ -95,7 +94,7 @@ public sealed class RegistryClientTests
         + "\"schemaVersion\":2,\"config\":{\"size\":50,\"digest\":\"sha256:abc\","
         + "\"mediaType\":\"application/vnd.docker.container.image.v1+json\"},"
         + "\"mediaType\":\"application/vnd.docker.distribution.manifest.v2+json\"}")]
-    public async Task GetManifestAsync_KeepsTheRawBytesByteForByte(string manifestJson)
+    public async Task GetManifestAsync_keeps_the_raw_bytes_byte_for_byte(string manifestJson)
     {
         //Arrange
         using var handler = new FakeRegistryHandler();
@@ -116,7 +115,7 @@ public sealed class RegistryClientTests
     }
 
     [Fact]
-    public async Task GetManifestAsync_SendsTheManifestAcceptHeaderAndTheUserAgent()
+    public async Task GetManifestAsync_sends_the_manifest_accept_header_and_the_user_agent()
     {
         //Arrange
         using var handler = new FakeRegistryHandler();
@@ -138,7 +137,7 @@ public sealed class RegistryClientTests
     }
 
     [Fact]
-    public async Task GetManifestAsync_WithUnknownModel_ThrowsModelNotFound()
+    public async Task GetManifestAsync_with_unknown_model_throws_model_not_found()
     {
         //Arrange
         using var handler = new FakeRegistryHandler();
@@ -154,7 +153,7 @@ public sealed class RegistryClientTests
     }
 
     [Fact]
-    public async Task GetManifestAsync_WithUnauthorizedAndNoToken_ThrowsRegistryExceptionWithStatus401()
+    public async Task GetManifestAsync_with_unauthorized_and_no_token_throws_registry_exception_with_status401()
     {
         //Arrange
         using var handler = new FakeRegistryHandler { RequireAuthorization = true };
@@ -174,7 +173,7 @@ public sealed class RegistryClientTests
     }
 
     [Fact]
-    public async Task GetManifestAsync_WithUnauthorizedAndAToken_RetriesWithTheToken()
+    public async Task GetManifestAsync_with_unauthorized_and_a_token_retries_with_the_token()
     {
         //Arrange
         using var handler = new FakeRegistryHandler { RequireAuthorization = true, ExpectedBearerToken = "secret" };
@@ -196,7 +195,7 @@ public sealed class RegistryClientTests
     }
 
     [Fact]
-    public async Task GetManifestAsync_AfterAChallenge_SendsTheTokenOnLaterRequests()
+    public async Task GetManifestAsync_after_a_challenge_sends_the_token_on_later_requests()
     {
         //Arrange
         using var handler = new FakeRegistryHandler { RequireAuthorization = true, ExpectedBearerToken = "secret" };
@@ -215,7 +214,7 @@ public sealed class RegistryClientTests
     }
 
     [Fact]
-    public async Task GetManifestAsync_WithHttpSchemeAndInsecureNotAllowed_ThrowsBeforeAnyRequest()
+    public async Task GetManifestAsync_with_http_scheme_and_insecure_not_allowed_throws_before_any_request()
     {
         //Arrange
         using var handler = new FakeRegistryHandler();
@@ -233,7 +232,7 @@ public sealed class RegistryClientTests
     }
 
     [Fact]
-    public async Task GetManifestAsync_WithHttpSchemeAllowed_FetchesTheManifest()
+    public async Task GetManifestAsync_with_http_scheme_allowed_fetches_the_manifest()
     {
         //Arrange
         using var handler = new FakeRegistryHandler();
@@ -253,7 +252,7 @@ public sealed class RegistryClientTests
     }
 
     [Fact]
-    public async Task GetManifestAsync_WithServerError_ThrowsRegistryExceptionCarryingTheBody()
+    public async Task GetManifestAsync_with_server_error_throws_registry_exception_carrying_the_body()
     {
         //Arrange
         using var handler = new FakeRegistryHandler { ManifestStatusCodeOverride = HttpStatusCode.InternalServerError };
@@ -271,7 +270,7 @@ public sealed class RegistryClientTests
     }
 
     [Fact]
-    public async Task GetBlobSizeAsync_WithUnknownBlob_ThrowsModelNotFound()
+    public async Task GetBlobSizeAsync_with_unknown_blob_throws_model_not_found()
     {
         //Arrange
         using var handler = new FakeRegistryHandler();
@@ -287,7 +286,7 @@ public sealed class RegistryClientTests
     }
 
     [Fact]
-    public async Task GetManifestAsync_WithAnAnswerThatIsNotAManifest_ThrowsRegistryException()
+    public async Task GetManifestAsync_with_an_answer_that_is_not_a_manifest_throws_registry_exception()
     {
         //Arrange
         using var handler = new FakeRegistryHandler();
@@ -303,7 +302,7 @@ public sealed class RegistryClientTests
     }
 
     [Fact]
-    public async Task GetManifestAsync_WithAnAnswerThatIsNotJson_ThrowsRegistryException()
+    public async Task GetManifestAsync_with_an_answer_that_is_not_json_throws_registry_exception()
     {
         //Arrange
         using var handler = new FakeRegistryHandler();
@@ -318,7 +317,7 @@ public sealed class RegistryClientTests
     }
 
     [Fact]
-    public async Task GetBlobSizeAsync_WithKnownBlob_ReturnsTheContentLength()
+    public async Task GetBlobSizeAsync_with_known_blob_returns_the_content_length()
     {
         //Arrange
         using var handler = new FakeRegistryHandler();

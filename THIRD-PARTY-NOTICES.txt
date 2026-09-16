@@ -496,10 +496,10 @@ WHAT WAS INCORPORATED
     consulted, never referenced by the build.
 
     Scope of incorporation, upstream Go file -> our C# file(s). Every C# file
-    listed carries, as its first line, the header
-        // Ported from Ollama (https://github.com/ollama/ollama), MIT License,
-        //   Copyright (c) Ollama. Source: <upstream path> at commit a43fad18.
-    (on one line in the source), which is how this list was compiled:
+    listed carries the family's provenance marker on its namespace line,
+        namespace CodeBrix.Ollama.ModelManager; //was previously: ollama/ollama <upstream path>;
+    naming the Go file(s) it was ported from at the commit above, which is how
+    this list was compiled:
 
       types/model/name.go
           -> Names/ModelName.cs
@@ -530,9 +530,9 @@ WHAT WAS INCORPORATED
     Test tables ported from upstream's *_test.go files (name_test.go, the
     fs/gguf tests, parser_test.go, images_test.go, auth_test.go) live in the
     correspondingly named files under tests/CodeBrix.Ollama.ModelManager.Tests/
-    and carry the same header naming the test file they came from.
+    and carry the same marker naming the test file they came from.
 
-    Files in the library WITHOUT the header contain no Ollama logic: the
+    Files in the library WITHOUT the marker contain no Ollama logic: the
     exception types and JSON helper under Common/, the public DTOs and options
     under Store/ (ModelStoreOptions, ModelManifest, ModelLayer, MediaTypes,
     ModelConfig, ModelParameters, ModelMessage, ModelInfo, ModelSummary,
@@ -616,8 +616,8 @@ SOFTWARE.
 INVENTORY: HOW THIS FILE WAS COMPILED, AND HOW TO RE-CHECK IT
 ================================================================================
 (This section covers entries 1 and 2, the vendored llama.cpp snapshot. Entry 3
-is checked differently: `grep -rl "Ported from Ollama" src/` lists every ported
-C# file, and that list must match the scope table in entry 3.)
+is checked differently: `grep -rl "was previously: ollama/ollama" src/` lists
+every ported C# file, and that list must match the scope table in entry 3.)
 
 On 2026-09-15 the vendored snapshot was inventoried mechanically, not by
 reading around in it. The snapshot holds 1,468 files (1,467 from upstream plus

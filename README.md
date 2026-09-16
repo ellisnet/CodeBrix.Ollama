@@ -9,11 +9,9 @@ large language models in-process**, with no Ollama installation and no server:
   through `hf.co/<user>/<repo>:<quant>` names). It pulls with resumable parallel downloads and
   sha256 verification, lists, shows, copies, deletes and creates models from Modelfiles, reads
   GGUF metadata, and resolves a model name to the GGUF files on disk. Pure managed code.
-* **CodeBrix.Ollama.ModelRunner** - runs a GGUF model in-process over a llama.cpp engine built
-  from vendored source and bound through hand-written P/Invoke, exposed to the application
-  through an interface contract. **In progress: the native build tooling and the first native
-  library are in the repository; the managed library is not written yet and no package is
-  published.**
+* **CodeBrix.Ollama.ModelRunner** - runs a GGUF model in-process over a self-built native
+  inference engine, bound through hand-written P/Invoke and exposed to the application through
+  an interface contract, with one native library per supported platform.
 
 The two packages do not depend on each other. An application asks ModelManager for the path of
 a model and hands that path to ModelRunner, or to any other in-process GGUF runner.
@@ -68,8 +66,7 @@ and hashing through `System.Security.Cryptography`.
   takes a `CancellationToken` as its last parameter
 
 Not in this package: running a model, rendering chat templates, pushing to a registry,
-safetensors models, or any HTTP server. See `src/CodeBrix.Ollama.ModelManager/AGENT-README.txt`
-for the complete reference.
+safetensors models, or any HTTP server.
 
 ## Requirements
 
@@ -146,14 +143,18 @@ await foreach (var _ in store.PullAsync("hf.co/HuggingFaceTB/smollm-360M-instruc
 
 ## Documentation
 
-* `README-INDEX.txt` - the map of every README in this repository
-* `src/CodeBrix.Ollama.ModelManager/AGENT-README.txt` - the complete ModelManager reference
-* `AGENT-README.txt` - the ModelRunner reference (placeholder until the library exists)
-* `MAINTAINER-README.txt` - building, testing, packaging and provenance
-* `THIRD-PARTY-NOTICES.txt` - what came from where, and under which licenses
+Each NuGet package includes its own `AGENT-README.txt`, a complete API reference and usage guide
+written for AI coding agents - point your agent at that file when it is writing code against the
+library.
+
+Additional sample code and usage examples are available in the `CodeBrix.Ollama.ModelManager.Tests`
+project:
+https://github.com/ellisnet/CodeBrix.Ollama/tree/main/tests/CodeBrix.Ollama.ModelManager.Tests
 
 ## License
 
-MIT. See `LICENSE`. CodeBrix.Ollama.ModelManager ports code from [Ollama](https://github.com/ollama/ollama)
-(MIT) and CodeBrix.Ollama.ModelRunner ships native libraries built from [llama.cpp](https://github.com/ggml-org/llama.cpp)
-(MIT); both are attributed in full in `THIRD-PARTY-NOTICES.txt`.
+CodeBrix.Ollama is licensed under the MIT License - see the
+[LICENSE](https://github.com/ellisnet/CodeBrix.Ollama/blob/main/LICENSE) file.
+
+For licensing and provenance information about the open source code included in
+these packages, see [THIRD-PARTY-NOTICES.txt](https://github.com/ellisnet/CodeBrix.Ollama/blob/main/THIRD-PARTY-NOTICES.txt).

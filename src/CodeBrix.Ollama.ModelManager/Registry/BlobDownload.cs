@@ -1,4 +1,3 @@
-// Ported from Ollama (https://github.com/ollama/ollama), MIT License, Copyright (c) Ollama. Source: server/download.go at commit a43fad18.
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -10,7 +9,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace CodeBrix.Ollama.ModelManager;
+namespace CodeBrix.Ollama.ModelManager; //was previously: ollama/ollama server/download.go;
 
 /// <summary>
 /// One blob download: the blob is split into byte ranges, the ranges are fetched concurrently into a

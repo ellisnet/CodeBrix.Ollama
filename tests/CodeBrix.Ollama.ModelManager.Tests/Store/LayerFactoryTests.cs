@@ -22,7 +22,7 @@ public sealed class LayerFactoryTests
 
     /// <summary>Streamed content lands in the blobs directory under its own digest.</summary>
     [Fact]
-    public async Task CreateFromStreamAsync_ProducesDigestSizeAndBlobFile()
+    public async Task CreateFromStreamAsync_produces_digest_size_and_blob_file()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -44,7 +44,7 @@ public sealed class LayerFactoryTests
 
     /// <summary>An empty stream is a valid layer with the empty digest.</summary>
     [Fact]
-    public async Task CreateFromStreamAsync_ForEmptyContent_ProducesEmptyDigest()
+    public async Task CreateFromStreamAsync_for_empty_content_produces_empty_digest()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -64,7 +64,7 @@ public sealed class LayerFactoryTests
 
     /// <summary>Storing the same bytes twice writes one file and leaves no temporary file behind.</summary>
     [Fact]
-    public async Task CreateFromStreamAsync_ForIdenticalContent_ReusesTheExistingBlob()
+    public async Task CreateFromStreamAsync_for_identical_content_reuses_the_existing_blob()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -91,7 +91,7 @@ public sealed class LayerFactoryTests
 
     /// <summary>Text is stored as UTF-8 with no byte order mark.</summary>
     [Fact]
-    public async Task CreateFromTextAsync_WritesUtf8WithoutByteOrderMark()
+    public async Task CreateFromTextAsync_writes_utf8_without_byte_order_mark()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -114,7 +114,7 @@ public sealed class LayerFactoryTests
 
     /// <summary>Bytes handed in directly produce the same blob as the stream overload.</summary>
     [Fact]
-    public async Task CreateFromBytesAsync_ProducesTheSameBlobAsTheStreamOverload()
+    public async Task CreateFromBytesAsync_produces_the_same_blob_as_the_stream_overload()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -133,7 +133,7 @@ public sealed class LayerFactoryTests
 
     /// <summary>Importing a file copies it into the store and leaves the original where it was.</summary>
     [Fact]
-    public async Task CreateFromFileAsync_CopiesTheFileAndLeavesTheSourceInPlace()
+    public async Task CreateFromFileAsync_copies_the_file_and_leaves_the_source_in_place()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -158,7 +158,7 @@ public sealed class LayerFactoryTests
 
     /// <summary>Importing a file whose blob is already there does not write a second copy.</summary>
     [Fact]
-    public async Task CreateFromFileAsync_ForExistingBlob_DoesNotWriteASecondFile()
+    public async Task CreateFromFileAsync_for_existing_blob_does_not_write_a_second_file()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -185,7 +185,7 @@ public sealed class LayerFactoryTests
 
     /// <summary>Importing a file that is not there is reported as a store problem.</summary>
     [Fact]
-    public async Task CreateFromFileAsync_ForMissingFile_Throws()
+    public async Task CreateFromFileAsync_for_missing_file_throws()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -205,7 +205,7 @@ public sealed class LayerFactoryTests
 
     /// <summary>A layer built from a blob already in the store takes its size from that blob.</summary>
     [Fact]
-    public async Task CreateFromExistingBlobAsync_ForPresentBlob_SetsSizeAndFrom()
+    public async Task CreateFromExistingBlobAsync_for_present_blob_sets_size_and_from()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -232,7 +232,7 @@ public sealed class LayerFactoryTests
 
     /// <summary>A blob that is not in the store cannot become a layer.</summary>
     [Fact]
-    public async Task CreateFromExistingBlobAsync_ForAbsentBlob_Throws()
+    public async Task CreateFromExistingBlobAsync_for_absent_blob_throws()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -252,7 +252,7 @@ public sealed class LayerFactoryTests
 
     /// <summary>The message for an absent blob names the digest.</summary>
     [Fact]
-    public async Task CreateFromExistingBlobAsync_ForAbsentBlob_MessageNamesTheDigest()
+    public async Task CreateFromExistingBlobAsync_for_absent_blob_message_names_the_digest()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -281,7 +281,7 @@ public sealed class LayerFactoryTests
 
     /// <summary>A blob reads back as the bytes and the text it was written from.</summary>
     [Fact]
-    public async Task ReadBlobAsync_RoundTripsBytesAndText()
+    public async Task ReadBlobAsync_round_trips_bytes_and_text()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -308,7 +308,7 @@ public sealed class LayerFactoryTests
 
     /// <summary>Reading a blob that is not in the store is reported as a store problem.</summary>
     [Fact]
-    public async Task ReadBlobBytesAsync_ForAbsentBlob_Throws()
+    public async Task ReadBlobBytesAsync_for_absent_blob_throws()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -325,7 +325,7 @@ public sealed class LayerFactoryTests
 
     /// <summary>An intact blob verifies.</summary>
     [Fact]
-    public async Task VerifyBlobAsync_ForIntactBlob_ReturnsTrue()
+    public async Task VerifyBlobAsync_for_intact_blob_returns_true()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -351,7 +351,7 @@ public sealed class LayerFactoryTests
     /// so the caller can download it again.
     /// </summary>
     [Fact]
-    public async Task VerifyBlobAsync_ForTamperedBlob_DeletesItAndThrowsWithBothDigests()
+    public async Task VerifyBlobAsync_for_tampered_blob_deletes_it_and_throws_with_both_digests()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -384,7 +384,7 @@ public sealed class LayerFactoryTests
 
     /// <summary>Verifying a blob that is not in the store is reported as a store problem.</summary>
     [Fact]
-    public async Task VerifyBlobAsync_ForAbsentBlob_Throws()
+    public async Task VerifyBlobAsync_for_absent_blob_throws()
     {
         //Arrange
         using var store = new TempStoreDirectory();

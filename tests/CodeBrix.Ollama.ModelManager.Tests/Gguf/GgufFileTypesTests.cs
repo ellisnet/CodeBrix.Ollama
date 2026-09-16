@@ -1,8 +1,7 @@
-// Ported from Ollama (https://github.com/ollama/ollama), MIT License, Copyright (c) Ollama. Source: fs/gguf/file_type.go at commit a43fad18.
 using SilverAssertions;
 using Xunit;
 
-namespace CodeBrix.Ollama.ModelManager.Tests;
+namespace CodeBrix.Ollama.ModelManager.Tests; //was previously: ollama/ollama fs/gguf/file_type.go;
 
 /// <summary>Covers the <c>general.file_type</c> table.</summary>
 public sealed class GgufFileTypesTests
@@ -43,7 +42,7 @@ public sealed class GgufFileTypesTests
     [InlineData(GgufFileType.MXFP4MOE, "MXFP4_MOE")]
     [InlineData(GgufFileType.NVFP4, "NVFP4")]
     [InlineData(GgufFileType.Q1_0, "Q1_0")]
-    public void GetName_ReturnsQuantizationName_ForEveryNamedType(GgufFileType fileType, string expected)
+    public void GetName_returns_quantization_name_for_every_named_type(GgufFileType fileType, string expected)
     {
         GgufFileTypes.GetName(fileType).Should().Be(expected);
     }
@@ -56,7 +55,7 @@ public sealed class GgufFileTypesTests
     [InlineData(GgufFileType.Q4_0_4_8)]
     [InlineData(GgufFileType.Q4_0_8_8)]
     [InlineData(GgufFileType.Unknown)]
-    public void GetName_ReturnsUnknown_ForTypesWithoutAName(GgufFileType fileType)
+    public void GetName_returns_unknown_for_types_without_a_name(GgufFileType fileType)
     {
         GgufFileTypes.GetName(fileType).Should().Be("unknown");
     }
@@ -72,7 +71,7 @@ public sealed class GgufFileTypesTests
     [InlineData(GgufFileType.NVFP4, 39u)]
     [InlineData(GgufFileType.Q1_0, 40u)]
     [InlineData(GgufFileType.Unknown, 1024u)]
-    public void GgufFileType_HasLlamaCppId_ForEveryType(GgufFileType fileType, uint expected)
+    public void GgufFileType_has_llama_cpp_id_for_every_type(GgufFileType fileType, uint expected)
     {
         ((uint)fileType).Should().Be(expected);
     }

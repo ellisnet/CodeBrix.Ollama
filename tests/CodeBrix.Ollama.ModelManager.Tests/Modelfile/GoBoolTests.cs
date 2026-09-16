@@ -17,7 +17,7 @@ public sealed class GoBoolTests
     [InlineData("TRUE")]
     [InlineData("true")]
     [InlineData("True")]
-    public void TryParse_WithTrueSpelling_ReturnsTrue(string value)
+    public void TryParse_with_true_spelling_returns_true(string value)
     {
         //Act
         var parsed = GoBool.TryParse(value, out var result);
@@ -36,7 +36,7 @@ public sealed class GoBoolTests
     [InlineData("FALSE")]
     [InlineData("false")]
     [InlineData("False")]
-    public void TryParse_WithFalseSpelling_ReturnsFalse(string value)
+    public void TryParse_with_false_spelling_returns_false(string value)
     {
         //Act
         var parsed = GoBool.TryParse(value, out var result);
@@ -61,7 +61,7 @@ public sealed class GoBoolTests
     [InlineData("true ")]
     [InlineData("y")]
     [InlineData("n")]
-    public void TryParse_WithUnknownSpelling_ReturnsFalse(string value)
+    public void TryParse_with_unknown_spelling_returns_false(string value)
     {
         //Act
         var parsed = GoBool.TryParse(value, out var result);
@@ -73,7 +73,7 @@ public sealed class GoBoolTests
 
     /// <summary>A null value is rejected rather than throwing.</summary>
     [Fact]
-    public void TryParse_WithNull_ReturnsFalse()
+    public void TryParse_with_null_returns_false()
     {
         //Act
         var parsed = GoBool.TryParse(null, out var result);

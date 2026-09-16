@@ -17,7 +17,7 @@
 # EVERY VERSION HERE COMES FROM pins.env. The defaults below exist only so a hand-run
 # `podman build -f Containerfile.x86_64 .` still works; build.sh always passes --build-arg.
 #
-#   NEVER YET RUN - see build.sh.
+#   BUILT AND USED 2026-09-15 (see BUILD-PROVENANCE.txt, linux-x64). No change was needed.
 # =============================================================================================
 
 ARG BASE_IMAGE=quay.io/pypa/manylinux_2_28_x86_64@sha256:a61875a2f84cab7df8de222ff12cabc08ff86eb4ad402ac90ba7bdaed9600cca

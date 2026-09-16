@@ -1,5 +1,4 @@
-// Ported from Ollama (https://github.com/ollama/ollama), MIT License, Copyright (c) Ollama. Source: parser/parser.go at commit a43fad18.
-namespace CodeBrix.Ollama.ModelManager;
+namespace CodeBrix.Ollama.ModelManager; //was previously: ollama/ollama parser/parser.go;
 
 /// <summary>
 /// The states of the Modelfile parser's state machine, one for one with the <c>state</c> constants

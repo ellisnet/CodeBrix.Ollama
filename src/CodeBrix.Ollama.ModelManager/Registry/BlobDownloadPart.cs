@@ -1,7 +1,6 @@
-// Ported from Ollama (https://github.com/ollama/ollama), MIT License, Copyright (c) Ollama. Source: server/download.go at commit a43fad18.
 using System.Text.Json.Serialization;
 
-namespace CodeBrix.Ollama.ModelManager;
+namespace CodeBrix.Ollama.ModelManager; //was previously: ollama/ollama server/download.go;
 
 /// <summary>
 /// One byte range of a blob download: where it starts, how long it is, and how much of it has already

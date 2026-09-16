@@ -1,8 +1,7 @@
-// Ported from Ollama (https://github.com/ollama/ollama), MIT License, Copyright (c) Ollama. Source: server/auth_test.go at commit a43fad18.
 using SilverAssertions;
 using Xunit;
 
-namespace CodeBrix.Ollama.ModelManager.Tests;
+namespace CodeBrix.Ollama.ModelManager.Tests; //was previously: ollama/ollama server/auth_test.go;
 
 /// <summary>
 /// Covers <see cref="RegistryChallenge.Parse"/>, including the table from Ollama's own
@@ -18,7 +17,7 @@ public sealed class RegistryChallengeTests
         "Bearer realm=\"https://r.ollama.ai/v2/token\",service=\"ollama\",scope=\"-\"",
         "https://r.ollama.ai/v2/token", "ollama", "-")]
     [InlineData("", "", "", "")]
-    public void Parse_WithOllamaTestCases_ReadsEveryValue(string header, string realm, string service, string scope)
+    public void Parse_with_ollama_test_cases_reads_every_value(string header, string realm, string service, string scope)
     {
         //Act
         RegistryChallenge challenge = RegistryChallenge.Parse(header);
@@ -30,7 +29,7 @@ public sealed class RegistryChallengeTests
     }
 
     [Fact]
-    public void Parse_WithNullHeader_ReadsEmptyValues()
+    public void Parse_with_null_header_reads_empty_values()
     {
         //Act
         RegistryChallenge challenge = RegistryChallenge.Parse(null);
@@ -42,7 +41,7 @@ public sealed class RegistryChallengeTests
     }
 
     [Fact]
-    public void Parse_WithoutBearerPrefix_StillReadsValues()
+    public void Parse_without_bearer_prefix_still_reads_values()
     {
         //Act
         RegistryChallenge challenge = RegistryChallenge.Parse(
@@ -55,7 +54,7 @@ public sealed class RegistryChallengeTests
     }
 
     [Fact]
-    public void Parse_WithCommaInsideQuotedValue_KeepsTheComma()
+    public void Parse_with_comma_inside_quoted_value_keeps_the_comma()
     {
         //Act
         RegistryChallenge challenge = RegistryChallenge.Parse(
@@ -67,7 +66,7 @@ public sealed class RegistryChallengeTests
     }
 
     [Fact]
-    public void Parse_WithQuoteNotFollowedByComma_KeepsTheQuote()
+    public void Parse_with_quote_not_followed_by_comma_keeps_the_quote()
     {
         //Act
         RegistryChallenge challenge = RegistryChallenge.Parse("Bearer realm=\"a\"b\",service=\"registry\"");
@@ -78,7 +77,7 @@ public sealed class RegistryChallengeTests
     }
 
     [Fact]
-    public void Parse_WithMissingKey_ReadsEmptyValue()
+    public void Parse_with_missing_key_reads_empty_value()
     {
         //Act
         RegistryChallenge challenge = RegistryChallenge.Parse(
@@ -91,7 +90,7 @@ public sealed class RegistryChallengeTests
     }
 
     [Fact]
-    public void Parse_WithTruncatedHeader_ReadsEmptyValue()
+    public void Parse_with_truncated_header_reads_empty_value()
     {
         //Act
         RegistryChallenge challenge = RegistryChallenge.Parse("Bearer realm=");

@@ -222,25 +222,216 @@ To be built on the Windows 11 ARM64 machine with windows\build-win-arm64.ps1
 
 
 ================================================================================
-linux-x64                                                             NOT BUILT
+linux-x64                                                        BUILT + PASSED
 ================================================================================
-To be built on the Debian x64 machine with linux/build.sh x64 (never yet run).
-manylinux_2_28 container (glibc floor 2.28), gcc 14, AVX2 baseline, static
-libstdc++/libgcc.
+Built            : 2026-09-16 05:07:04 UTC (2026-09-15 local)
+Built by         : linux/build.sh x64 -> container-build.sh (container route)
+Build host       : Dell Precision 7770, LMDE 7, x86_64 (native, no emulation),
+                   podman 5.4.2
+Derived image    : codebrix-llama-build-x86_64, built the same day from the
+                   digest-pinned base (the one network step: cmake 4.4.3 and
+                   ninja 1.13.2 wheels, file, xz)
+Base image       : quay.io/pypa/manylinux_2_28_x86_64@sha256:a61875a2f84cab7df8de222ff12cabc08ff86eb4ad402ac90ba7bdaed9600cca
+                   (AlmaLinux 8.10, container glibc 2.28)
+Duration         : 24 s inside the container (the whole run, image already
+                   built, about 25 s; the derived-image build before it about
+                   one minute)
+Network          : DISABLED (interfaces: lo) - proven by the log's first step
+Compiler         : cc (GCC) 14.2.1 20250110 (Red Hat 14.2.1-11), GNU ld 2.41
+cmake / ninja    : 4.4.3 / 1.13.2 (both equal to the pins)
+arch options     : (none) - the x64 baseline is what GGML_NATIVE=OFF gives
+CPU baseline     : x86-64 with AVX2, FMA, F16C, BMI2 (no AVX-512)
+GPU backend      : none (CPU-only slice)
+Patches applied  : none
+
+File             : libcodebrix_llama.so
+Build-id         : fd7e8b30909507f14bf523c03c402c40e1ae4f98
+Size (stripped)  : 6,138,928 bytes
+Size (unstripped): 114,326,288 bytes (full DWARF from -g; see unstripped/)
+Size (xz staged) : 1,801,368 bytes
+SHA256           : a2c7572063b149dea0371b8767aa23554df305761f6373423ae55a92334ac8d8
+SHA256 unstripped: 40c32e86227401824230eccd5089b2da468f3791b9ec7c33db6610fd2b061b9f
+glibc floor      : 2.27 (allowed <= 2.28; loads on Debian 10+, Ubuntu 20.04+,
+                   RHEL 8+)
+Dependencies     : ld-linux-x86-64.so.2 libc.so.6 libdl.so.2 libm.so.6
+                   libpthread.so.0 - system-only; no libstdc++/libgcc_s
+                   (linked statically)
+Exports          : 1,155 symbols, all llama_* / ggml_* / gguf_* /
+                   codebrix_llama_*; all 233 LLAMA_API functions present
+                   (248/248 required incl. the extras)
+Gate             : architecture ok, 248/248 required exports, export surface
+                   exact, ldd -r clean, system-only dependencies, glibc floor
+                   ok, smoke test passed (75/75 entry points, 1 device: CPU),
+                   model regeneration byte-identical, conformance CPU:
+                   12 positions, 64 logits each, max |diff| 4.98e-08, PASSED
+                   (the same spread the macOS slices show)
+Reproducibility  : measured with a second from-scratch run 28 minutes later
+                   (build-id d9da1cd07204b0ad17af095861cf4f93139379db, sha256
+                   69ee876d...): the stripped files differ in exactly 24 bytes
+                   and the unstripped files in the same 24 - the 20-byte GNU
+                   build-id note plus the four digits of the build time that
+                   container-build.sh bakes into codebrix_llama_build_info().
+                   All code and data identical; the repeat run passed the whole
+                   gate with the identical conformance spread. So: reproducible
+                   except for the embedded timestamp and the build-id derived
+                   from it - the ELF counterpart of the macOS LC_UUID finding.
+                   Compare size, exports and gate result, not the hash. The
+                   arm64 and riscv64 builds carry the same timestamp and
+                   build-id and are expected to behave the same way; not
+                   re-measured (each emulated run is 5-7 minutes).
+First-run fix    : the first linux-x64 run (2026-09-16 05:05 UTC) built the
+                   library but the gate tools could not link against it: the
+                   wrapper's Linux link options carried -Wl,--exclude-libs,ALL
+                   as "belt and braces" with the version script, and on ELF
+                   that option makes every symbol from a static archive HIDDEN,
+                   which a version script's global: list cannot undo - the .so
+                   exported only the two codebrix_llama_* functions. The flag
+                   was removed from wrapper/CMakeLists.txt (the version script
+                   alone gives the exact surface) and the second run passed the
+                   whole gate. macOS was never affected (it uses
+                   -exported_symbols_list, no such flag).
+Adopted into runtimes/linux-x64/native/ : YES, 2026-09-15, with
+                   LICENSE-LlamaCpp.txt; unstripped twin stored xz-compressed
+                   (xz -9e) as unstripped/linux-x64/libcodebrix_llama.so.xz,
+                   17,829,980 bytes - the "SHA256 unstripped" above is the
+                   decompressed file's hash (build-id verified equal before and
+                   after the round trip through xz)
 
 
 ================================================================================
-linux-arm64                                                           NOT BUILT
+linux-arm64                                                      BUILT + PASSED
 ================================================================================
-To be built on the Debian arm64 machine with linux/build.sh arm64 (never yet
-run). manylinux_2_28 container (glibc floor 2.28), gcc 14,
-armv8.2-a+dotprod+fp16 baseline, static libstdc++/libgcc.
+Built            : 2026-09-16 05:12:46 UTC (2026-09-15 local)
+Built by         : linux/build.sh arm64 -> container-build.sh (container route)
+Build host       : the same x86_64 laptop (Dell Precision 7770, LMDE 7), under
+                   qemu-user emulation (qemu-user-static 10.0.13, binfmt),
+                   podman 5.4.2 - the dav1d route, not a native arm64 machine
+Derived image    : codebrix-llama-build-aarch64, built the same day from the
+                   digest-pinned base (the one network step)
+Base image       : quay.io/pypa/manylinux_2_28_aarch64@sha256:162c81dfd3efc710732a571717d3c916a6945ebf279e879ddee3243af96fe46f
+                   (AlmaLinux 8.10, container glibc 2.28)
+Duration         : 334 s inside the container (emulated; 24 jobs)
+Network          : DISABLED (interfaces: lo)
+Compiler         : cc (GCC) 14.2.1 20250110 (Red Hat 14.2.1-11), GNU ld 2.41
+cmake / ninja    : 4.4.3 / 1.13.2 (both equal to the pins)
+arch options     : -DGGML_CPU_ARM_ARCH=armv8.2-a+dotprod+fp16
+CPU baseline     : armv8.2-a with dotprod and fp16 (Cortex-A75 / Neoverse-N1 /
+                   Raspberry Pi 5 and later; excludes Raspberry Pi 4)
+GPU backend      : none (CPU-only slice)
+Patches applied  : none
+
+File             : libcodebrix_llama.so
+Build-id         : ed211a6aa0b77d2c5d13bf07eed093d6b448de27
+Size (stripped)  : 5,585,600 bytes
+Size (unstripped): 112,111,304 bytes (full DWARF from -g; see unstripped/)
+Size (xz staged) : 1,527,656 bytes
+SHA256           : 037dbe5182dd85b5266f84f2aadea09fcadfabe8509d5f57deed991f33ae3a51
+SHA256 unstripped: 321c65e12ae1086b4de5da427af1d5ee9ede81ed96b73d0577a406d734f76d25
+glibc floor      : 2.27 (allowed <= 2.28)
+Dependencies     : ld-linux-aarch64.so.1 libc.so.6 libdl.so.2 libm.so.6
+                   libpthread.so.0 - system-only; no libstdc++/libgcc_s
+Exports          : 1,173 symbols, all llama_* / ggml_* / gguf_* /
+                   codebrix_llama_*; all 233 LLAMA_API functions present
+                   (248/248 required incl. the extras)
+Gate             : architecture ok, 248/248 required exports, export surface
+                   exact, ldd -r clean, system-only dependencies, glibc floor
+                   ok, smoke test passed UNDER EMULATION (75/75 entry points,
+                   1 device: CPU, system info "NEON = 1 | ARM_FMA = 1 |
+                   FP16_VA = 1 | DOTPROD = 1 | LLAMAFILE = 1 | REPACK = 1"),
+                   model regeneration byte-identical, conformance CPU:
+                   12 positions, 64 logits each, max |diff| 1.43e-04, PASSED.
+                   That spread is IDENTICAL to the one the native Apple
+                   Silicon build recorded for its CPU path (osx-arm64 entry
+                   above), so it is the fp16 vector arithmetic of the arm64
+                   kernels, not an emulation artefact; x64 sits at 5e-08
+                   because its kernels stay in f32.
+Note             : the whole gate ran under qemu-user, which exercises the
+                   NEON/dotprod/fp16 code paths but is not a reference for
+                   speed. Nothing has yet run this file on real arm64
+                   hardware; the first real-hardware run should be recorded
+                   here.
+First-run fix    : the first arm64 attempt (05:08 UTC) failed while BUILDING
+                   THE DERIVED IMAGE, in Containerfile.aarch64's own toolchain
+                   probe: the probe program expected vdotq_s32 over all-ones
+                   bytes to put 16 in each lane, but the instruction sums four
+                   1*1 products per lane and puts 4, so the probe exited -12
+                   (podman reported exit 244). The intrinsics compiled and ran
+                   correctly; only the expected value was wrong. Fixed in the
+                   Containerfile (expect 4) and the second run passed.
+Adopted into runtimes/linux-arm64/native/ : YES, 2026-09-15, with
+                   LICENSE-LlamaCpp.txt; unstripped twin stored xz-compressed
+                   (xz -9e) as unstripped/linux-arm64/libcodebrix_llama.so.xz,
+                   16,999,208 bytes - the "SHA256 unstripped" above is the
+                   decompressed file's hash (build-id verified equal before and
+                   after the round trip through xz)
 
 
 ================================================================================
-linux-riscv64                                                         NOT BUILT
+linux-riscv64                                                    BUILT + PASSED
 ================================================================================
-To be built on the Debian riscv64 machine with linux/build.sh riscv64 (never
-yet run). manylinux_2_39 container (glibc floor 2.39), gcc 14, rv64gc scalar
-baseline (no RVV), static libstdc++/libgcc.
+Built            : 2026-09-16 05:28:47 UTC (2026-09-15 local)
+Built by         : linux/build.sh riscv64 -> container-build.sh (container route)
+Build host       : the same x86_64 laptop (Dell Precision 7770, LMDE 7), under
+                   qemu-user emulation (qemu-user-static 10.0.13, binfmt),
+                   podman 5.4.2 - the dav1d route, not a native riscv64 board
+Derived image    : codebrix-llama-build-riscv64, rebuilt the same day from the
+                   digest-pinned base (the one network step) - see First-run fix
+Base image       : quay.io/pypa/manylinux_2_39_riscv64@sha256:04b3acc69a6cebb10ac1252587d202acce6445d91c783d3f92229bb2b2483069
+                   (Rocky Linux 10.2, container glibc 2.39; the system gcc, not
+                   a gcc-toolset)
+Duration         : 311 s inside the container (emulated; 24 jobs)
+Network          : DISABLED (interfaces: lo)
+Compiler         : cc (GCC) 14.3.1 20251022 (Red Hat 14.3.1-4)
+cmake / ninja    : 4.4.3 / 1.13.2 (both equal to the pins; riscv64 wheels
+                   exist on PyPI, nothing was built from source)
+arch options     : -DGGML_RVV=OFF -DGGML_RV_ZFH=OFF -DGGML_RV_ZVFH=OFF
+                   -DGGML_RV_ZICBOP=OFF -DGGML_RV_ZIHINTPAUSE=OFF
+CPU baseline     : rv64gc, scalar - no vector extension (a board without RVV
+                   would otherwise crash; see pins.env)
+GPU backend      : none (CPU-only slice)
+Patches applied  : none
+
+File             : libcodebrix_llama.so
+Build-id         : a85df2912e3d3a1c44d86cdb550fb6b38348eb8e
+Size (stripped)  : 4,676,056 bytes
+Size (unstripped): 79,725,640 bytes (full DWARF from -g; see unstripped/)
+Size (xz staged) : 1,676,008 bytes
+SHA256           : 06315b609bc2272a9bcd6d08364bd73997eabc320d02209235e929396dd1e5e4
+SHA256 unstripped: 2ff7bf71acbd92d2aba2263bdaea225b37c213c123e0b3e0d5e49b0063f30123
+glibc floor      : 2.38 (allowed <= 2.39; Debian 13 / Ubuntu 24.04 and newer)
+Dependencies     : ld-linux-riscv64-lp64d.so.1 libc.so.6 libm.so.6 - system-only
+                   (glibc 2.34+ folds libpthread and libdl into libc, so the
+                   shorter list is correct); no libstdc++/libgcc_s
+Exports          : 1,146 symbols, all llama_* / ggml_* / gguf_* /
+                   codebrix_llama_*; all 233 LLAMA_API functions present
+                   (248/248 required incl. the extras)
+Gate             : architecture ok (UCB RISC-V, RVC, double-float ABI),
+                   248/248 required exports, export surface exact, ldd -r
+                   clean, system-only dependencies, glibc floor ok, smoke test
+                   passed UNDER EMULATION (75/75 entry points, 1 device: CPU,
+                   system info "LLAMAFILE = 1 | REPACK = 1" - no vector
+                   features, as pinned), model regeneration byte-identical,
+                   conformance CPU: 12 positions, 64 logits each, max |diff|
+                   1.32e-07, PASSED (scalar f32, the same order as x64).
+Note             : the whole gate ran under qemu-user. Nothing has yet run this
+                   file on real riscv64 hardware; the first real-hardware run
+                   should be recorded here.
+First-run fix    : the first riscv64 attempt (05:19 UTC) compiled every object
+                   and failed at the final link: "cannot find -lstdc++". The
+                   x86_64 and aarch64 images are AlmaLinux 8 with gcc-toolset-14,
+                   whose libstdc++-devel ships libstdc++.a; this image is Rocky
+                   Linux 10 with the system gcc, where the static libstdc++ is
+                   the separate package libstdc++-static (14.3.1-4.4.el10, in
+                   the enabled CRB repository). Containerfile.riscv64 now
+                   installs it beside file and xz and asserts the archive is
+                   present; the image was rebuilt (FORCE_IMAGE_REBUILD=1) and
+                   the second run passed the whole gate. The static-runtime
+                   design is unchanged: no libstdc++.so.6 / libgcc_s.so.1
+                   dependency, exactly as on the other two slices.
+Adopted into runtimes/linux-riscv64/native/ : YES, 2026-09-15, with
+                   LICENSE-LlamaCpp.txt; unstripped twin stored xz-compressed
+                   (xz -9e) as unstripped/linux-riscv64/libcodebrix_llama.so.xz,
+                   14,022,316 bytes - the "SHA256 unstripped" above is the
+                   decompressed file's hash (build-id verified equal before and
+                   after the round trip through xz)
 ================================================================================

@@ -16,7 +16,7 @@ namespace CodeBrix.Ollama.ModelManager.Tests;
 public sealed class ModelStoreCreateTests
 {
     [Fact]
-    public async Task CreateAsync_FromALocalGgufFile_WritesTheModelAndTheModelfileLayers()
+    public async Task CreateAsync_from_a_local_gguf_file_writes_the_model_and_the_modelfile_layers()
     {
         //Arrange
         using var directory = new TempStoreDirectory();
@@ -67,7 +67,7 @@ public sealed class ModelStoreCreateTests
     }
 
     [Fact]
-    public async Task CreateAsync_FromAnExistingModel_OverridesTheTemplateAndMergesTheParameters()
+    public async Task CreateAsync_from_an_existing_model_overrides_the_template_and_merges_the_parameters()
     {
         //Arrange
         using var directory = new TempStoreDirectory();
@@ -99,7 +99,7 @@ public sealed class ModelStoreCreateTests
     }
 
     [Fact]
-    public async Task CreateAsync_FromAnExistingModel_SharesTheModelBlob()
+    public async Task CreateAsync_from_an_existing_model_shares_the_model_blob()
     {
         //Arrange
         using var directory = new TempStoreDirectory();
@@ -120,7 +120,7 @@ public sealed class ModelStoreCreateTests
     }
 
     [Fact]
-    public async Task CreateAsync_WhenTheNameAlreadyExists_PrunesTheReplacedLayers()
+    public async Task CreateAsync_when_the_name_already_exists_prunes_the_replaced_layers()
     {
         //Arrange
         using var directory = new TempStoreDirectory();
@@ -153,7 +153,7 @@ public sealed class ModelStoreCreateTests
     }
 
     [Fact]
-    public async Task CreateAsync_FromSomethingThatIsNeitherFileNorModel_ThrowsModelNotFound()
+    public async Task CreateAsync_from_something_that_is_neither_file_nor_model_throws_model_not_found()
     {
         //Arrange
         using var directory = new TempStoreDirectory();
@@ -173,7 +173,7 @@ public sealed class ModelStoreCreateTests
     }
 
     [Fact]
-    public async Task CreateAsync_WithAnAdapterThatIsNotOne_ThrowsGgufFormat()
+    public async Task CreateAsync_with_an_adapter_that_is_not_one_throws_gguf_format()
     {
         //Arrange
         using var directory = new TempStoreDirectory();
@@ -195,7 +195,7 @@ public sealed class ModelStoreCreateTests
     }
 
     [Fact]
-    public async Task CreateAsync_WithADraftLine_ThrowsBecauseDraftIsNotSupported()
+    public async Task CreateAsync_with_a_draft_line_throws_because_draft_is_not_supported()
     {
         //Arrange
         using var directory = new TempStoreDirectory();
@@ -226,7 +226,7 @@ public sealed class ModelStoreCreateTests
     }
 
     [Fact]
-    public async Task CreateAsync_WithANullModelfile_ThrowsArgumentNull()
+    public async Task CreateAsync_with_a_null_modelfile_throws_argument_null()
     {
         //Arrange
         using var directory = new TempStoreDirectory();

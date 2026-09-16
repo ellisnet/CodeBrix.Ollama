@@ -1,5 +1,4 @@
-// Ported from Ollama (https://github.com/ollama/ollama), MIT License, Copyright (c) Ollama. Source: fs/gguf/metadata.go at commit a43fad18.
-namespace CodeBrix.Ollama.ModelManager;
+namespace CodeBrix.Ollama.ModelManager; //was previously: ollama/ollama fs/gguf/metadata.go;
 
 /// <summary>
 /// The knobs for <see cref="GgufMetadata.ReadAsync(string, GgufReadOptions, System.Threading.CancellationToken)"/>.

@@ -17,7 +17,7 @@ namespace CodeBrix.Ollama.ModelManager.Tests;
 public sealed class ModelStorePullTests
 {
     [Fact]
-    public async Task PullAsync_WithANewModel_ReportsTheStatusesInOrder()
+    public async Task PullAsync_with_a_new_model_reports_the_statuses_in_order()
     {
         //Arrange
         using var directory = new TempStoreDirectory();
@@ -34,7 +34,7 @@ public sealed class ModelStorePullTests
     }
 
     [Fact]
-    public async Task PullAsync_WithANewModel_WritesTheManifestBytesTheRegistryServed()
+    public async Task PullAsync_with_a_new_model_writes_the_manifest_bytes_the_registry_served()
     {
         //Arrange
         using var directory = new TempStoreDirectory();
@@ -55,7 +55,7 @@ public sealed class ModelStorePullTests
     }
 
     [Fact]
-    public async Task PullAsync_WithANewModel_WritesEveryBlobAtItsManifestSize()
+    public async Task PullAsync_with_a_new_model_writes_every_blob_at_its_manifest_size()
     {
         //Arrange
         using var directory = new TempStoreDirectory();
@@ -77,7 +77,7 @@ public sealed class ModelStorePullTests
     }
 
     [Fact]
-    public async Task PullAsync_WhenEveryLayerIsCached_MakesNoBlobRequests()
+    public async Task PullAsync_when_every_layer_is_cached_makes_no_blob_requests()
     {
         //Arrange
         using var directory = new TempStoreDirectory();
@@ -98,7 +98,7 @@ public sealed class ModelStorePullTests
     }
 
     [Fact]
-    public async Task PullAsync_WithAReplacedLayer_RemovesTheOldBlobAndKeepsTheSharedOnes()
+    public async Task PullAsync_with_a_replaced_layer_removes_the_old_blob_and_keeps_the_shared_ones()
     {
         //Arrange
         using var directory = new TempStoreDirectory();
@@ -123,7 +123,7 @@ public sealed class ModelStorePullTests
     }
 
     [Fact]
-    public async Task PullAsync_WithASafetensorsManifest_ThrowsBeforeAnyBlobRequest()
+    public async Task PullAsync_with_a_safetensors_manifest_throws_before_any_blob_request()
     {
         //Arrange
         using var directory = new TempStoreDirectory();
@@ -150,7 +150,7 @@ public sealed class ModelStorePullTests
     }
 
     [Fact]
-    public async Task PullAsync_WithAnUnknownModel_ThrowsModelNotFound()
+    public async Task PullAsync_with_an_unknown_model_throws_model_not_found()
     {
         //Arrange
         using var directory = new TempStoreDirectory();
@@ -165,7 +165,7 @@ public sealed class ModelStorePullTests
     }
 
     [Fact]
-    public async Task PullAsync_WithACorruptedBlob_ThrowsDigestMismatchAndLeavesNoBlob()
+    public async Task PullAsync_with_a_corrupted_blob_throws_digest_mismatch_and_leaves_no_blob()
     {
         //Arrange
         using var directory = new TempStoreDirectory();
@@ -186,7 +186,7 @@ public sealed class ModelStorePullTests
     }
 
     [Fact]
-    public async Task PullAsync_WhenCancelledMidDownload_LeavesThePartialFilesAndNoManifest()
+    public async Task PullAsync_when_cancelled_mid_download_leaves_the_partial_files_and_no_manifest()
     {
         //Arrange
         using var directory = new TempStoreDirectory();
@@ -221,7 +221,7 @@ public sealed class ModelStorePullTests
     }
 
     [Fact]
-    public async Task PullAsync_WithAHuggingFaceStyleName_PullsThroughTheSamePath()
+    public async Task PullAsync_with_a_hugging_face_style_name_pulls_through_the_same_path()
     {
         //Arrange
         using var directory = new TempStoreDirectory();

@@ -22,7 +22,7 @@ public sealed class ManifestFilesTests
 
     /// <summary>A manifest that has not been written has no file and reads back as nothing.</summary>
     [Fact]
-    public async Task ReadAsync_ForMissingManifest_ReturnsNull()
+    public async Task ReadAsync_for_missing_manifest_returns_null()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -39,7 +39,7 @@ public sealed class ManifestFilesTests
 
     /// <summary>Existence follows the file.</summary>
     [Fact]
-    public async Task ExistsAsync_FollowsTheFile()
+    public async Task ExistsAsync_follows_the_file()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -60,7 +60,7 @@ public sealed class ManifestFilesTests
     /// of those bytes with no prefix, which is what Ollama's Manifest.Digest() reports.
     /// </summary>
     [Fact]
-    public async Task WriteAsync_ThenReadAsync_RoundTripsBytesAndDigest()
+    public async Task WriteAsync_then_read_async_round_trips_bytes_and_digest()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -81,7 +81,7 @@ public sealed class ManifestFilesTests
 
     /// <summary>The written document carries schema version 2 and the manifest media type.</summary>
     [Fact]
-    public async Task WriteAsync_ForManifest_WritesSchemaVersionAndMediaType()
+    public async Task WriteAsync_for_manifest_writes_schema_version_and_media_type()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -104,7 +104,7 @@ public sealed class ManifestFilesTests
 
     /// <summary>The bytes handed to the raw overload are the bytes that end up on disk.</summary>
     [Fact]
-    public async Task WriteAsync_ForRawBytes_WritesThemVerbatim()
+    public async Task WriteAsync_for_raw_bytes_writes_them_verbatim()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -123,7 +123,7 @@ public sealed class ManifestFilesTests
 
     /// <summary>Writing over an existing manifest replaces it and leaves no temporary file behind.</summary>
     [Fact]
-    public async Task WriteAsync_OverExistingManifest_ReplacesItAndLeavesNoTempFile()
+    public async Task WriteAsync_over_existing_manifest_replaces_it_and_leaves_no_temp_file()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -145,7 +145,7 @@ public sealed class ManifestFilesTests
 
     /// <summary>A file that is not JSON is reported as a manifest problem, not a JSON problem.</summary>
     [Fact]
-    public async Task ReadAsync_ForCorruptManifest_ThrowsModelManagerException()
+    public async Task ReadAsync_for_corrupt_manifest_throws_model_manager_exception()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -162,7 +162,7 @@ public sealed class ManifestFilesTests
 
     /// <summary>The message names the file and says it is not valid JSON.</summary>
     [Fact]
-    public async Task ReadAsync_ForCorruptManifest_MessageNamesTheFile()
+    public async Task ReadAsync_for_corrupt_manifest_message_names_the_file()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -189,7 +189,7 @@ public sealed class ManifestFilesTests
 
     /// <summary>An empty store has nothing to list, even before the manifests directory exists.</summary>
     [Fact]
-    public async Task EnumerateAsync_ForMissingManifestsDirectory_ReturnsEmpty()
+    public async Task EnumerateAsync_for_missing_manifests_directory_returns_empty()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -206,7 +206,7 @@ public sealed class ManifestFilesTests
 
     /// <summary>Every written manifest is listed and each one keeps the name it was filed under.</summary>
     [Fact]
-    public async Task EnumerateAsync_RoundTripsEveryName()
+    public async Task EnumerateAsync_round_trips_every_name()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -234,7 +234,7 @@ public sealed class ManifestFilesTests
 
     /// <summary>Only files exactly four levels below the manifests directory count as manifests.</summary>
     [Fact]
-    public async Task EnumerateAsync_IgnoresEntriesAtTheWrongDepth()
+    public async Task EnumerateAsync_ignores_entries_at_the_wrong_depth()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -268,7 +268,7 @@ public sealed class ManifestFilesTests
 
     /// <summary>A path that is not a valid model name is skipped when errors are tolerated.</summary>
     [Fact]
-    public async Task EnumerateAsync_WithContinueOnError_SkipsInvalidNames()
+    public async Task EnumerateAsync_with_continue_on_error_skips_invalid_names()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -291,7 +291,7 @@ public sealed class ManifestFilesTests
 
     /// <summary>A path that is not a valid model name stops the walk when errors are not tolerated.</summary>
     [Fact]
-    public async Task EnumerateAsync_WithoutContinueOnError_ThrowsForInvalidName()
+    public async Task EnumerateAsync_without_continue_on_error_throws_for_invalid_name()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -307,7 +307,7 @@ public sealed class ManifestFilesTests
 
     /// <summary>A corrupt manifest is skipped when errors are tolerated, so the good ones still list.</summary>
     [Fact]
-    public async Task EnumerateAsync_WithContinueOnError_SkipsCorruptManifest()
+    public async Task EnumerateAsync_with_continue_on_error_skips_corrupt_manifest()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -331,7 +331,7 @@ public sealed class ManifestFilesTests
 
     /// <summary>A corrupt manifest stops the walk when errors are not tolerated.</summary>
     [Fact]
-    public async Task EnumerateAsync_WithoutContinueOnError_ThrowsForCorruptManifest()
+    public async Task EnumerateAsync_without_continue_on_error_throws_for_corrupt_manifest()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -347,7 +347,7 @@ public sealed class ManifestFilesTests
 
     /// <summary>Deleting the only manifest removes the directories it left behind.</summary>
     [Fact]
-    public async Task DeleteAsync_PrunesEmptyParentDirectories()
+    public async Task DeleteAsync_prunes_empty_parent_directories()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -364,7 +364,7 @@ public sealed class ManifestFilesTests
 
     /// <summary>The manifests directory itself is never pruned, however empty it gets.</summary>
     [Fact]
-    public async Task DeleteAsync_NeverRemovesTheManifestsDirectory()
+    public async Task DeleteAsync_never_removes_the_manifests_directory()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -380,7 +380,7 @@ public sealed class ManifestFilesTests
 
     /// <summary>Pruning stops as soon as a directory still holds something.</summary>
     [Fact]
-    public async Task DeleteAsync_KeepsDirectoriesThatStillHoldAnotherTag()
+    public async Task DeleteAsync_keeps_directories_that_still_hold_another_tag()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -404,7 +404,7 @@ public sealed class ManifestFilesTests
 
     /// <summary>Deleting a manifest that is not there is not an error.</summary>
     [Fact]
-    public async Task DeleteAsync_ForMissingManifest_DoesNothing()
+    public async Task DeleteAsync_for_missing_manifest_does_nothing()
     {
         //Arrange
         using var store = new TempStoreDirectory();

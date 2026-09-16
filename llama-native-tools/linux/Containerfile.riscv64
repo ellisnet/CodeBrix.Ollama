@@ -27,7 +27,8 @@
 # EVERY VERSION HERE COMES FROM pins.env. The defaults below exist only so a hand-run
 # `podman build -f Containerfile.riscv64 .` still works; build.sh always passes --build-arg.
 #
-#   NEVER YET RUN - see build.sh.
+#   BUILT AND USED 2026-09-15 (see BUILD-PROVENANCE.txt, linux-riscv64). The first attempt
+#   failed at link time for want of a static libstdc++; step 1 now installs it.
 # =============================================================================================
 
 ARG BASE_IMAGE=quay.io/pypa/manylinux_2_39_riscv64@sha256:04b3acc69a6cebb10ac1252587d202acce6445d91c783d3f92229bb2b2483069
@@ -42,15 +43,21 @@ LABEL org.opencontainers.image.description="codebrix_llama native build machine:
 LABEL org.opencontainers.image.source="CodeBrix.Ollama/llama-native-tools/linux/Containerfile.riscv64"
 
 # ---------------------------------------------------------------------------------------------
-# 1. Distro packages: file and xz, used by the verification gate and the staging step.
+# 1. Distro packages: file and xz, used by the verification gate and the staging step, PLUS
+#    libstdc++-static. Unlike the x86_64 and aarch64 images (AlmaLinux 8 + gcc-toolset-14,
+#    whose libstdc++-devel ships libstdc++.a), this image is Rocky Linux 10 with the system
+#    gcc 14, and its static libstdc++ is a separate package in the (enabled) CRB repository.
+#    Without it the wrapper's -static-libstdc++ link fails with "cannot find -lstdc++" - the
+#    first riscv64 run (2026-09-15) did exactly that after compiling every object.
 # ---------------------------------------------------------------------------------------------
 RUN set -eux; \
     if command -v dnf > /dev/null 2>&1; then \
-        dnf install -y --setopt=install_weak_deps=False file xz; \
+        dnf install -y --setopt=install_weak_deps=False file xz libstdc++-static; \
         dnf clean all; \
+        ls /usr/lib/gcc/riscv64-redhat-linux/*/libstdc++.a; \
     elif command -v apt-get > /dev/null 2>&1; then \
         apt-get update; \
-        apt-get install -y --no-install-recommends file xz-utils; \
+        apt-get install -y --no-install-recommends file xz-utils libstdc++-14-dev; \
         rm -rf /var/lib/apt/lists/*; \
     else \
         echo "ERROR: no dnf and no apt-get in this image." >&2; exit 1; \

@@ -1,5 +1,4 @@
-// Ported from Ollama (https://github.com/ollama/ollama), MIT License, Copyright (c) Ollama. Source: fs/gguf/tensor.go at commit a43fad18.
-namespace CodeBrix.Ollama.ModelManager;
+namespace CodeBrix.Ollama.ModelManager; //was previously: ollama/ollama fs/gguf/tensor.go;
 
 /// <summary>
 /// The names and block geometry of every <see cref="GgufTensorType"/>.

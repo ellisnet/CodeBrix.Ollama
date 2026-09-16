@@ -1,8 +1,7 @@
-// Ported from Ollama (https://github.com/ollama/ollama), MIT License, Copyright (c) Ollama. Source: fs/gguf/keyvalue.go at commit a43fad18.
 using SilverAssertions;
 using Xunit;
 
-namespace CodeBrix.Ollama.ModelManager.Tests;
+namespace CodeBrix.Ollama.ModelManager.Tests; //was previously: ollama/ollama fs/gguf/keyvalue.go;
 
 /// <summary>
 /// Covers the conversion rules of one key-value's value. They are deliberately narrow: a value only reads
@@ -39,7 +38,7 @@ public sealed class GgufValueTests
     };
 
     [Fact]
-    public void AsInt64_ReturnsTheValue_OnlyForSignedIntegers()
+    public void AsInt64_returns_the_value_only_for_signed_integers()
     {
         //Arrange
         //Act
@@ -69,7 +68,7 @@ public sealed class GgufValueTests
     }
 
     [Fact]
-    public void AsUInt64_ReturnsTheValue_OnlyForUnsignedIntegers()
+    public void AsUInt64_returns_the_value_only_for_unsigned_integers()
     {
         //Arrange
         //Act
@@ -99,7 +98,7 @@ public sealed class GgufValueTests
     }
 
     [Fact]
-    public void AsDouble_ReturnsTheValue_OnlyForFloats()
+    public void AsDouble_returns_the_value_only_for_floats()
     {
         //Arrange
         //Act
@@ -124,7 +123,7 @@ public sealed class GgufValueTests
     }
 
     [Fact]
-    public void AsString_ReturnsTheValue_OnlyForStrings()
+    public void AsString_returns_the_value_only_for_strings()
     {
         //Arrange
         var text = GgufValue.CreateScalar(GgufValueType.String, "hello");
@@ -137,7 +136,7 @@ public sealed class GgufValueTests
     }
 
     [Fact]
-    public void AsBoolean_ReturnsTheValue_OnlyForBooleans()
+    public void AsBoolean_returns_the_value_only_for_booleans()
     {
         //Arrange
         //Act
@@ -149,7 +148,7 @@ public sealed class GgufValueTests
     }
 
     [Fact]
-    public void AsInt64Array_WidensEverySignedArray_AndRejectsOthers()
+    public void AsInt64Array_widens_every_signed_array_and_rejects_others()
     {
         //Arrange
         var signed = new GgufValue[]
@@ -172,7 +171,7 @@ public sealed class GgufValueTests
     }
 
     [Fact]
-    public void AsUInt64Array_WidensEveryUnsignedArray_AndRejectsOthers()
+    public void AsUInt64Array_widens_every_unsigned_array_and_rejects_others()
     {
         //Arrange
         var unsigned = new GgufValue[]
@@ -195,7 +194,7 @@ public sealed class GgufValueTests
     }
 
     [Fact]
-    public void AsDoubleArray_WidensEveryFloatArray_AndRejectsOthers()
+    public void AsDoubleArray_widens_every_float_array_and_rejects_others()
     {
         //Arrange
         //Act
@@ -206,7 +205,7 @@ public sealed class GgufValueTests
     }
 
     [Fact]
-    public void AsStringArrayAndAsBooleanArray_ReturnOnlyTheirOwnKind()
+    public void AsStringArrayAndAsBooleanArray_return_only_their_own_kind()
     {
         //Arrange
         var strings = GgufValue.CreateArray(GgufValueType.String, 2, new[] { "hello", "world" });
@@ -221,7 +220,7 @@ public sealed class GgufValueTests
     }
 
     [Fact]
-    public void ArrayAccessors_ReturnNull_ForScalars()
+    public void ArrayAccessors_return_null_for_scalars()
     {
         //Arrange
         var scalar = GgufValue.CreateScalar(GgufValueType.UInt32, 42u);
@@ -237,7 +236,7 @@ public sealed class GgufValueTests
     }
 
     [Fact]
-    public void CreateOmittedArray_KeepsTheLength_ButNoValues()
+    public void CreateOmittedArray_keeps_the_length_but_no_values()
     {
         //Arrange
         var omitted = GgufValue.CreateOmittedArray(GgufValueType.String, 50_000);
@@ -260,7 +259,7 @@ public sealed class GgufValueTests
     [InlineData(true, "True")]
     [InlineData("hello", "hello")]
     [InlineData(1.5d, "1.5")]
-    public void ToString_PrintsTheScalar(object raw, string expected)
+    public void ToString_prints_the_scalar(object raw, string expected)
     {
         //Arrange
         var value = GgufValue.CreateScalar(GgufValueType.UInt32, raw);
@@ -271,7 +270,7 @@ public sealed class GgufValueTests
     }
 
     [Fact]
-    public void ToString_PrintsTheItemCount_ForAnArray()
+    public void ToString_prints_the_item_count_for_an_array()
     {
         //Arrange
         var value = GgufValue.CreateArray(GgufValueType.Int32, 3, new[] { 1, 2, 3 });

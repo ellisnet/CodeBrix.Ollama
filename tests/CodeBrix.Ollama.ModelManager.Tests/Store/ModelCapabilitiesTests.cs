@@ -13,7 +13,7 @@ namespace CodeBrix.Ollama.ModelManager.Tests;
 public sealed class ModelCapabilitiesTests
 {
     [Fact]
-    public async Task Infer_WithoutAPoolingType_ReportsCompletion()
+    public async Task Infer_without_a_pooling_type_reports_completion()
     {
         //Arrange
         GgufMetadata metadata = await ReadAsync(BaseModel());
@@ -26,7 +26,7 @@ public sealed class ModelCapabilitiesTests
     }
 
     [Fact]
-    public async Task Infer_WithAPoolingType_ReportsEmbeddingInsteadOfCompletion()
+    public async Task Infer_with_a_pooling_type_reports_embedding_instead_of_completion()
     {
         //Arrange
         GgufMetadata metadata = await ReadAsync(BaseModel().AddUInt32("llama.pooling_type", 1));
@@ -40,7 +40,7 @@ public sealed class ModelCapabilitiesTests
     }
 
     [Fact]
-    public async Task Infer_WithAToolChatTemplate_ReportsTools()
+    public async Task Infer_with_a_tool_chat_template_reports_tools()
     {
         //Arrange
         GgufMetadata metadata = await ReadAsync(
@@ -54,7 +54,7 @@ public sealed class ModelCapabilitiesTests
     }
 
     [Fact]
-    public async Task Infer_WithAThinkTagChatTemplate_ReportsThinking()
+    public async Task Infer_with_a_think_tag_chat_template_reports_thinking()
     {
         //Arrange
         GgufMetadata metadata = await ReadAsync(
@@ -68,7 +68,7 @@ public sealed class ModelCapabilitiesTests
     }
 
     [Fact]
-    public async Task Infer_WithAPlainChatTemplate_ReportsNeitherToolsNorThinking()
+    public async Task Infer_with_a_plain_chat_template_reports_neither_tools_nor_thinking()
     {
         //Arrange
         GgufMetadata metadata = await ReadAsync(
@@ -83,7 +83,7 @@ public sealed class ModelCapabilitiesTests
     }
 
     [Fact]
-    public async Task Infer_WithVisionBlocks_ReportsVision()
+    public async Task Infer_with_vision_blocks_reports_vision()
     {
         //Arrange
         GgufMetadata metadata = await ReadAsync(BaseModel().AddUInt32("llama.vision.block_count", 4));
@@ -96,7 +96,7 @@ public sealed class ModelCapabilitiesTests
     }
 
     [Fact]
-    public async Task Infer_WithAudioBlocks_ReportsAudio()
+    public async Task Infer_with_audio_blocks_reports_audio()
     {
         //Arrange
         GgufMetadata metadata = await ReadAsync(BaseModel().AddUInt32("llama.audio.block_count", 4));
@@ -109,7 +109,7 @@ public sealed class ModelCapabilitiesTests
     }
 
     [Fact]
-    public async Task Infer_WithAProjector_ReportsVisionOnly()
+    public async Task Infer_with_a_projector_reports_vision_only()
     {
         //Arrange
         GgufMetadata metadata = await ReadAsync(BaseModel());
@@ -128,7 +128,7 @@ public sealed class ModelCapabilitiesTests
     }
 
     [Fact]
-    public async Task Infer_WithAnAudioProjector_ReportsAudioAsWell()
+    public async Task Infer_with_an_audio_projector_reports_audio_as_well()
     {
         //Arrange
         GgufMetadata metadata = await ReadAsync(BaseModel());
@@ -147,7 +147,7 @@ public sealed class ModelCapabilitiesTests
     }
 
     [Fact]
-    public async Task Infer_WithAFalseAudioEncoderFlag_DoesNotReportAudio()
+    public async Task Infer_with_a_false_audio_encoder_flag_does_not_report_audio()
     {
         //Arrange
         GgufMetadata metadata = await ReadAsync(BaseModel());
@@ -165,7 +165,7 @@ public sealed class ModelCapabilitiesTests
     }
 
     [Fact]
-    public async Task Infer_WithAGoTemplateUsingTools_ReportsTools()
+    public async Task Infer_with_a_go_template_using_tools_reports_tools()
     {
         //Arrange
         GgufMetadata metadata = await ReadAsync(BaseModel());
@@ -179,7 +179,7 @@ public sealed class ModelCapabilitiesTests
     }
 
     [Fact]
-    public async Task Infer_WithAGoTemplateUsingSuffix_ReportsInsert()
+    public async Task Infer_with_a_go_template_using_suffix_reports_insert()
     {
         //Arrange
         GgufMetadata metadata = await ReadAsync(BaseModel());
@@ -193,7 +193,7 @@ public sealed class ModelCapabilitiesTests
     }
 
     [Fact]
-    public async Task Infer_WithAGoTemplateMentioningThinking_ReportsThinking()
+    public async Task Infer_with_a_go_template_mentioning_thinking_reports_thinking()
     {
         //Arrange
         GgufMetadata metadata = await ReadAsync(BaseModel());
@@ -207,7 +207,7 @@ public sealed class ModelCapabilitiesTests
     }
 
     [Fact]
-    public void Infer_WithConfigCapabilities_ReportsThemEvenWithoutAnyGguf()
+    public void Infer_with_config_capabilities_reports_them_even_without_any_gguf()
     {
         //Arrange
         var config = new ModelConfig { Capabilities = new List<string> { "completion", "tools", "nonsense" } };
@@ -224,7 +224,7 @@ public sealed class ModelCapabilitiesTests
     }
 
     [Fact]
-    public async Task Infer_WithTheSameCapabilityFromTwoSources_ReportsItOnce()
+    public async Task Infer_with_the_same_capability_from_two_sources_reports_it_once()
     {
         //Arrange
         GgufMetadata metadata = await ReadAsync(

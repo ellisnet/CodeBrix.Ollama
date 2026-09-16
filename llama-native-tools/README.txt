@@ -91,10 +91,12 @@ FOLDER MAP
 
   unstripped/             COMMITTED. The pre-strip twin of every shipped native,
                           one folder per RID (plus the .dSYM on macOS, the .pdb
-                          on Windows), with SHA256SUMS and a README.txt carrying
-                          the rule for keeping them in step with the binaries in
-                          runtimes/<rid>/native/. For crash triage: never
-                          shipped, never an input to any build
+                          on Windows; the Linux ELFs xz-compressed, because raw
+                          they exceed GitHub's per-file limit), with SHA256SUMS
+                          and a README.txt carrying the rule for keeping them in
+                          step with the binaries in runtimes/<rid>/native/. For
+                          crash triage: never shipped, never an input to any
+                          build
 
   output/                 build results (git-ignored except its README.txt).
                           Disposable - the pre-strip copies that are meant to
@@ -110,18 +112,21 @@ WHICH README TO READ
 Each one lists the tools to install on that machine, with the exact command,
 and nothing else is needed.
 
-  >>> STATUS 2026-09-15: TWO of the seven slices have been built and adopted -
+  >>> STATUS 2026-09-15: FIVE of the seven slices have been built and adopted.
       osx-x64 on the Intel Mac mini and osx-arm64 on the Apple Silicon Mac
       mini, full gate passed on both, both at the 13.3 macOS floor. The arm64
       run found that the original floor of 11.0 was never real (a 13.3-only
       Accelerate symbol was weak-imported by BOTH slices); the floor is now
       13.3, the wrapper enforces it at compile time, and osx-x64 was REBUILT
-      and re-adopted at 13.3 the same day (BUILD-PROVENANCE.txt). The five
-      Windows and Linux scripts were
-      written on the Intel Mac and have NEVER BEEN RUN; each says so in its
-      header. The expectation, from dav1d's experience, is that each platform's
-      first real run finds something to fix. Fix it IN THE SCRIPT, commit the
-      fix, and rewrite that platform's status block. <<<
+      and re-adopted at 13.3 the same day (BUILD-PROVENANCE.txt). linux-x64,
+      linux-arm64 and linux-riscv64 were built the same evening on the x86_64
+      LMDE laptop through the manylinux container route (arm64 and riscv64
+      under qemu-user emulation), full gate passed on all three; the three
+      first-run fixes (wrapper --exclude-libs, the aarch64 probe, the riscv64
+      static libstdc++) are in BUILD-PROVENANCE.txt. The two Windows scripts
+      were written on the Intel Mac and have NEVER BEEN RUN; each says so in
+      its header. Expect the first real run to find something to fix; fix it
+      IN THE SCRIPT, commit the fix, and rewrite that platform's status block. <<<
 
 
 THE SEVEN RUNTIME IDENTIFIERS

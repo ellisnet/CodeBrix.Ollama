@@ -1,4 +1,3 @@
-// Ported from Ollama (https://github.com/ollama/ollama), MIT License, Copyright (c) Ollama. Source: manifest/manifest.go at commit a43fad18.
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -6,7 +5,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace CodeBrix.Ollama.ModelManager;
+namespace CodeBrix.Ollama.ModelManager; //was previously: ollama/ollama manifest/manifest.go;
 
 /// <summary>
 /// Reading, writing, listing and deleting the manifest files of a store. A manifest lives at

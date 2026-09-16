@@ -1,8 +1,7 @@
-// Ported from Ollama (https://github.com/ollama/ollama), MIT License, Copyright (c) Ollama. Source: fs/gguf/tensor.go at commit a43fad18.
 using SilverAssertions;
 using Xunit;
 
-namespace CodeBrix.Ollama.ModelManager.Tests;
+namespace CodeBrix.Ollama.ModelManager.Tests; //was previously: ollama/ollama fs/gguf/tensor.go;
 
 /// <summary>Covers the ggml type table: names, block geometry and per-value sizes.</summary>
 public sealed class GgufTensorTypesTests
@@ -50,13 +49,13 @@ public sealed class GgufTensorTypesTests
     [InlineData(GgufTensorType.MXFP4, "mxfp4")]
     [InlineData(GgufTensorType.NVFP4, "nvfp4")]
     [InlineData(GgufTensorType.Q1_0, "q1_0")]
-    public void GetName_ReturnsGgmlName_ForEveryKnownType(GgufTensorType tensorType, string expected)
+    public void GetName_returns_ggml_name_for_every_known_type(GgufTensorType tensorType, string expected)
     {
         GgufTensorTypes.GetName(tensorType).Should().Be(expected);
     }
 
     [Fact]
-    public void GetName_ReturnsUnknown_ForUnknownId()
+    public void GetName_returns_unknown_for_unknown_id()
     {
         GgufTensorTypes.GetName((GgufTensorType)9999).Should().Be("unknown");
     }
@@ -84,7 +83,7 @@ public sealed class GgufTensorTypesTests
     [InlineData(GgufTensorType.MXFP4, 39u)]
     [InlineData(GgufTensorType.NVFP4, 40u)]
     [InlineData(GgufTensorType.Q1_0, 41u)]
-    public void GgufTensorType_HasGgmlId_ForEveryType(GgufTensorType tensorType, uint expected)
+    public void GgufTensorType_has_ggml_id_for_every_type(GgufTensorType tensorType, uint expected)
     {
         ((uint)tensorType).Should().Be(expected);
     }
@@ -122,7 +121,7 @@ public sealed class GgufTensorTypesTests
     [InlineData(GgufTensorType.MXFP4, 32L, 17L)]
     [InlineData(GgufTensorType.NVFP4, 64L, 36L)]
     [InlineData(GgufTensorType.Q1_0, 128L, 18L)]
-    public void GetBlockSizeAndGetTypeSize_MatchGgml(GgufTensorType tensorType, long blockSize, long typeSize)
+    public void GetBlockSizeAndGetTypeSize_match_ggml(GgufTensorType tensorType, long blockSize, long typeSize)
     {
         //Arrange
         //Act
@@ -145,7 +144,7 @@ public sealed class GgufTensorTypesTests
     [InlineData(GgufTensorType.IQ4_NL_4_4)]
     [InlineData(GgufTensorType.IQ4_NL_4_8)]
     [InlineData(GgufTensorType.IQ4_NL_8_8)]
-    public void GetTypeSize_ReturnsZero_ForTypesWithNoDefinedSize(GgufTensorType tensorType)
+    public void GetTypeSize_returns_zero_for_types_with_no_defined_size(GgufTensorType tensorType)
     {
         GgufTensorTypes.GetTypeSize(tensorType).Should().Be(0L);
     }
@@ -159,7 +158,7 @@ public sealed class GgufTensorTypesTests
     [InlineData(GgufTensorType.MXFP4, 0.53125d)]
     [InlineData(GgufTensorType.NVFP4, 0.5625d)]
     [InlineData(GgufTensorType.Q1_0, 0.140625d)]
-    public void GetBytesPerElement_DividesTypeSizeByBlockSize(GgufTensorType tensorType, double expected)
+    public void GetBytesPerElement_divides_type_size_by_block_size(GgufTensorType tensorType, double expected)
     {
         GgufTensorTypes.GetBytesPerElement(tensorType).Should().Be(expected);
     }

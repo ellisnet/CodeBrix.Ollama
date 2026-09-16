@@ -1,8 +1,7 @@
-// Ported from Ollama (https://github.com/ollama/ollama), MIT License, Copyright (c) Ollama. Source: server/images.go at commit a43fad18.
 using System;
 using System.Collections.Generic;
 
-namespace CodeBrix.Ollama.ModelManager;
+namespace CodeBrix.Ollama.ModelManager; //was previously: ollama/ollama server/images.go;
 
 /// <summary>
 /// Infers what a model can do from its config, its GGUF metadata, its projectors and its Go template,

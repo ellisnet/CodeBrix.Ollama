@@ -19,7 +19,7 @@ public sealed class ModelStorePathsTests
 
     /// <summary>The store directory is made absolute and the two subdirectories hang off it.</summary>
     [Fact]
-    public void Constructor_StoresAbsolutePathsForBothSubdirectories()
+    public void Constructor_stores_absolute_paths_for_both_subdirectories()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -35,7 +35,7 @@ public sealed class ModelStorePathsTests
 
     /// <summary>A relative store directory is resolved against the current directory.</summary>
     [Fact]
-    public void Constructor_WithRelativeDirectory_MakesItAbsolute()
+    public void Constructor_with_relative_directory_makes_it_absolute()
     {
         //Act
         var paths = new ModelStorePaths("relative-store");
@@ -50,7 +50,7 @@ public sealed class ModelStorePathsTests
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]
-    public void Constructor_WithEmptyDirectory_Throws(string directory)
+    public void Constructor_with_empty_directory_throws(string directory)
     {
         //Act
         Action act = () => new ModelStorePaths(directory);
@@ -61,7 +61,7 @@ public sealed class ModelStorePathsTests
 
     /// <summary>A blob lives in the blobs directory under its digest, with a hyphen for the colon.</summary>
     [Fact]
-    public void GetBlobPath_ForValidDigest_ReturnsHyphenatedNameInBlobs()
+    public void GetBlobPath_for_valid_digest_returns_hyphenated_name_in_blobs()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -75,7 +75,7 @@ public sealed class ModelStorePathsTests
 
     /// <summary>A digest already spelled as a file name resolves to the same blob.</summary>
     [Fact]
-    public void GetBlobPath_ForFileNameSpelling_ReturnsSamePath()
+    public void GetBlobPath_for_file_name_spelling_returns_same_path()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -90,7 +90,7 @@ public sealed class ModelStorePathsTests
 
     /// <summary>Computing a blob path creates nothing on disk.</summary>
     [Fact]
-    public void GetBlobPath_DoesNotCreateDirectories()
+    public void GetBlobPath_does_not_create_directories()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -108,7 +108,7 @@ public sealed class ModelStorePathsTests
     [InlineData("")]
     [InlineData("nonsense")]
     [InlineData("sha256:tooshort")]
-    public void GetBlobPath_ForInvalidDigest_Throws(string digest)
+    public void GetBlobPath_for_invalid_digest_throws(string digest)
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -122,7 +122,7 @@ public sealed class ModelStorePathsTests
 
     /// <summary>The exception message names the problem the way Ollama's ErrInvalidDigestFormat does.</summary>
     [Fact]
-    public void GetBlobPath_ForInvalidDigest_MessageMentionsInvalidDigestFormat()
+    public void GetBlobPath_for_invalid_digest_message_mentions_invalid_digest_format()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -145,7 +145,7 @@ public sealed class ModelStorePathsTests
 
     /// <summary>A manifest lives four directory levels below the manifests directory.</summary>
     [Fact]
-    public void GetManifestPath_ForFullyQualifiedName_ReturnsFourLevels()
+    public void GetManifestPath_for_fully_qualified_name_returns_four_levels()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -165,7 +165,7 @@ public sealed class ModelStorePathsTests
 
     /// <summary>Every part of the name shows up as its own directory, host and tag included.</summary>
     [Fact]
-    public void GetManifestPath_ForExplicitName_UsesEveryPart()
+    public void GetManifestPath_for_explicit_name_uses_every_part()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -185,7 +185,7 @@ public sealed class ModelStorePathsTests
 
     /// <summary>A name missing a part has no manifest path.</summary>
     [Fact]
-    public void GetManifestPath_ForUnqualifiedName_Throws()
+    public void GetManifestPath_for_unqualified_name_throws()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -199,7 +199,7 @@ public sealed class ModelStorePathsTests
 
     /// <summary>Both directories are created and creating them twice is harmless.</summary>
     [Fact]
-    public async Task EnsureDirectoriesAsync_CreatesManifestsAndBlobs()
+    public async Task EnsureDirectoriesAsync_creates_manifests_and_blobs()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -215,7 +215,7 @@ public sealed class ModelStorePathsTests
 
     /// <summary>The partial-download sidecars sit beside the blob and carry this library's own suffixes.</summary>
     [Fact]
-    public void GetPartialPaths_ReturnBlobPathWithCodebrixSuffixes()
+    public void GetPartialPaths_return_blob_path_with_codebrix_suffixes()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -235,7 +235,7 @@ public sealed class ModelStorePathsTests
     /// or "-partial-N", so the two downloaders never write to the same file.
     /// </summary>
     [Fact]
-    public void GetPartialPaths_DoNotCollideWithOllamaSidecarNames()
+    public void GetPartialPaths_do_not_collide_with_ollama_sidecar_names()
     {
         //Arrange
         using var store = new TempStoreDirectory();
@@ -260,7 +260,7 @@ public sealed class ModelStorePathsTests
     [InlineData("sha256-" + SixtyFourHex + "-partial-3", false)]
     [InlineData("sha256-" + SixtyFourHex, false)]
     [InlineData("", false)]
-    public void IsPartialSidecarFileName_RecognizesOnlyThisLibrarysLeftovers(string fileName, bool expected)
+    public void IsPartialSidecarFileName_recognizes_only_this_librarys_leftovers(string fileName, bool expected)
     {
         ModelStorePaths.IsPartialSidecarFileName(fileName).Should().Be(expected);
     }

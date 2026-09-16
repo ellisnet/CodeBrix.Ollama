@@ -1,7 +1,6 @@
-// Ported from Ollama (https://github.com/ollama/ollama), MIT License, Copyright (c) Ollama. Source: parser/parser.go at commit a43fad18.
 using System;
 
-namespace CodeBrix.Ollama.ModelManager;
+namespace CodeBrix.Ollama.ModelManager; //was previously: ollama/ollama parser/parser.go;
 
 /// <summary>
 /// One command from a Modelfile: the keyword Ollama stores it under, and its argument text with

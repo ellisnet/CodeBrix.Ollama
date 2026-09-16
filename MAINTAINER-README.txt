@@ -55,8 +55,10 @@ THE STATE OF THINGS, 2026-09-15
     identifier - no library code at all. Its AGENT-README.txt is a placeholder,
     and tests/CodeBrix.Ollama.ModelRunner.Tests builds, references the library
     and links the conformance vectors but holds no test files at all.
-  * The native build tooling under llama-native-tools/ is complete, and ONE of
-    the seven runtime identifiers has been built, gated and adopted.
+  * The native build tooling under llama-native-tools/ is complete, and FIVE
+    of the seven runtime identifiers have been built, gated and adopted:
+    osx-x64, osx-arm64, linux-x64, linux-arm64 and linux-riscv64. The two
+    Windows slices remain unbuilt.
 
 Statements below about ModelRunner therefore describe its packaging and its
 native payload, not an API that exists.
@@ -399,8 +401,9 @@ LICENSE, named LICENSE-LlamaCpp.txt, into
 
     src/CodeBrix.Ollama.ModelRunner/runtimes/<rid>/native/
 
-with the pre-strip twin going to llama-native-tools/unstripped/<rid>/ (its
-SHA256SUMS extended) and a BUILD-PROVENANCE.txt entry written from that build's
+with the pre-strip twin going to llama-native-tools/unstripped/<rid>/
+(xz-compressed on Linux, where the raw twin is 80-115 MB; its SHA256SUMS
+extended) and a BUILD-PROVENANCE.txt entry written from that build's
 output/<rid>/BUILD-INFO.txt, all together.
 
 The shipped file names are unversioned and package-unique on purpose -
@@ -419,11 +422,23 @@ was never real - both slices weak-imported a 13.3-only Accelerate symbol and
 would have crashed at the first BLAS matmul on macOS 11.0 to 13.2 - so the pin
 was raised, the wrapper now fails the build on any unguarded use of an API
 newer than the floor, and the x64 slice was rebuilt and re-adopted the same
-day. The other five - win-x64, win-arm64, linux-x64, linux-arm64 and
-linux-riscv64 - are NOT BUILT, and their scripts, written on the Intel mini,
-have NEVER BEEN RUN; each script says so in its header. From dav1d's
-experience, each platform's first real run is expected to find something to
-fix. Fix it IN THE SCRIPT, and rewrite that platform's status block.
+day. LINUX-X64, LINUX-ARM64 and LINUX-RISCV64 were built, gated and adopted
+the same evening on the x86_64 LMDE laptop through the manylinux container
+route (x64 natively; arm64 and riscv64 under qemu-user emulation, the way
+dav1d's were), with glibc floors of 2.27, 2.27 and 2.38 and only glibc's own
+libraries as dependencies. Their first runs found three things to fix, none of
+them in the build scripts: the wrapper's Linux link carried
+-Wl,--exclude-libs,ALL, which on ELF hides every archive symbol and defeated
+the version script; the aarch64 Containerfile's toolchain probe expected the
+wrong dot-product value; and the riscv64 image (Rocky Linux 10, system gcc)
+lacked the static libstdc++ that its AlmaLinux siblings get from
+gcc-toolset-14. Each fix is in the file it belongs to and recorded in
+BUILD-PROVENANCE.txt. Nothing has yet run the arm64 or riscv64 files on real
+hardware. The other two - win-x64 and win-arm64 - are NOT BUILT, and their
+scripts, written on the Intel mini, have NEVER BEEN RUN; each script says so
+in its header. From dav1d's experience, the first real run is expected to find
+something to fix. Fix it IN THE SCRIPT, and rewrite that platform's status
+block.
 
 EVERYTHING ELSE ABOUT THE NATIVES LIVES IN THAT FOLDER, and is not duplicated
 here on purpose:
@@ -447,7 +462,9 @@ about its origin. The osx-x64 slice is CPU-only by decision AND by necessity: at
 the vendored commit, ggml-metal returned NaN for every logit on that machine's
 Intel UHD 630. And osx-x64 is reproducible EXCEPT for its LC_UUID, so a rebuild
 legitimately produces a different sha256 - compare size, exports and gate
-result, not the hash. The macOS floor is a symbol question, not a stamp: the
+result, not the hash; the Linux slices behave the same way, differing between
+runs only in the build timestamp baked into codebrix_llama_build_info() and the
+GNU build-id derived from it. The macOS floor is a symbol question, not a stamp: the
 minos value says where dyld will load the file, and only the compile-time
 availability check proves that every symbol it calls exists there.
 
@@ -464,18 +481,22 @@ is LOGIC: a set of Go files was read and re-expressed by hand as C#, organised
 around this library's own public API and using the base class library
 throughout.
 
-EVERY PORTED FILE CARRIES THIS HEADER AS ITS FIRST LINE, on one line:
+EVERY PORTED FILE CARRIES THE FAMILY'S PROVENANCE MARKER ON ITS NAMESPACE LINE:
 
-    // Ported from Ollama (https://github.com/ollama/ollama), MIT License,
-    Copyright (c) Ollama. Source: <upstream path> at commit a43fad18.
+    namespace CodeBrix.Ollama.ModelManager; //was previously: ollama/ollama <upstream path>;
 
-27 files in the library carry it today, naming types/model/name.go, the five
-fs/gguf files, parser/parser.go with api/types.go, the three manifest/ files,
-server/images.go, server/create.go, server/model.go, x/create/manifest.go,
-server/download.go and format/format.go. Ten files in the test project carry it
-too, naming the upstream *_test.go the case tables came from.
+There is no banner comment above the using block - ported files follow the same
+top-of-file layout as every other file (Ollama's Go sources carry no per-file
+licence header, so there is nothing to preserve verbatim), and the licence and
+copyright attribution live in THIRD-PARTY-NOTICES.txt, not in each file.
+27 files in the library carry the marker today, naming types/model/name.go, the
+five fs/gguf files, parser/parser.go with api/types.go, the three manifest/
+files, server/images.go, server/create.go, server/model.go,
+x/create/manifest.go, server/download.go and format/format.go. Eleven files in
+the test project carry it too, naming the upstream *_test.go the case tables
+came from (or the source file whose tables they exercise).
 
-FILES WITH NO OLLAMA LOGIC CARRY NO HEADER, and that is not an oversight: the
+FILES WITH NO OLLAMA LOGIC CARRY NO MARKER, and that is not an oversight: the
 exception types and the JSON helper under Common/, the public DTOs and options
 under Store/, Modelfile/GoBool.cs and Registry/RegistryManifestResponse.cs. The
 on-disk FORMAT those DTOs describe is Ollama's, kept identical on purpose so a
@@ -483,11 +504,11 @@ store directory is interchangeable with a real Ollama install - but the C# is
 this repository's.
 
 THIRD-PARTY-NOTICES.txt at the repository root holds the full attribution: the
-upstream-file-to-our-file scope list from which the header list above was
+upstream-file-to-our-file scope list from which the marker list above was
 compiled, the modifications made during the port, and Ollama's MIT licence
 verbatim. It also covers llama.cpp and the licences that appear in the vendored
 snapshot. Extend it whenever you port anything further; if you rewrite a file
-until nothing of the original remains, remove the header rather than leave a
+until nothing of the original remains, remove the marker rather than leave a
 false attribution.
 
 THE REFERENCE CLONE lives at ~/GitHome/ollama, at that same commit. It is a
@@ -609,12 +630,16 @@ test projects alike.
     GenerateDocumentationFile is on for both libraries; fix CS1591 at the source
     and never suppress it. There is no <NoWarn> in this repository.
 
-  - TESTS are named <ClassUnderTest>Tests.cs with PascalCase method names in the
-    Member_Behaviour_Condition shape, //Arrange //Act //Assert comments in
-    multi-statement tests, and TestContext.Current.CancellationToken passed to
-    every cancellable call (xUnit1051). Assertions are SilverAssertions fluent
-    style throughout - .Should().Be(), .BeNull(), .BeTrue(), .HaveCount(),
-    .BeEmpty() - not raw Assert.* calls.
+  - TESTS are named <ClassUnderTest>Tests.cs, and test methods follow the
+    family's two styles: <Member>_<snake_case_description> when the test
+    targets one member (ReadAsync_reads_a_version_one_file,
+    IsValid_with_null_returns_false), pure snake_case when it does not.
+    The leading token matches the member's casing exactly; everything after
+    the first underscore is lowercase snake_case. Multi-statement tests carry
+    //Arrange //Act //Assert comments, and TestContext.Current.CancellationToken
+    is passed to every cancellable call (xUnit1051). Assertions are
+    SilverAssertions fluent style throughout - .Should().Be(), .BeNull(),
+    .BeTrue(), .HaveCount(), .BeEmpty() - not raw Assert.* calls.
 
   - PROSE RULES for anything written in this repository: no firearm metaphors
     ("pitfall", "gotcha", "sharp edge" instead), and the family's banned-name
@@ -636,9 +661,8 @@ NOTES
 
 NEVER `git commit` AND NEVER `git push` IN THIS REPOSITORY. Leave all changes in
 the working tree; Jeremy handles every git operation. Read-only git (status,
-log, diff, ls-tree) is fine. As of this writing the repository has two commits -
-the initial commit and the native-tools commit - and everything else, including
-the whole of ModelManager, is uncommitted in the working tree.
+log, diff, ls-tree) is fine. `git log` is the record of what has been committed;
+do not describe the commit state in this file, because it goes stale.
 
 WHAT HAS BEEN VALIDATED, AND ON WHAT
 ------------------------------------
@@ -663,20 +687,25 @@ macOS 15.8, x86_64, .NET SDK 10.0.401.
 
 WHAT HAS NOT BEEN VALIDATED
 ---------------------------
-  * THE MANAGED SUITE HAS NEVER BEEN RUN ON WINDOWS OR LINUX. ModelManager is
-    pure managed code and path handling goes through Path.Combine throughout,
-    but that is an argument, not evidence. The store lays out
+  * THE MANAGED SUITE HAS NEVER BEEN RUN ON WINDOWS. ModelManager is pure
+    managed code and path handling goes through Path.Combine throughout, but
+    that is an argument, not evidence. The store lays out
     manifests/<host>/<namespace>/<model>/<tag> as real directories, and nothing
-    has yet proved that a Windows run agrees with this one. Anyone with those
-    machines should run it and report back.
+    has yet proved that a Windows run agrees with this one. Anyone with a
+    Windows machine should run it and report back. (Linux IS covered: on
+    2026-09-15 the solution built 0/0 with --no-incremental and the suite ran
+    789 total / 788 passed / 1 skipped on a Debian-family x64 workstation with
+    the same SDK, as the built executable.)
 
   * THE LIVE PULL TEST HAS NOT YET BEEN RUN IN THIS REPOSITORY. Say that plainly
     rather than assuming it works: CODEBRIX_OLLAMA_RUN_LIVE_TESTS=1 has never
     been set here, so the one test that reaches registry.ollama.ai has only ever
     been skipped. Running it is the first thing to do before any release.
 
-  * THE FIVE WINDOWS AND LINUX NATIVE SLICES ARE UNBUILT and their scripts
-    unrun, as described under THE NATIVE LIBRARIES.
+  * THE TWO WINDOWS NATIVE SLICES ARE UNBUILT and their scripts unrun, as
+    described under THE NATIVE LIBRARIES. The three Linux slices were built
+    and gated on 2026-09-15 (arm64 and riscv64 under qemu-user emulation) but
+    have not yet run on real arm64 or riscv64 hardware.
 
   * ModelRunner IS NOT WRITTEN. There is no managed binding, so the committed
     macOS libraries have been verified only by llama-native-tools' own gate - by

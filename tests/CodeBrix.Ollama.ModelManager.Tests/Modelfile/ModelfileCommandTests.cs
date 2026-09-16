@@ -1,9 +1,8 @@
-// Ported from Ollama (https://github.com/ollama/ollama), MIT License, Copyright (c) Ollama. Source: parser/parser_test.go at commit a43fad18.
 using System;
 using SilverAssertions;
 using Xunit;
 
-namespace CodeBrix.Ollama.ModelManager.Tests;
+namespace CodeBrix.Ollama.ModelManager.Tests; //was previously: ollama/ollama parser/parser_test.go;
 
 /// <summary>
 /// Tests for <see cref="ModelfileCommand"/>, ported from the Command.String cases exercised by
@@ -13,7 +12,7 @@ public sealed class ModelfileCommandTests
 {
     /// <summary>The constructor keeps the name and argument text as given.</summary>
     [Fact]
-    public void Constructor_KeepsNameAndArgs()
+    public void Constructor_keeps_name_and_args()
     {
         //Act
         var command = new ModelfileCommand("model", "llama3:latest");
@@ -25,7 +24,7 @@ public sealed class ModelfileCommandTests
 
     /// <summary>A null name is rejected.</summary>
     [Fact]
-    public void Constructor_WithNullName_Throws()
+    public void Constructor_with_null_name_throws()
     {
         //Arrange
         Action act = () => new ModelfileCommand(null, "value");
@@ -36,7 +35,7 @@ public sealed class ModelfileCommandTests
 
     /// <summary>A null argument is rejected.</summary>
     [Fact]
-    public void Constructor_WithNullArgs_Throws()
+    public void Constructor_with_null_args_throws()
     {
         //Arrange
         Action act = () => new ModelfileCommand("system", null);
@@ -66,7 +65,7 @@ public sealed class ModelfileCommandTests
     [InlineData("message", "system: ", "MESSAGE system ")]
     [InlineData("message", "system:  ", "MESSAGE system \" \"")]
     [InlineData("message", "assistant", "MESSAGE assistant ")]
-    public void ToString_RendersTheLine(string name, string args, string expected)
+    public void ToString_renders_the_line(string name, string args, string expected)
     {
         //Act
         var line = new ModelfileCommand(name, args).ToString();
@@ -77,7 +76,7 @@ public sealed class ModelfileCommandTests
 
     /// <summary>A value holding a newline is wrapped in one double quote when it has no quote of its own.</summary>
     [Fact]
-    public void ToString_WithMultilineValue_UsesSingleQuotes()
+    public void ToString_with_multiline_value_uses_single_quotes()
     {
         //Act
         var line = new ModelfileCommand("system", "\nThis is a\nmultiline system.\n").ToString();
@@ -88,7 +87,7 @@ public sealed class ModelfileCommandTests
 
     /// <summary>A value holding a newline and a double quote is wrapped in three double quotes.</summary>
     [Fact]
-    public void ToString_WithMultilineValueHoldingQuote_UsesTripleQuotes()
+    public void ToString_with_multiline_value_holding_quote_uses_triple_quotes()
     {
         //Act
         var line = new ModelfileCommand("system", "\nSay \"Hello!\".\n").ToString();
@@ -99,7 +98,7 @@ public sealed class ModelfileCommandTests
 
     /// <summary>A MESSAGE argument is split on the first ": " only.</summary>
     [Fact]
-    public void ToString_WithMessageHoldingSeparator_SplitsOnTheFirstOne()
+    public void ToString_with_message_holding_separator_splits_on_the_first_one()
     {
         //Act
         var line = new ModelfileCommand("message", "user: a: b").ToString();

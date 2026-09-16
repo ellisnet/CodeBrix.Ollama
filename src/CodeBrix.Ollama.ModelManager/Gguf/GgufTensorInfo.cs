@@ -1,8 +1,7 @@
-// Ported from Ollama (https://github.com/ollama/ollama), MIT License, Copyright (c) Ollama. Source: fs/gguf/tensor.go at commit a43fad18.
 using System;
 using System.Collections.Generic;
 
-namespace CodeBrix.Ollama.ModelManager;
+namespace CodeBrix.Ollama.ModelManager; //was previously: ollama/ollama fs/gguf/tensor.go;
 
 /// <summary>
 /// One tensor descriptor from a GGUF file: its name, shape, type and offset into the tensor data section.

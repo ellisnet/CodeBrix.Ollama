@@ -1,8 +1,7 @@
-// Ported from Ollama (https://github.com/ollama/ollama), MIT License, Copyright (c) Ollama. Source: fs/gguf/keyvalue.go at commit a43fad18.
 using System;
 using System.Globalization;
 
-namespace CodeBrix.Ollama.ModelManager;
+namespace CodeBrix.Ollama.ModelManager; //was previously: ollama/ollama fs/gguf/keyvalue.go;
 
 /// <summary>
 /// One GGUF key-value's value: a scalar, a string, or an array of one element type.

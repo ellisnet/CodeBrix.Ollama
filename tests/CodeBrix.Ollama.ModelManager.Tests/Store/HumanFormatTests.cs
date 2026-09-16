@@ -27,7 +27,7 @@ public sealed class HumanFormatTests
     [InlineData(7200000000UL, "7.2B")]
     [InlineData(8000000000UL, "8B")]
     [InlineData(70000000000UL, "70B")]
-    public void HumanNumber_FormatsTheCountLikeOllama(ulong value, string expected)
+    public void HumanNumber_formats_the_count_like_ollama(ulong value, string expected)
     {
         HumanFormat.HumanNumber(value).Should().Be(expected);
     }

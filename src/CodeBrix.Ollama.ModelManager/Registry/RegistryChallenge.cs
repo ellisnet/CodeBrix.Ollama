@@ -1,7 +1,6 @@
-// Ported from Ollama (https://github.com/ollama/ollama), MIT License, Copyright (c) Ollama. Source: server/images.go at commit a43fad18.
 using System;
 
-namespace CodeBrix.Ollama.ModelManager;
+namespace CodeBrix.Ollama.ModelManager; //was previously: ollama/ollama server/images.go;
 
 /// <summary>
 /// The three values a registry puts in the <c>WWW-Authenticate</c> header of a 401 answer: the realm
