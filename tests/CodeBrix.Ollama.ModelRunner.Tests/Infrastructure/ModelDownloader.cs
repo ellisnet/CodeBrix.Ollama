@@ -78,8 +78,8 @@ public static class ModelDownloader
                 $"'{target}' is {length} bytes and should be {expectedSize}. Delete it and run again.");
         }
 
-        // Something else may already be fetching this file - the orchestrator downloads the large one - so a
-        // growing partial file is waited on rather than raced.
+        // Another process may already be fetching this file - a second test run, or a download started by hand
+        // into the same cache - so a growing partial file is waited on rather than raced.
         string partial = target + ".partial";
         if (await WaitForAnotherDownloadAsync(target, partial, cancellationToken).ConfigureAwait(false))
         {

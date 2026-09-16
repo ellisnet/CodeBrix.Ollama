@@ -1,7 +1,8 @@
 namespace CodeBrix.Ollama.ModelManager;
 
 /// <summary>
-/// One progress report from <see cref="IModelStore.PullAsync"/>. The shape mirrors Ollama's own
+/// One progress report from <see cref="IModelStore.PullAsync(string, System.Threading.CancellationToken)"/>
+/// and from the bundle pull beside it. The shape mirrors Ollama's own
 /// progress stream: a status line, and for layer downloads the digest with byte counts.
 /// </summary>
 public sealed class PullProgress

@@ -36,9 +36,7 @@ public sealed class ToolCallFormatTests
     [InlineData("{{if .ToolCalls}}[TOOL_CALL] [{{end}}", "[TOOL_CALL] [")]
     [InlineData("{{if .ToolCalls}}[TOOL_CALL][{{end}}", "[TOOL_CALL][")]
     public void FromGoTemplateText_reads_the_prefix(string template, string expectedPrefix)
-    {
-        ToolCallFormat.FromGoTemplateText(template).Prefix.Should().Be(expectedPrefix);
-    }
+        => ToolCallFormat.FromGoTemplateText(template).Prefix.Should().Be(expectedPrefix);
 
     /// <summary>A null template is treated as one that says nothing about tool calls.</summary>
     [Fact]

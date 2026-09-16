@@ -7,7 +7,7 @@ namespace CodeBrix.Ollama.ModelRunner.Tests;
 /// Covers the stop-sequence detector, whose whole job is to be right about text that arrives a few
 /// characters at a time.
 /// </summary>
-public sealed class StopSequenceTests
+public sealed class StopSequenceDetectorTests
 {
     /// <summary>With nothing to watch for, text passes straight through.</summary>
     [Fact]

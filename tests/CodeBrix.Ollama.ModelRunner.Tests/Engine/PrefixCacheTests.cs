@@ -124,9 +124,13 @@ public sealed class PrefixCacheTests
         PrefixCache cache = new PrefixCache();
         cache.Add(1);
 
-        //Act and assert
-        Assert.Throws<ArgumentOutOfRangeException>(() => cache.TruncateTo(3));
-        Assert.Throws<ArgumentOutOfRangeException>(() => cache.TruncateTo(-1));
+        //Act
+        Action pastTheEnd = () => cache.TruncateTo(3);
+        Action negative = () => cache.TruncateTo(-1);
+
+        //Assert
+        pastTheEnd.Should().Throw<ArgumentOutOfRangeException>();
+        negative.Should().Throw<ArgumentOutOfRangeException>();
     }
 
     /// <summary>Clearing forgets everything, matching a cleared memory.</summary>

@@ -282,15 +282,11 @@ public sealed class ModelNameTests
     [InlineData(Part80, true)]
     [InlineData(Part80 + "8", false)]
     public void IsValidNamespace_matches_upstream(string value, bool expected)
-    {
-        ModelName.IsValidNamespace(value).Should().Be(expected);
-    }
+        => ModelName.IsValidNamespace(value).Should().Be(expected);
 
     [Fact]
     public void IsValidNamespace_with_null_returns_false()
-    {
-        ModelName.IsValidNamespace(null).Should().BeFalse();
-    }
+        => ModelName.IsValidNamespace(null).Should().BeFalse();
 
     // ---------------------------------------------------------------------
     // ToRelativePath and ParseFromRelativePath.
@@ -330,9 +326,7 @@ public sealed class ModelNameTests
     [InlineData("")]
     [InlineData(null)]
     public void ParseFromRelativePath_with_unusable_path_returns_default(string relativePath)
-    {
-        ModelName.ParseFromRelativePath(relativePath).Should().Be(default(ModelName));
-    }
+        => ModelName.ParseFromRelativePath(relativePath).Should().Be(default(ModelName));
 
     [Fact]
     public void ToRelativePath_round_trips_through_parse_from_relative_path()
@@ -374,17 +368,13 @@ public sealed class ModelNameTests
     [InlineData("host/library/model:tag", "host/library/model:tag")]
     [InlineData("REGISTRY.OLLAMA.AI/LIBRARY/model:tag", "model:tag")]
     public void DisplayShortest_matches_upstream(string input, string expected)
-    {
-        ModelName.ParseBare(input).DisplayShortest().Should().Be(expected);
-    }
+        => ModelName.ParseBare(input).DisplayShortest().Should().Be(expected);
 
     [Theory]
     [InlineData("host/namespace/model:tag", "namespace/model")]
     [InlineData("model", "library/model")]
     public void DisplayNamespaceModel_joins_namespace_and_model(string input, string expected)
-    {
-        ModelName.Parse(input).DisplayNamespaceModel().Should().Be(expected);
-    }
+        => ModelName.Parse(input).DisplayNamespaceModel().Should().Be(expected);
 
     // ---------------------------------------------------------------------
     // Merge.
@@ -443,9 +433,7 @@ public sealed class ModelNameTests
     [InlineData("host/namespace/model:tag", "host/namespace/model:other", false)]
     [InlineData("host/namespace/model:tag", "other/namespace/model:tag", false)]
     public void EqualsIgnoreCase_compares_parts_without_case(string first, string second, bool expected)
-    {
-        ModelName.ParseBare(first).EqualsIgnoreCase(ModelName.ParseBare(second)).Should().Be(expected);
-    }
+        => ModelName.ParseBare(first).EqualsIgnoreCase(ModelName.ParseBare(second)).Should().Be(expected);
 
     [Fact]
     public void Equals_is_ordinal_and_ignores_the_protocol_scheme()
@@ -499,9 +487,7 @@ public sealed class ModelNameTests
 
     [Fact]
     public void BaseUrl_with_port_keeps_the_port()
-    {
-        ModelName.Parse("https://host:8080/namespace/model:tag").BaseUrl().Port.Should().Be(8080);
-    }
+        => ModelName.Parse("https://host:8080/namespace/model:tag").BaseUrl().Port.Should().Be(8080);
 
     // ---------------------------------------------------------------------
     // Members that have no upstream counterpart.

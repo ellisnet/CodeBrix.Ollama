@@ -19,6 +19,36 @@ namespace CodeBrix.Ollama.ModelManager; //was previously: ollama/ollama server/i
 /// </summary>
 public sealed class ModelStore : IModelStore, IDisposable
 {
+    /// <summary>What a pull of a plain list of addresses calls the thing it is listing.</summary>
+    private const string FileListLabel = "file list";
+
+    /// <summary>The value the config's <c>source</c> property carries for a Hugging Face pull.</summary>
+    private const string HubSource = "hf.co";
+
+    /// <summary>The value the config's <c>source</c> property carries for a pull of a list of addresses.</summary>
+    private const string UrlSource = "url";
+
+    /// <summary>The value the config's <c>source</c> property carries for an imported folder.</summary>
+    private const string LocalSource = "local";
+
+    /// <summary>The config property that says where a bundle's files came from.</summary>
+    private const string SourceProperty = "source";
+
+    /// <summary>The config property that names the repository or folder a bundle came from.</summary>
+    private const string RepositoryProperty = "repository";
+
+    /// <summary>The config property that records the commit a listing resolved to.</summary>
+    private const string RevisionProperty = "revision";
+
+    /// <summary>The config property that records the licence identifier the source states.</summary>
+    private const string LicenseIdProperty = "licenseId";
+
+    /// <summary>The config property that records where the licence statement was read from.</summary>
+    private const string LicenseSourceProperty = "licenseSource";
+
+    /// <summary>The config property that records when a bundle was pulled or imported.</summary>
+    private const string PulledAtProperty = "pulledAt";
+
     private static readonly IReadOnlyList<GgufMetadata> NoMetadata = Array.Empty<GgufMetadata>();
     private static readonly IReadOnlyList<ModelMessage> NoMessages = Array.Empty<ModelMessage>();
 
@@ -50,6 +80,51 @@ public sealed class ModelStore : IModelStore, IDisposable
         ThrowIfDisposed();
         ModelName parsed = ParseModelName(name, nameof(name));
 
+        await foreach (PullProgress progress in StreamProgressAsync(
+            (writer, token) => RunPullAsync(parsed, writer, token), cancellationToken).ConfigureAwait(false))
+        {
+            yield return progress;
+        }
+    }
+
+    /// <inheritdoc />
+    public async IAsyncEnumerable<PullProgress> PullAsync(
+        string name,
+        PullOptions options,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        ModelName parsed = ParseModelName(name, nameof(name));
+        PullOptions effective = options ?? PullOptions.ForRegistry();
+
+        // A pull with no source of its own is the pull this library has always done, down to the same
+        // code path: a bundle pull is something a caller asks for, never something it falls into.
+        Func<ChannelWriter<PullProgress>, CancellationToken, Task> work;
+        if (effective.Source == PullSource.Registry)
+        {
+            work = (writer, token) => RunPullAsync(parsed, writer, token);
+        }
+        else
+        {
+            work = (writer, token) => RunBundlePullAsync(parsed, effective, writer, token);
+        }
+
+        await foreach (PullProgress progress in StreamProgressAsync(work, cancellationToken).ConfigureAwait(false))
+        {
+            yield return progress;
+        }
+    }
+
+    /// <summary>
+    /// Runs one pull and hands its progress reports to the caller as they are made.
+    /// </summary>
+    /// <param name="work">The pull, which writes its reports into the channel it is given.</param>
+    /// <param name="cancellationToken">A token that cancels the pull.</param>
+    /// <returns>The reports, in the order they were made.</returns>
+    private async IAsyncEnumerable<PullProgress> StreamProgressAsync(
+        Func<ChannelWriter<PullProgress>, CancellationToken, Task> work,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
         var channel = Channel.CreateUnbounded<PullProgress>(new UnboundedChannelOptions
         {
             SingleReader = true,
@@ -71,7 +146,7 @@ public sealed class ModelStore : IModelStore, IDisposable
                 {
                     try
                     {
-                        await RunPullAsync(parsed, channel.Writer, downloadToken).ConfigureAwait(false);
+                        await work(channel.Writer, downloadToken).ConfigureAwait(false);
                     }
                     catch (Exception exception)
                     {
@@ -183,7 +258,9 @@ public sealed class ModelStore : IModelStore, IDisposable
             Template = layers.Template,
             System = layers.System,
             Parameters = layers.Parameters,
-            Licenses = layers.LicensesOrEmpty(),
+            Licenses = await ReadLicenseTextsAsync(layers, cancellationToken).ConfigureAwait(false),
+            License = ReadLicenseRecord(layers.Config),
+            Format = ReadFormat(layers),
             Messages = layers.Messages ?? NoMessages,
             Metadata = metadata,
             ProjectorMetadata = projectorMetadata,
@@ -216,8 +293,96 @@ public sealed class ModelStore : IModelStore, IDisposable
             Parameters = layers.Parameters,
             Licenses = layers.LicensesOrEmpty(),
             Messages = layers.Messages ?? NoMessages,
-            Config = layers.Config
+            Config = layers.Config,
+            Format = ReadFormat(layers),
+            Files = layers.BundleFiles
         };
+    }
+
+    /// <inheritdoc />
+    public async Task ImportBundleAsync(
+        string name,
+        string directory,
+        ImportOptions options = null,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        ModelName parsed = ParseModelName(name, nameof(name));
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            throw new ArgumentException("A directory is required.", nameof(directory));
+        }
+
+        ImportOptions effective = options ?? new ImportOptions();
+        string root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory));
+        if (!Directory.Exists(root))
+        {
+            throw new ModelManagerException("the directory " + root + " does not exist");
+        }
+
+        IReadOnlyList<string> relativePaths = CollectImportPaths(root, effective.Filter, cancellationToken);
+        if (relativePaths.Count == 0)
+        {
+            throw new ModelManagerException(
+                "the directory " + root + " holds no file to import"
+                    + (effective.Filter.KeepsEverything ? string.Empty : " that the filter keeps"));
+        }
+
+        await _paths.EnsureDirectoriesAsync(cancellationToken).ConfigureAwait(false);
+        StoredManifest existing = await TryReadManifestAsync(parsed, cancellationToken).ConfigureAwait(false);
+        Dictionary<string, string> deleteMap = CollectDeleteMap(existing);
+
+        var layers = new List<ModelLayer>(relativePaths.Count);
+        foreach (string relativePath in relativePaths)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            string filePath = Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
+            ModelLayer layer = await LayerFactory.CreateFromFileAsync(
+                _paths, filePath, MediaTypes.BundleFile, null, effective.Link, cancellationToken)
+                .ConfigureAwait(false);
+            layer.Name = relativePath;
+            layers.Add(layer);
+            deleteMap.Remove(layer.Digest);
+        }
+
+        LicenseRecord license = effective.License ?? FindImportedLicense(relativePaths);
+        ModelConfig config = BuildBundleConfig(
+            parsed, relativePaths, BundleFormatDetector.Imported, LocalSource, root, null, license);
+
+        await WriteBundleManifestAsync(parsed, layers, config, deleteMap, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<string>> MaterializeAsync(
+        string name,
+        string targetDirectory,
+        MaterializeOptions options = null,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        ModelName parsed = ParseModelName(name, nameof(name));
+        if (string.IsNullOrWhiteSpace(targetDirectory))
+        {
+            throw new ArgumentException("A target directory is required.", nameof(targetDirectory));
+        }
+
+        StoredManifest stored = await RequireManifestAsync(parsed, name, cancellationToken).ConfigureAwait(false);
+        ModelLayerReader layers = await ModelLayerReader
+            .ReadAsync(_paths, stored.Manifest, cancellationToken).ConfigureAwait(false);
+
+        if (layers.BundleFiles.Count == 0)
+        {
+            throw new InvalidOperationException(
+                "The model " + parsed.DisplayShortest() + " has no publisher file tree, so there is nothing"
+                    + " to lay out: it carries no bundle file layers. Only a bundle - a model pulled with"
+                    + " PullOptions or imported from a folder - can be materialized; the files of a GGUF"
+                    + " model are named by ResolveAsync instead.");
+        }
+
+        return await BundleMaterializer.WriteAsync(
+            layers.BundleFiles, targetDirectory, options ?? new MaterializeOptions(), cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -537,6 +702,469 @@ public sealed class ModelStore : IModelStore, IDisposable
             cancellationToken).ConfigureAwait(false);
 
         return false;
+    }
+
+    /// <summary>
+    /// Runs one bundle pull to completion: list the source, fetch every file it named into the blobs
+    /// directory, then write one layer per file and a config that records where they came from.
+    /// </summary>
+    /// <remarks>
+    /// The verification step reports its status and checks that every blob the new manifest names is in
+    /// the store at the size that was recorded, rather than reading every file a second time. Each
+    /// file's SHA-256 was computed from the bytes as they were written and checked against whatever the
+    /// source stated, so there is nothing a re-read could establish that the download did not - and a
+    /// bundle is exactly the case where re-reading would mean gigabytes.
+    /// </remarks>
+    /// <param name="name">The fully qualified model name.</param>
+    /// <param name="options">Where the files come from and which of them are wanted.</param>
+    /// <param name="writer">Where progress reports go.</param>
+    /// <param name="cancellationToken">A token that cancels the pull.</param>
+    /// <returns>A task that completes when the manifest has been written.</returns>
+    private async Task RunBundlePullAsync(
+        ModelName name,
+        PullOptions options,
+        ChannelWriter<PullProgress> writer,
+        CancellationToken cancellationToken)
+    {
+        ThrowIfDisposed();
+        await _paths.EnsureDirectoriesAsync(cancellationToken).ConfigureAwait(false);
+
+        bool fromHub = options.Source == PullSource.HuggingFaceFiles;
+        string repository = fromHub ? ResolveRepository(name, options) : null;
+        string revision = fromHub ? ResolveRevision(name, options) : null;
+
+        // Whatever the previous manifest referenced and the new one does not is removed at the end.
+        StoredManifest existing = await TryReadManifestAsync(name, cancellationToken).ConfigureAwait(false);
+        Dictionary<string, string> deleteMap = CollectDeleteMap(existing);
+
+        writer.TryWrite(new PullProgress("listing " + (repository ?? FileListLabel)));
+        BundleListing listing = await ListBundleAsync(options, repository, revision, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (listing.Files.Count == 0)
+        {
+            throw new ModelManagerException(
+                "the source listed no file to pull for " + name.DisplayShortest()
+                    + ", so there would be nothing to store");
+        }
+
+        var layers = new List<ModelLayer>(listing.Files.Count);
+        var paths = new List<string>(listing.Files.Count);
+
+        using (var downloader = new FileDownloader(GetRegistryClient(), _options, _paths))
+        {
+            foreach (BundleFile file in listing.Files)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                string status = "pulling " + file.Path;
+
+                // A file whose source stated a sha256 is named by it before a byte arrives; a file whose
+                // source stated none is named by what it turns out to be, so its digest joins the
+                // reports only once the bytes are all there.
+                string statedDigest = file.Sha256 == null ? null : Sha256Digest.Prefix + file.Sha256;
+
+                BlobDownloadResult result = await downloader.DownloadFileAsync(
+                    file,
+                    options.RequireHashes,
+                    (completed, total) => writer.TryWrite(new PullProgress(status, statedDigest, total, completed)),
+                    cancellationToken).ConfigureAwait(false);
+
+                writer.TryWrite(new PullProgress(status, result.Digest, result.Size, result.Size));
+
+                layers.Add(new ModelLayer(MediaTypes.BundleFile, result.Digest, result.Size)
+                {
+                    Name = file.Path
+                });
+                paths.Add(file.Path);
+                deleteMap.Remove(result.Digest);
+            }
+        }
+
+        writer.TryWrite(new PullProgress("verifying sha256 digest"));
+        EnsureBundleBlobs(layers);
+
+        ModelConfig config = BuildBundleConfig(
+            name,
+            paths,
+            fromHub ? BundleFormatDetector.HuggingFace : BundleFormatDetector.Files,
+            fromHub ? HubSource : UrlSource,
+            fromHub ? repository : null,
+            listing.ResolvedRevision,
+            listing.License);
+
+        writer.TryWrite(new PullProgress("writing manifest"));
+        await WriteBundleManifestAsync(name, layers, config, deleteMap, cancellationToken).ConfigureAwait(false);
+        writer.TryWrite(new PullProgress("success"));
+    }
+
+    /// <summary>
+    /// Asks the source of a bundle pull what it holds.
+    /// </summary>
+    /// <param name="options">The pull options.</param>
+    /// <param name="repository">The Hugging Face repository, or <see langword="null"/>.</param>
+    /// <param name="revision">The Hugging Face revision, or <see langword="null"/>.</param>
+    /// <param name="cancellationToken">A token that cancels the requests.</param>
+    /// <returns>The files the pull fetches, already filtered.</returns>
+    /// <exception cref="ArgumentException">
+    /// A file-list pull was asked for with no files, or the source is not one a bundle pull can use.
+    /// </exception>
+    private async Task<BundleListing> ListBundleAsync(
+        PullOptions options,
+        string repository,
+        string revision,
+        CancellationToken cancellationToken)
+    {
+        if (options.Source == PullSource.HuggingFaceFiles)
+        {
+            using var hub = new HuggingFaceHubSource(repository, revision, options.Filter, _options);
+            return await hub.ListAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        if (options.Source == PullSource.FileList)
+        {
+            if (options.Files.Count == 0)
+            {
+                throw new ArgumentException(
+                    "A pull from a list of addresses needs at least one file in PullOptions.Files.",
+                    nameof(options));
+            }
+
+            using var list = new HttpFileListSource(options.Files, options.Filter, _options);
+            return await list.ListAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        throw new ArgumentException(
+            "PullSource." + options.Source + " is not a source a bundle can be pulled from.", nameof(options));
+    }
+
+    /// <summary>
+    /// Works out which Hugging Face repository a pull is for: the one the options name, or the one the
+    /// model name spells when its host is the Hub.
+    /// </summary>
+    /// <param name="name">The fully qualified model name.</param>
+    /// <param name="options">The pull options.</param>
+    /// <returns>The repository as <c>&lt;namespace&gt;/&lt;repository&gt;</c>.</returns>
+    /// <exception cref="ArgumentException">
+    /// The options name no repository and the name's host is not the Hub.
+    /// </exception>
+    private static string ResolveRepository(ModelName name, PullOptions options)
+    {
+        if (!string.IsNullOrWhiteSpace(options.Repository))
+        {
+            return options.Repository.Trim();
+        }
+
+        if (HuggingFaceHubSource.IsHubHost(name.Host))
+        {
+            return name.Namespace + "/" + name.Model;
+        }
+
+        throw new ArgumentException(
+            "The name " + name.DisplayShortest() + " does not spell a Hugging Face repository: its host is '"
+                + name.Host + "', not " + HuggingFaceHubSource.ShortHubHost + " or "
+                + HuggingFaceHubSource.HubHost + ". Set PullOptions.Repository to <namespace>/<repository>,"
+                + " or store the bundle under a name whose host is the Hub.",
+            nameof(options));
+    }
+
+    /// <summary>
+    /// Works out which revision a Hugging Face pull lists: the one the options name, or the model name's
+    /// own tag, where the store's default tag means the default branch.
+    /// </summary>
+    /// <param name="name">The fully qualified model name.</param>
+    /// <param name="options">The pull options.</param>
+    /// <returns>The branch, tag or commit to list.</returns>
+    private static string ResolveRevision(ModelName name, PullOptions options)
+    {
+        return HuggingFaceHubSource.NormalizeRevision(
+            string.IsNullOrWhiteSpace(options.Revision) ? name.Tag : options.Revision);
+    }
+
+    /// <summary>
+    /// Checks that every blob a new bundle manifest is about to name is in the store at the size the
+    /// layer records.
+    /// </summary>
+    /// <param name="layers">The layers of the manifest about to be written.</param>
+    /// <exception cref="ModelManagerException">A blob is missing or is not the size it should be.</exception>
+    private void EnsureBundleBlobs(IReadOnlyList<ModelLayer> layers)
+    {
+        foreach (ModelLayer layer in layers)
+        {
+            var blob = new FileInfo(_paths.GetBlobPath(layer.Digest));
+            if (!blob.Exists)
+            {
+                throw new ModelManagerException(
+                    "blob " + layer.Digest + " of '" + layer.Name + "' does not exist");
+            }
+            if (blob.Length != layer.Size)
+            {
+                throw new ModelManagerException(
+                    "blob " + layer.Digest + " of '" + layer.Name + "' is "
+                        + blob.Length.ToString(CultureInfo.InvariantCulture) + " bytes, not "
+                        + layer.Size.ToString(CultureInfo.InvariantCulture));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Builds the config layer of a bundle: what its files are, and where they came from.
+    /// </summary>
+    /// <param name="name">The name the bundle is stored under.</param>
+    /// <param name="paths">The publisher's relative paths, which decide the model format.</param>
+    /// <param name="undecidedFormat">The format to record when the file names decide nothing.</param>
+    /// <param name="source">Where the files came from: the Hub, an address, or a folder on disk.</param>
+    /// <param name="repository">The repository or folder, or <see langword="null"/>.</param>
+    /// <param name="revision">The commit the listing resolved to, or <see langword="null"/>.</param>
+    /// <param name="license">What the source states about the licence, or <see langword="null"/>.</param>
+    /// <returns>The config.</returns>
+    private static ModelConfig BuildBundleConfig(
+        ModelName name,
+        IReadOnlyList<string> paths,
+        string undecidedFormat,
+        string source,
+        string repository,
+        string revision,
+        LicenseRecord license)
+    {
+        LicenseRecord stated = license ?? LicenseRecord.None;
+
+        return new ModelConfig
+        {
+            ModelFormat = BundleFormatDetector.Detect(paths, undecidedFormat),
+            ModelFamily = name.Model,
+            AdditionalProperties = new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+            {
+                [SourceProperty] = ToJsonElement(source),
+                [RepositoryProperty] = ToJsonElement(repository),
+                [RevisionProperty] = ToJsonElement(revision),
+                [LicenseIdProperty] = ToJsonElement(stated.LicenseId),
+                [LicenseSourceProperty] = ToJsonElement(stated.LicenseSource),
+                [PulledAtProperty] = ToJsonElement(DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture))
+            }
+        };
+    }
+
+    /// <summary>
+    /// Writes the config blob and the manifest of a bundle, then removes the blobs the manifest that was
+    /// there before named and this one does not.
+    /// </summary>
+    /// <param name="name">The name the bundle is stored under.</param>
+    /// <param name="layers">The file layers, in the order they are recorded.</param>
+    /// <param name="config">The config to write.</param>
+    /// <param name="deleteMap">The digests of the previous manifest that no longer have a use.</param>
+    /// <param name="cancellationToken">A token that cancels the work.</param>
+    /// <returns>A task that completes when the manifest is in place.</returns>
+    private async Task WriteBundleManifestAsync(
+        ModelName name,
+        List<ModelLayer> layers,
+        ModelConfig config,
+        Dictionary<string, string> deleteMap,
+        CancellationToken cancellationToken)
+    {
+        ModelLayer configLayer = await LayerFactory.CreateFromBytesAsync(
+            _paths,
+            ModelManagerJson.SerializeLikeGo(config),
+            MediaTypes.Config,
+            cancellationToken).ConfigureAwait(false);
+        deleteMap.Remove(configLayer.Digest);
+
+        var manifest = new ModelManifest
+        {
+            Config = configLayer,
+            Layers = layers
+        };
+        await ManifestFiles.WriteAsync(_paths, name, manifest, cancellationToken).ConfigureAwait(false);
+
+        if (deleteMap.Count > 0)
+        {
+            await LayerPruner
+                .RemoveUnreferencedAsync(_paths, deleteMap.Values, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// The digests a manifest that is about to be replaced names, keyed so that the ones the new
+    /// manifest names again can be struck off as they are stored.
+    /// </summary>
+    /// <param name="existing">The manifest that is there now, or <see langword="null"/>.</param>
+    /// <returns>The digests, which are deleted at the end of the pull unless they are struck off.</returns>
+    private static Dictionary<string, string> CollectDeleteMap(StoredManifest existing)
+    {
+        var deleteMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (existing == null)
+        {
+            return deleteMap;
+        }
+
+        foreach (string digest in CollectDigests(existing.Manifest))
+        {
+            deleteMap[digest] = digest;
+        }
+        return deleteMap;
+    }
+
+    /// <summary>
+    /// Walks a folder to its full depth and returns the paths, relative to it and with forward slashes,
+    /// of the files an import keeps, in a fixed order so that two imports of one folder write the same
+    /// manifest.
+    /// </summary>
+    /// <param name="root">The absolute folder path.</param>
+    /// <param name="filter">Which files are wanted.</param>
+    /// <param name="cancellationToken">A token that cancels the walk.</param>
+    /// <returns>The relative paths, ordered.</returns>
+    private static IReadOnlyList<string> CollectImportPaths(
+        string root, FileFilter filter, CancellationToken cancellationToken)
+    {
+        var kept = new List<string>();
+        foreach (string file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            string relativePath = Path.GetRelativePath(root, file).Replace(Path.DirectorySeparatorChar, '/');
+            if (filter.ShouldInclude(relativePath))
+            {
+                kept.Add(relativePath);
+            }
+        }
+
+        kept.Sort(StringComparer.Ordinal);
+        return kept;
+    }
+
+    /// <summary>
+    /// The licence an imported folder states by holding a licence file, when the caller stated none.
+    /// </summary>
+    /// <param name="relativePaths">The paths being imported.</param>
+    /// <returns>
+    /// A record naming the file the terms are in, or <see cref="LicenseRecord.None"/> when there is no
+    /// such file. No identifier is invented: what a licence file says is for a human to read.
+    /// </returns>
+    private static LicenseRecord FindImportedLicense(IReadOnlyList<string> relativePaths)
+    {
+        foreach (string path in relativePaths)
+        {
+            if (IsLicenseFileName(path))
+            {
+                return new LicenseRecord(null, path, "The folder states no licence; it holds this file.");
+            }
+        }
+        return LicenseRecord.None;
+    }
+
+    /// <summary>
+    /// Whether a relative path names a licence file, which is <c>LICENSE</c> or <c>LICENSE.</c> and
+    /// anything, ignoring case.
+    /// </summary>
+    /// <param name="path">The relative path, with forward slashes.</param>
+    /// <returns><see langword="true"/> when the file is a licence.</returns>
+    private static bool IsLicenseFileName(string path)
+    {
+        if (string.IsNullOrEmpty(path))
+        {
+            return false;
+        }
+
+        int slash = path.LastIndexOf('/');
+        string fileName = slash < 0 ? path : path.Substring(slash + 1);
+        return fileName.Equals("LICENSE", StringComparison.OrdinalIgnoreCase)
+            || fileName.StartsWith("LICENSE.", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The licence texts a model reports: every licence layer of a model created from a Modelfile or
+    /// pulled from a registry, followed by the text of every licence file a bundle ships.
+    /// </summary>
+    /// <param name="layers">The decoded layers of the model.</param>
+    /// <param name="cancellationToken">A token that cancels the reads.</param>
+    /// <returns>The texts, in manifest order.</returns>
+    /// <exception cref="ModelManagerException">A licence file's blob is not in the store.</exception>
+    private async Task<IReadOnlyList<string>> ReadLicenseTextsAsync(
+        ModelLayerReader layers, CancellationToken cancellationToken)
+    {
+        var fromFiles = new List<string>();
+        foreach (ResolvedFile file in layers.BundleFiles)
+        {
+            if (!IsLicenseFileName(file.Name))
+            {
+                continue;
+            }
+
+            fromFiles.Add(await LayerFactory
+                .ReadBlobTextAsync(_paths, file.Digest, cancellationToken).ConfigureAwait(false));
+        }
+
+        if (fromFiles.Count == 0)
+        {
+            return layers.LicensesOrEmpty();
+        }
+
+        var combined = new List<string>(layers.Licenses);
+        combined.AddRange(fromFiles);
+        return combined;
+    }
+
+    /// <summary>
+    /// The licence a config layer states.
+    /// </summary>
+    /// <param name="config">The config layer.</param>
+    /// <returns>
+    /// The record, or <see cref="LicenseRecord.None"/> when the config states nothing, which is what
+    /// every model pulled from an Ollama-protocol registry does.
+    /// </returns>
+    private static LicenseRecord ReadLicenseRecord(ModelConfig config)
+    {
+        string licenseId = ReadConfigProperty(config, LicenseIdProperty);
+        string licenseSource = ReadConfigProperty(config, LicenseSourceProperty);
+        return licenseId == null && licenseSource == null
+            ? LicenseRecord.None
+            : new LicenseRecord(licenseId, licenseSource, null);
+    }
+
+    /// <summary>
+    /// The format of a model: what its config says, or "gguf" when it says nothing and the manifest
+    /// carries GGUF weights.
+    /// </summary>
+    /// <param name="layers">The decoded layers of the model.</param>
+    /// <returns>The format, or <see langword="null"/> when nothing says what it is.</returns>
+    private static string ReadFormat(ModelLayerReader layers)
+    {
+        if (!string.IsNullOrEmpty(layers.Config.ModelFormat))
+        {
+            return layers.Config.ModelFormat;
+        }
+        return layers.ModelPath == null ? null : "gguf";
+    }
+
+    /// <summary>
+    /// Reads one of the properties a bundle config records beside the ones this library models.
+    /// </summary>
+    /// <param name="config">The config layer.</param>
+    /// <param name="propertyName">The property to read.</param>
+    /// <returns>The value, or <see langword="null"/> when it is absent or is not a string.</returns>
+    private static string ReadConfigProperty(ModelConfig config, string propertyName)
+    {
+        if (config == null || config.AdditionalProperties == null)
+        {
+            return null;
+        }
+
+        return config.AdditionalProperties.TryGetValue(propertyName, out JsonElement value)
+            && value.ValueKind == JsonValueKind.String
+                ? value.GetString()
+                : null;
+    }
+
+    /// <summary>
+    /// Turns a string into the JSON value a config property carries. A value that is not there is
+    /// written as a JSON null rather than left out, so that a reader can tell "the source stated
+    /// nothing" from "this config was written by something that did not know about the property".
+    /// </summary>
+    /// <param name="value">The value, which may be <see langword="null"/>.</param>
+    /// <returns>The JSON value.</returns>
+    private static JsonElement ToJsonElement(string value)
+    {
+        return JsonSerializer.SerializeToElement(value, ModelManagerJson.Options);
     }
 
     /// <summary>

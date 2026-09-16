@@ -125,8 +125,8 @@ internal static class LayerPruner
     /// Ollama deletes every file in the blobs directory whose name is not a digest. This library does
     /// not, because the same directory may belong to a real Ollama install whose own partial-download
     /// sidecars would then disappear underneath it. Only leftovers this library itself writes, named
-    /// by <see cref="ModelStorePaths.GetPartialDataPath"/> and
-    /// <see cref="ModelStorePaths.GetPartialStatePath"/>, are cleaned up here, and they are not
+    /// by <see cref="ModelStorePaths.GetPartialDataPath(string)"/> and
+    /// <see cref="ModelStorePaths.GetPartialStatePath(string)"/>, are cleaned up here, and they are not
     /// reported in the returned list because they are not blobs.
     /// </remarks>
     public static async Task<IReadOnlyList<string>> PruneAllAsync(

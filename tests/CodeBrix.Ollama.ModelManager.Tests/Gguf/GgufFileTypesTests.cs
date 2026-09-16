@@ -43,9 +43,7 @@ public sealed class GgufFileTypesTests
     [InlineData(GgufFileType.NVFP4, "NVFP4")]
     [InlineData(GgufFileType.Q1_0, "Q1_0")]
     public void GetName_returns_quantization_name_for_every_named_type(GgufFileType fileType, string expected)
-    {
-        GgufFileTypes.GetName(fileType).Should().Be(expected);
-    }
+        => GgufFileTypes.GetName(fileType).Should().Be(expected);
 
     [Theory]
     [InlineData(GgufFileType.Q4_1F16)]
@@ -56,9 +54,7 @@ public sealed class GgufFileTypesTests
     [InlineData(GgufFileType.Q4_0_8_8)]
     [InlineData(GgufFileType.Unknown)]
     public void GetName_returns_unknown_for_types_without_a_name(GgufFileType fileType)
-    {
-        GgufFileTypes.GetName(fileType).Should().Be("unknown");
-    }
+        => GgufFileTypes.GetName(fileType).Should().Be("unknown");
 
     [Theory]
     [InlineData(GgufFileType.F32, 0u)]
@@ -72,7 +68,5 @@ public sealed class GgufFileTypesTests
     [InlineData(GgufFileType.Q1_0, 40u)]
     [InlineData(GgufFileType.Unknown, 1024u)]
     public void GgufFileType_has_llama_cpp_id_for_every_type(GgufFileType fileType, uint expected)
-    {
-        ((uint)fileType).Should().Be(expected);
-    }
+        => ((uint)fileType).Should().Be(expected);
 }

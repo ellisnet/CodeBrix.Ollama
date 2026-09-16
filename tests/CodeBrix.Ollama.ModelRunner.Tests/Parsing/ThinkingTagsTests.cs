@@ -45,16 +45,12 @@ public sealed class ThinkingTagsTests
     [InlineData("content.split('</think>') <SPECIAL_12>", false)]
     [InlineData("{{ content }}", false)]
     public void TemplateSupportsThinking_recognizes_tagged_reasoning(string template, bool expected)
-    {
-        ThinkingTags.TemplateSupportsThinking(template).Should().Be(expected);
-    }
+        => ThinkingTags.TemplateSupportsThinking(template).Should().Be(expected);
 
     /// <summary>A null template is treated as one that says nothing about thinking.</summary>
     [Fact]
     public void TemplateSupportsThinking_accepts_null()
-    {
-        ThinkingTags.TemplateSupportsThinking(null).Should().BeFalse();
-    }
+        => ThinkingTags.TemplateSupportsThinking(null).Should().BeFalse();
 
     /// <summary>The Go heuristic finds the tags around the reasoning of the last message.</summary>
     [Theory]
@@ -159,9 +155,7 @@ public sealed class ThinkingTagsTests
     [InlineData("<|im_start|>assistant\n<think>", "", false)]
     public void PromptEndsWithOpeningTag_detects_an_already_open_block(string prompt, string openingTag,
         bool expected)
-    {
-        ThinkingTags.PromptEndsWithOpeningTag(prompt, openingTag).Should().Be(expected);
-    }
+        => ThinkingTags.PromptEndsWithOpeningTag(prompt, openingTag).Should().Be(expected);
 
     /// <summary>Returns one of the Go templates the theories name.</summary>
     /// <param name="name">The template name.</param>

@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -110,6 +112,49 @@ internal sealed class ModelStorePaths
     public string GetPartialStatePath(string digest)
     {
         return GetBlobPath(digest) + PartialStateSuffix;
+    }
+
+    /// <summary>
+    /// The key a download of an address is tracked under while it runs. A file fetched from an address
+    /// has no digest until its bytes are all there, so its partial file and sidecar are named after the
+    /// address instead: <c>url-</c> and the first 32 characters of the SHA-256 of the address.
+    /// </summary>
+    /// <param name="url">The address the bytes are fetched from.</param>
+    /// <returns>The key, which is a usable file name on every platform.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="url"/> is <see langword="null"/>.</exception>
+    public static string GetDownloadKey(Uri url)
+    {
+        if (url == null)
+        {
+            throw new ArgumentNullException(nameof(url));
+        }
+
+        byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(url.AbsoluteUri));
+        return "url-" + Convert.ToHexStringLower(hash).Substring(0, 32);
+    }
+
+    /// <summary>
+    /// The path of the file that holds the bytes of a download from an address still in progress. It
+    /// sits in the blobs directory beside the blob it will become, and it carries the same
+    /// <c>.codebrix-</c> segment as every other sidecar this library writes, so a prune cleans it up
+    /// and a real Ollama install never mistakes it for one of its own.
+    /// </summary>
+    /// <param name="url">The address the bytes are fetched from.</param>
+    /// <returns>The absolute path of the partial data file.</returns>
+    public string GetPartialDataPath(Uri url)
+    {
+        return Path.Combine(BlobsDirectory, GetDownloadKey(url) + PartialDataSuffix);
+    }
+
+    /// <summary>
+    /// The path of the file that records which byte ranges of a download from an address have been
+    /// written, so an interrupted download resumes.
+    /// </summary>
+    /// <param name="url">The address the bytes are fetched from.</param>
+    /// <returns>The absolute path of the partial state file.</returns>
+    public string GetPartialStatePath(Uri url)
+    {
+        return Path.Combine(BlobsDirectory, GetDownloadKey(url) + PartialStateSuffix);
     }
 
     /// <summary>

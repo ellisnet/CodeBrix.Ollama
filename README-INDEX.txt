@@ -24,9 +24,12 @@ AGENT-README FILES (consumer documentation, one per NuGet package)
   src/CodeBrix.Ollama.ModelManager/AGENT-README.txt
       CodeBrix.Ollama.ModelManager.MitLicenseForever - pulls models from the
       Ollama registry into a local store laid out exactly as Ollama's own,
-      lists, shows, copies, deletes and creates models from Modelfiles, reads
-      GGUF metadata, and resolves a model name to the files on disk. Pure
-      managed code.
+      obtains the files of a model no such registry serves - a Hugging Face
+      file repository, a list of HTTPS addresses, a folder on disk - into the
+      same store and lays them out again as the publisher wrote them, lists,
+      shows, copies, deletes and creates models from Modelfiles, reads GGUF
+      metadata, and resolves a model name to the files on disk. Pure managed
+      code.
 
 MAINTAINER AND EXTRAS
 ---------------------

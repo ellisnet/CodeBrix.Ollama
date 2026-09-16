@@ -21,6 +21,7 @@ public sealed class NativeDefaultsTests
     [Fact]
     public unsafe void Structure_sizes_match_the_c_abi()
     {
+        //Act and assert
         sizeof(LlamaModelParams).Should().Be(72);
         sizeof(LlamaContextParams).Should().Be(160);
         sizeof(LlamaBatch).Should().Be(56);
@@ -112,9 +113,7 @@ public sealed class NativeDefaultsTests
     /// <summary>The sampler chain defaults have the timers off, as the engine writes them.</summary>
     [Fact]
     public void SamplerChainParams_are_the_headers_defaults()
-    {
-        NativeDefaults.SamplerChainParams.NoPerf.Should().Be((byte)1);
-    }
+        => NativeDefaults.SamplerChainParams.NoPerf.Should().Be((byte)1);
 
     /// <summary>The quantization defaults come back with a sane thread count and file type.</summary>
     [Fact]

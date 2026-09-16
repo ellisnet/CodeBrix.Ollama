@@ -22,22 +22,28 @@ public sealed unsafe class ParameterMapperTests
     /// <summary>Options with nothing but a path pass.</summary>
     [Fact]
     public void Validate_accepts_an_option_set_with_only_a_model_path()
-    {
-        ParameterMapper.Validate(Minimal());
-    }
+        => ParameterMapper.Validate(Minimal());
 
     /// <summary>A null option set is a programming error.</summary>
     [Fact]
     public void Validate_refuses_a_null_option_set()
     {
-        Assert.Throws<ArgumentNullException>(() => ParameterMapper.Validate(null));
+        //Arrange
+        Action act = () => ParameterMapper.Validate(null);
+
+        //Assert
+        act.Should().Throw<ArgumentNullException>();
     }
 
     /// <summary>A missing model path is an argument problem, not a load problem.</summary>
     [Fact]
     public void Validate_refuses_an_option_set_without_a_model_path()
     {
-        Assert.Throws<ArgumentException>(() => ParameterMapper.Validate(new ModelRunnerOptions()));
+        //Arrange
+        Action act = () => ParameterMapper.Validate(new ModelRunnerOptions());
+
+        //Assert
+        act.Should().Throw<ArgumentException>();
     }
 
     /// <summary>A path that names nothing is a load problem, and the message says which path.</summary>
@@ -51,10 +57,10 @@ public sealed unsafe class ParameterMapperTests
         };
 
         //Act
-        ModelLoadException error = Assert.Throws<ModelLoadException>(() => ParameterMapper.Validate(options));
+        Action act = () => ParameterMapper.Validate(options);
 
         //Assert
-        error.Message.Should().Contain("no-such-model.gguf");
+        act.Should().Throw<ModelLoadException>().Which.Message.Should().Contain("no-such-model.gguf");
     }
 
     /// <summary>A physical batch larger than the logical one cannot be what the caller meant.</summary>
@@ -66,8 +72,11 @@ public sealed unsafe class ParameterMapperTests
         options.BatchSize = 256;
         options.PhysicalBatchSize = 512;
 
-        //Act and assert
-        Assert.Throws<ArgumentException>(() => ParameterMapper.Validate(options));
+        //Act
+        Action act = () => ParameterMapper.Validate(options);
+
+        //Assert
+        act.Should().Throw<ArgumentException>();
     }
 
     /// <summary>Zeroes where the engine needs at least one are refused.</summary>
@@ -92,8 +101,11 @@ public sealed unsafe class ParameterMapperTests
             case "batchThreads": options.BatchThreads = 0; break;
         }
 
-        //Act and assert
-        Assert.Throws<ArgumentException>(() => ParameterMapper.Validate(options));
+        //Act
+        Action act = () => ParameterMapper.Validate(options);
+
+        //Assert
+        act.Should().Throw<ArgumentException>();
     }
 
     /// <summary>An adapter whose file is not there is a load problem.</summary>
@@ -104,8 +116,11 @@ public sealed unsafe class ParameterMapperTests
         ModelRunnerOptions options = Minimal();
         options.LoraAdapters.Add(new LoraAdapterOptions { Path = Path.Combine(AppContext.BaseDirectory, "nope.gguf") });
 
-        //Act and assert
-        Assert.Throws<ModelLoadException>(() => ParameterMapper.Validate(options));
+        //Act
+        Action act = () => ParameterMapper.Validate(options);
+
+        //Assert
+        act.Should().Throw<ModelLoadException>();
     }
 
     /// <summary>Every model-loading option reaches the field the engine reads it from.</summary>
@@ -349,9 +364,7 @@ public sealed unsafe class ParameterMapperTests
     [InlineData(ModelLoadMode.MemoryMapAndLock, 3)]
     [InlineData(ModelLoadMode.DirectIo, 4)]
     public void MapLoadMode_maps_every_named_mode(ModelLoadMode mode, int expected)
-    {
-        ((int)ParameterMapper.MapLoadMode(mode)).Should().Be(expected);
-    }
+        => ((int)ParameterMapper.MapLoadMode(mode)).Should().Be(expected);
 
     /// <summary>Every flash-attention setting maps onto the engine's own.</summary>
     [Theory]
@@ -359,9 +372,7 @@ public sealed unsafe class ParameterMapperTests
     [InlineData(FlashAttentionMode.Disabled, 0)]
     [InlineData(FlashAttentionMode.Enabled, 1)]
     public void MapFlashAttention_maps_every_named_setting(FlashAttentionMode mode, int expected)
-    {
-        ((int)ParameterMapper.MapFlashAttention(mode)).Should().Be(expected);
-    }
+        => ((int)ParameterMapper.MapFlashAttention(mode)).Should().Be(expected);
 
     /// <summary>Every pooling setting maps onto the engine's own.</summary>
     [Theory]
@@ -372,9 +383,7 @@ public sealed unsafe class ParameterMapperTests
     [InlineData(EmbeddingPooling.Last, 3)]
     [InlineData(EmbeddingPooling.Rank, 4)]
     public void MapPooling_maps_every_named_setting(EmbeddingPooling pooling, int expected)
-    {
-        ((int)ParameterMapper.MapPooling(pooling)).Should().Be(expected);
-    }
+        => ((int)ParameterMapper.MapPooling(pooling)).Should().Be(expected);
 
     /// <summary>Every cache type maps onto a tensor type, and the default keeps whatever the engine chose.</summary>
     [Theory]
@@ -384,24 +393,27 @@ public sealed unsafe class ParameterMapperTests
     [InlineData(KvCacheType.Q8_0, 8)]
     [InlineData(KvCacheType.Q4_0, 2)]
     public void MapCacheType_maps_every_named_type(KvCacheType type, int expected)
-    {
-        ((int)ParameterMapper.MapCacheType(type, GgmlType.Iq4Nl)).Should().Be(expected);
-    }
+        => ((int)ParameterMapper.MapCacheType(type, GgmlType.Iq4Nl)).Should().Be(expected);
 
     /// <summary>The default cache type is whatever the engine already decided.</summary>
     [Fact]
     public void MapCacheType_keeps_the_engines_own_choice_for_the_default()
-    {
-        ParameterMapper.MapCacheType(KvCacheType.Default, GgmlType.Q5K).Should().Be(GgmlType.Q5K);
-    }
+        => ParameterMapper.MapCacheType(KvCacheType.Default, GgmlType.Q5K).Should().Be(GgmlType.Q5K);
 
     /// <summary>A value that is not one of the named ones is a programming error, not a silent fallback.</summary>
     [Fact]
     public void The_mappers_refuse_a_value_that_is_not_one_of_the_named_ones()
     {
-        Assert.Throws<ArgumentException>(() => ParameterMapper.MapLoadMode((ModelLoadMode)99));
-        Assert.Throws<ArgumentException>(() => ParameterMapper.MapFlashAttention((FlashAttentionMode)99));
-        Assert.Throws<ArgumentException>(() => ParameterMapper.MapPooling((EmbeddingPooling)99));
-        Assert.Throws<ArgumentException>(() => ParameterMapper.MapCacheType((KvCacheType)99, GgmlType.F16));
+        //Arrange
+        Action loadMode = () => ParameterMapper.MapLoadMode((ModelLoadMode)99);
+        Action flashAttention = () => ParameterMapper.MapFlashAttention((FlashAttentionMode)99);
+        Action pooling = () => ParameterMapper.MapPooling((EmbeddingPooling)99);
+        Action cacheType = () => ParameterMapper.MapCacheType((KvCacheType)99, GgmlType.F16);
+
+        //Assert
+        loadMode.Should().Throw<ArgumentException>();
+        flashAttention.Should().Throw<ArgumentException>();
+        pooling.Should().Throw<ArgumentException>();
+        cacheType.Should().Throw<ArgumentException>();
     }
 }

@@ -35,9 +35,11 @@ public sealed class EngineWorkerTests
         //Arrange
         using EngineWorker worker = new EngineWorker("test worker");
 
-        //Act and assert
-        await Assert.ThrowsAsync<InvalidTimeZoneException>(
-            () => worker.RunAsync<int>(() => throw new InvalidTimeZoneException("no")));
+        //Act
+        Func<Task> failing = () => worker.RunAsync<int>(() => throw new InvalidTimeZoneException("no"));
+
+        //Assert
+        await failing.Should().ThrowAsync<InvalidTimeZoneException>();
 
         // The thread survived it and is still taking work.
         (await worker.RunAsync(() => 7)).Should().Be(7);
@@ -79,6 +81,7 @@ public sealed class EngineWorkerTests
 
         //Assert
         refused.Should().NotBeNull();
-        await Assert.ThrowsAsync<ObjectDisposedException>(() => refused);
+        Func<Task> awaiting = () => refused;
+        await awaiting.Should().ThrowAsync<ObjectDisposedException>();
     }
 }

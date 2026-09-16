@@ -23,18 +23,14 @@ public sealed class Sha256DigestTests
     /// <summary>The prefix is what a manifest spells a digest with.</summary>
     [Fact]
     public void Prefix_is_colon_form()
-    {
-        Sha256Digest.Prefix.Should().Be("sha256:");
-    }
+        => Sha256Digest.Prefix.Should().Be("sha256:");
 
     /// <summary>Hashing bytes already in memory produces the known vectors.</summary>
     [Theory]
     [InlineData("", EmptyDigest)]
     [InlineData("abc", AbcDigest)]
     public void Compute_for_known_input_returns_known_digest(string input, string expected)
-    {
-        Sha256Digest.Compute(Encoding.UTF8.GetBytes(input)).Should().Be(expected);
-    }
+        => Sha256Digest.Compute(Encoding.UTF8.GetBytes(input)).Should().Be(expected);
 
     /// <summary>Hashing a stream produces the same digest as hashing its bytes.</summary>
     [Fact]
@@ -72,9 +68,7 @@ public sealed class Sha256DigestTests
     [InlineData("sha256-" + SixtyFourHex)]
     [InlineData("sha256:0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF")]
     public void IsValid_for_well_formed_digest_returns_true(string digest)
-    {
-        Sha256Digest.IsValid(digest).Should().BeTrue();
-    }
+        => Sha256Digest.IsValid(digest).Should().BeTrue();
 
     /// <summary>Anything that is not exactly the algorithm, a separator and 64 hex characters is rejected.</summary>
     [Theory]
@@ -89,37 +83,27 @@ public sealed class Sha256DigestTests
     [InlineData("sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdeg")]
     [InlineData("sha256-" + SixtyFourHex + ".codebrix-partial")]
     public void IsValid_for_malformed_digest_returns_false(string digest)
-    {
-        Sha256Digest.IsValid(digest).Should().BeFalse();
-    }
+        => Sha256Digest.IsValid(digest).Should().BeFalse();
 
     /// <summary>A manifest digest becomes a blob file name by way of the separator.</summary>
     [Fact]
     public void ToFileName_for_manifest_digest_replaces_colon_with_hyphen()
-    {
-        Sha256Digest.ToFileName("sha256:" + SixtyFourHex).Should().Be("sha256-" + SixtyFourHex);
-    }
+        => Sha256Digest.ToFileName("sha256:" + SixtyFourHex).Should().Be("sha256-" + SixtyFourHex);
 
     /// <summary>A digest already spelled as a file name is left alone.</summary>
     [Fact]
     public void ToFileName_for_file_name_digest_returns_it_unchanged()
-    {
-        Sha256Digest.ToFileName("sha256-" + SixtyFourHex).Should().Be("sha256-" + SixtyFourHex);
-    }
+        => Sha256Digest.ToFileName("sha256-" + SixtyFourHex).Should().Be("sha256-" + SixtyFourHex);
 
     /// <summary>A blob file name becomes a manifest digest by way of the separator.</summary>
     [Fact]
     public void ToDigest_for_file_name_replaces_hyphen_with_colon()
-    {
-        Sha256Digest.ToDigest("sha256-" + SixtyFourHex).Should().Be("sha256:" + SixtyFourHex);
-    }
+        => Sha256Digest.ToDigest("sha256-" + SixtyFourHex).Should().Be("sha256:" + SixtyFourHex);
 
     /// <summary>A digest already spelled for a manifest is left alone.</summary>
     [Fact]
     public void ToDigest_for_manifest_digest_returns_it_unchanged()
-    {
-        Sha256Digest.ToDigest("sha256:" + SixtyFourHex).Should().Be("sha256:" + SixtyFourHex);
-    }
+        => Sha256Digest.ToDigest("sha256:" + SixtyFourHex).Should().Be("sha256:" + SixtyFourHex);
 
     /// <summary>The short form is the 12 hexadecimal characters Ollama prints on a progress line.</summary>
     [Fact]
@@ -138,9 +122,7 @@ public sealed class Sha256DigestTests
     [InlineData("")]
     [InlineData("sha256:abc")]
     public void Short_for_too_short_input_returns_it_unchanged(string input)
-    {
-        Sha256Digest.Short(input).Should().Be(input);
-    }
+        => Sha256Digest.Short(input).Should().Be(input);
 
     /// <summary>A null stream is rejected.</summary>
     [Fact]

@@ -166,11 +166,38 @@ internal static class LayerFactory
     /// <param name="from">The name recorded as the source of the layer, or <see langword="null"/>.</param>
     /// <param name="cancellationToken">A token that cancels the work.</param>
     /// <returns>The layer that names the imported file.</returns>
+    public static Task<ModelLayer> CreateFromFileAsync(
+        ModelStorePaths paths,
+        string filePath,
+        string mediaType,
+        string from,
+        CancellationToken cancellationToken)
+    {
+        return CreateFromFileAsync(paths, filePath, mediaType, from, false, cancellationToken);
+    }
+
+    /// <summary>
+    /// Imports a file into the store, hard-linking it rather than copying it when the caller asks and
+    /// the file system allows. A link costs no disk space, which is what makes importing a folder of
+    /// weights files about to be thrown away cheap; the price is that the caller's file and the blob
+    /// are then the same bytes, so editing the file in place afterwards edits the blob.
+    /// </summary>
+    /// <param name="paths">The store paths.</param>
+    /// <param name="filePath">The file to import.</param>
+    /// <param name="mediaType">One of the <see cref="MediaTypes"/> constants.</param>
+    /// <param name="from">The name recorded as the source of the layer, or <see langword="null"/>.</param>
+    /// <param name="hardLink">
+    /// Whether to hard-link the file into the blobs directory instead of copying it. A link that cannot
+    /// be made - across a volume, on a file system without hard links - becomes a copy.
+    /// </param>
+    /// <param name="cancellationToken">A token that cancels the work.</param>
+    /// <returns>The layer that names the imported file.</returns>
     public static async Task<ModelLayer> CreateFromFileAsync(
         ModelStorePaths paths,
         string filePath,
         string mediaType,
         string from,
+        bool hardLink,
         CancellationToken cancellationToken)
     {
         if (paths == null)
@@ -197,7 +224,10 @@ internal static class LayerFactory
             string tempPath = Path.Combine(paths.BlobsDirectory, "sha256-" + Path.GetRandomFileName());
             try
             {
-                File.Copy(filePath, tempPath, false);
+                if (!hardLink || !HardLink.TryCreate(filePath, tempPath))
+                {
+                    File.Copy(filePath, tempPath, false);
+                }
                 if (File.Exists(blobPath))
                 {
                     File.Delete(tempPath);

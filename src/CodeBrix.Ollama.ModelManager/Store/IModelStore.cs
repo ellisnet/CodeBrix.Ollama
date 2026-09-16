@@ -39,6 +39,110 @@ public interface IModelStore
     IAsyncEnumerable<PullProgress> PullAsync(string name, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Downloads a model into the store from where its publisher actually keeps it, which need not be a
+    /// registry that speaks Ollama's protocol: a Hugging Face file repository or a plain list of HTTPS
+    /// addresses, a public storage bucket among them. Such a model is a BUNDLE - a set of the
+    /// publisher's own files rather than a GGUF weights file - and it is stored in the same
+    /// content-addressed blob and manifest layout as every other model, so listing, describing,
+    /// resolving, copying, deleting and pruning work on it unchanged.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A bundle pull is always asked for. <see cref="PullOptions.Source"/> of
+    /// <see cref="PullSource.Registry"/>, and <paramref name="options"/> of <see langword="null"/>, both
+    /// mean exactly what <see cref="PullAsync(string, CancellationToken)"/> means, and a name that the
+    /// registry protocol cannot serve fails there as it always has rather than quietly taking another
+    /// route.
+    /// </para>
+    /// <para>
+    /// One layer per file is written, each carrying the publisher's relative path, and the config layer
+    /// records where the files came from, the revision the listing resolved to and whatever the source
+    /// states about the licence. A file already in the store costs no request. A file the source states
+    /// a SHA-256 for is verified against it; a file it states only an MD5 for is verified against that;
+    /// and the store computes the SHA-256 of every file in any case, so a second pull verifies against
+    /// the first.
+    /// </para>
+    /// </remarks>
+    /// <param name="name">The name the model is stored under.</param>
+    /// <param name="options">
+    /// Where the files come from, which of them are wanted and how strict the verification is.
+    /// <see langword="null"/> means a plain registry pull.
+    /// </param>
+    /// <param name="cancellationToken">A token to cancel the operation; partial downloads are kept for resumption.</param>
+    /// <returns>
+    /// A stream of progress reports: "listing &lt;repository&gt;", then "pulling &lt;path&gt;" for each
+    /// file with its byte counts, then "verifying sha256 digest", "writing manifest" and "success".
+    /// </returns>
+    /// <exception cref="ArgumentException">
+    /// A Hugging Face pull was asked for under a name that is not a Hugging Face name and
+    /// <see cref="PullOptions.Repository"/> was not set, or a file-list pull was asked for with no files.
+    /// </exception>
+    /// <exception cref="ModelManagerException">
+    /// <see cref="PullOptions.RequireHashes"/> is set and the source states no hash for a file, or the
+    /// source listed nothing to pull.
+    /// </exception>
+    /// <exception cref="RegistryException">The source refused or failed a request.</exception>
+    /// <exception cref="DigestMismatchException">A downloaded file did not match the hash its source stated.</exception>
+    IAsyncEnumerable<PullProgress> PullAsync(
+        string name, PullOptions options, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Imports a folder already on disk as a bundle: every file under it is hashed, stored as a blob and
+    /// recorded as a layer carrying its path relative to the folder. This is the route for anything a
+    /// publisher keeps behind a sign-in - fetch it however it has to be fetched, then hand the folder
+    /// over - and for any set of files a consumer produced itself.
+    /// </summary>
+    /// <remarks>
+    /// The conventional name for an imported bundle uses the host <c>local</c>, as in
+    /// <c>local/&lt;namespace&gt;/&lt;model&gt;:&lt;tag&gt;</c>, which the name grammar accepts like any
+    /// other host and which no registry can ever be confused with. Nothing enforces it.
+    /// </remarks>
+    /// <param name="name">The name the bundle is stored under.</param>
+    /// <param name="directory">The folder to import. It is walked to its full depth.</param>
+    /// <param name="options">
+    /// Which files are wanted, whether they are linked rather than copied and what is known about the
+    /// licence. <see langword="null"/> copies every file and states no licence.
+    /// </param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>A task that completes when the manifest has been written.</returns>
+    /// <exception cref="ArgumentException">The name or the directory is missing.</exception>
+    /// <exception cref="ModelManagerException">
+    /// The directory does not exist, or holds no file the filter keeps.
+    /// </exception>
+    Task ImportBundleAsync(
+        string name, string directory, ImportOptions options = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Writes a bundle's files out as the directory tree its publisher wrote, so that they can be worked
+    /// with as ordinary files. The store keeps them content addressed, under names that say what they
+    /// are and not what they are called; this puts the publisher's names back.
+    /// </summary>
+    /// <param name="name">The model name. It must name a bundle.</param>
+    /// <param name="targetDirectory">The directory the tree is written under. It is created if missing.</param>
+    /// <param name="options">
+    /// How each file is put in place and what happens to a file already there. <see langword="null"/>
+    /// hard-links where it can, copies where it cannot, and refuses to replace anything.
+    /// </param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>The absolute paths that were written, in manifest order.</returns>
+    /// <exception cref="ArgumentException">The name or the target directory is missing.</exception>
+    /// <exception cref="ModelNotFoundException">The store has no such model.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The model is not a bundle: it carries no publisher file tree, which is the case for every model
+    /// pulled from an Ollama-protocol registry.
+    /// </exception>
+    /// <exception cref="ModelManagerException">
+    /// A file is already at a target path and <see cref="MaterializeOptions.Overwrite"/> is not set, a
+    /// layer names a blob that is not in the store or a path outside the target directory, or a symbolic
+    /// link was asked for and could not be made.
+    /// </exception>
+    Task<IReadOnlyList<string>> MaterializeAsync(
+        string name,
+        string targetDirectory,
+        MaterializeOptions options = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Lists every model in the store, most recently modified first.
     /// </summary>
     /// <param name="cancellationToken">A token to cancel the operation.</param>

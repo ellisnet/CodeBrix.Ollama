@@ -18,9 +18,7 @@ public sealed class ChatFunctionCallParserTests
     [InlineData("<function=x></function>", false)]
     [InlineData(null, false)]
     public void TemplateUsesFunctionSyntax_recognizes_the_nested_tag_convention(string template, bool expected)
-    {
-        ChatFunctionCallParser.TemplateUsesFunctionSyntax(template).Should().Be(expected);
-    }
+        => ChatFunctionCallParser.TemplateUsesFunctionSyntax(template).Should().Be(expected);
 
     /// <summary>One call arrives whole, with its parameters as a JSON object.</summary>
     [Fact]

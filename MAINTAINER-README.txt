@@ -39,17 +39,34 @@ ModelRunner is the PRIMARY package, which is why its AGENT-README sits at the
 repository root and ModelManager keeps its own inside its src/ project folder.
 That is the family's multi-package convention; do not move either file.
 
-ModelManager is pure managed code with zero native content: it pulls models from
-any registry that speaks Ollama's manifest-and-blob protocol, keeps them in
-Ollama's own on-disk blob and manifest layout, lists, shows, copies, deletes and
-creates models from Modelfiles, reads GGUF metadata, and resolves a model name
-to the files on disk. ModelRunner loads a GGUF file and runs it in-process over
-a self-built llama.cpp engine bound through hand-written P/Invoke. An
-application uses the first to get a path and hands that path to the second.
+ModelManager ships no native library: it pulls models from any registry that
+speaks Ollama's manifest-and-blob protocol, obtains the files of a model that no
+such registry serves - a Hugging Face file repository, any list of HTTPS
+addresses, a folder on disk - into the same store, keeps all of it in Ollama's
+own on-disk blob and manifest layout, lists, shows, copies, deletes and creates
+models from Modelfiles, reads GGUF metadata, resolves a model name to the files
+on disk, and lays a bundle out again as its publisher's own file tree.
+ModelRunner loads a GGUF file and runs it in-process over a self-built
+llama.cpp engine bound through hand-written P/Invoke. An application uses the
+first to get a path and hands that path to the second.
 
 THE STATE OF THINGS, 2026-09-16
 -------------------------------
   * ModelManager is written and tested.
+  * ModelManager NOW OBTAINS BUNDLES as well as GGUF models: a Hugging Face
+    file repository, any list of HTTPS addresses (the objects under a public
+    storage bucket included) or a folder already on disk, into the same
+    content-addressed store, with list, show, resolve, copy, delete and prune
+    working on them unchanged, a materialize call that writes the publisher's
+    file tree back out, and the licence a publisher states reported and
+    nothing more. Tested live on 2026-09-16 against four families of
+    music-generation models - a SkyTNT MIDI model, MuPT, MuseCoco and
+    Magenta's Music Transformer. THOSE ARE TEST SUBJECTS, test-side data and
+    nothing else: the library names no model anywhere, and what the work
+    widened is the KINDS of model it can obtain. The plan behind it, whose
+    next phase - exporting what was obtained to ONNX and reducing it, through
+    CodeBrix.Python - is neither written nor started, is
+    ~/ClaudeHome/PLAN_codebrix_ollama_music_models_2026-09-16.md.
   * ModelRunner IS NOW WRITTEN AND TESTED, as of 2026-09-16. The library is
     240 .cs files and about 29,500 lines: the hand-written P/Invoke binding
     over the native engine, two chat-template engines (a clean-room Jinja and
@@ -65,15 +82,23 @@ THE STATE OF THINGS, 2026-09-16
     passed, never executed) and adopted by Jeremy's decision on 2026-09-15,
     overruling the gate rule; a native rebuild on an ARM64 machine is the
     plan if it misbehaves.
-  * ONLY osx-x64 HAS EVER RUN THROUGH THE MANAGED BINDING. Everything below
-    about ModelRunner's behaviour was measured on one machine, the Intel Mac
-    mini; the other six natives have still never been loaded from .NET. See
-    WHAT HAS NOT BEEN VALIDATED.
+  * TWO OF THE SEVEN NATIVES HAVE RUN THROUGH THE MANAGED BINDING: osx-x64,
+    where everything below about ModelRunner's behaviour was measured, on the
+    Intel Mac mini; and linux-x64, where the offline ModelRunner suite loaded
+    the committed native and passed on 2026-09-16 (see WHAT HAS BEEN
+    VALIDATED). The other five natives have still never been loaded from
+    .NET. See WHAT HAS NOT BEEN VALIDATED.
 
 
 REPOSITORY LAYOUT
 =================
-    src/CodeBrix.Ollama.ModelManager/   the managed library (54 .cs files)
+    src/CodeBrix.Ollama.ModelManager/   the managed library (74 .cs files)
+      Bundles/                   the vocabulary a bundle is described in and
+                                 pulled with: BundleDefinition, BundleFile,
+                                 BundleListing, FileFilter, LicenseRecord,
+                                 PullOptions, PullSource, ImportOptions, and
+                                 the internal BundleFormatDetector that reads
+                                 a model format out of a set of file names
       Common/                    the exception hierarchy (ModelManagerException
                                  and its six subclasses) and ModelManagerJson,
                                  the shared JsonSerializerOptions that makes
@@ -92,15 +117,31 @@ REPOSITORY LAYOUT
                                  [@digest]
       Registry/                  the HTTP side of a pull: RegistryClient,
                                  RegistryChallenge, RegistryManifestResponse,
-                                 and the resumable ranged downloader
-                                 BlobDownload with BlobDownloadPart and
-                                 BlobDownloadState. All internal
+                                 the resumable ranged downloader BlobDownload
+                                 with BlobDownloadPart, BlobDownloadState and
+                                 BlobDownloadResult, and FileDownloader, which
+                                 drives that same downloader from an address
+                                 and a stated hash rather than from a registry
+                                 digest. All internal
+      Sources/                   what a bundle is listed from before anything
+                                 is fetched: IBundleSource,
+                                 HuggingFaceHubSource (the Hub's own HTTP API,
+                                 pinned to a commit), HttpFileListSource (a
+                                 plain list of addresses) and the
+                                 GoogleCloudStorageListing helper that turns a
+                                 public bucket prefix into such a list
       Store/                     the store itself: IModelStore, ModelStore,
                                  ModelStoreOptions, ModelStorePaths, the
                                  manifest / layer / config / parameters /
                                  message DTOs, MediaTypes, ManifestFiles,
                                  LayerFactory, LayerPruner, ModelLayerReader,
-                                 ModelCapabilities, Sha256Digest, HumanFormat
+                                 ModelCapabilities, Sha256Digest, HumanFormat,
+                                 and the bundle side of the store:
+                                 ResolvedFile, MaterializeOptions,
+                                 MaterializeLink, the internal
+                                 BundleMaterializer that writes a publisher's
+                                 tree back out and the internal HardLink it
+                                 does that with
       AGENT-README.txt           this package's consumer guide (packed)
       InternalsVisibleTo.cs      grants CodeBrix.Ollama.ModelManager.Tests
 
@@ -175,10 +216,16 @@ REPOSITORY LAYOUT
       InternalsVisibleTo.cs      grants CodeBrix.Ollama.ModelRunner.Tests
 
     tests/CodeBrix.Ollama.ModelManager.Tests/   the xunit.v3 suite, offline
-      Gguf/ Modelfile/ Names/ Registry/ Store/  27 test classes in all
-      Infrastructure/            EnvGatedFactAttribute, FakeRegistryHandler,
-                                 GgufTestFileBuilder, FakeModelBuilder,
-                                 TempStoreDirectory
+                                 by default
+      Bundles/ Gguf/ Modelfile/ Names/ Registry/ Sources/ Store/
+                                 41 test classes in all
+      Infrastructure/            EnvGatedFactAttribute, FakeHttpHandlerBase
+                                 and the three service doubles built on it
+                                 (FakeRegistryHandler, FakeHubHandler,
+                                 FakeBucketHandler), GgufTestFileBuilder,
+                                 FakeModelBuilder, TempStoreDirectory, and the
+                                 live-bundle data MusicModelDefinitions with
+                                 MusicModel and ExpectedBundleFile
       xunit.runner.json          copied to output by an explicit csproj item
 
     tests/CodeBrix.Ollama.ModelRunner.Tests/    the xunit.v3 suite, offline
@@ -201,6 +248,14 @@ REPOSITORY LAYOUT
     llama-native-tools/          everything needed to build the native
                                  libraries. Nothing here is compiled by a
                                  `dotnet build`; see its own README.txt
+
+    .gitattributes               LF line endings on every checkout, on every
+                                 platform. The built-in chat templates are
+                                 embedded resources and the ModelRunner
+                                 fixtures are compared byte for byte, so a
+                                 CRLF checkout (core.autocrlf=true) would fail
+                                 the suite and pack CRLF templates into the
+                                 assembly; the file itself says why in full
 
     CodeBrix.Ollama.slnx         the solution. Its Solution Items folder carries
                                  .gitignore, AGENT-README.txt,
@@ -235,11 +290,11 @@ Standard SDK build from the repository root:
     dotnet build   CodeBrix.Ollama.slnx -c Release
 
 Target framework: net10.0 only, LangVersion latest, on all four projects.
-ModelRunner additionally sets AllowUnsafeBlocks - load-bearing for the P/Invoke
-layer, where 36 of Native/'s 68 files and 7 of Engine/'s 25 use pointers - and
-ModelRunner.Tests matches it. ModelRunner also carries an EmbeddedResource item
-over Templates\OllamaGo\BuiltIn\**, which is how Ollama's 41 built-in template
-files come to travel inside the assembly.
+Both libraries set AllowUnsafeBlocks: ModelRunner for its P/Invoke layer and
+the engine code that walks a logits array or a batch, ModelManager for its
+source-generated platform calls; ModelRunner.Tests matches it. ModelRunner also
+carries an EmbeddedResource item over Templates\OllamaGo\BuiltIn\**, which is
+how Ollama's 41 built-in template files come to travel inside the assembly.
 
 BOTH LIBRARIES HAVE ZERO PackageReference ENTRIES. Verify that after any change.
 It is a contract with consumers, not a preference (see CODING CONVENTIONS), and
@@ -262,9 +317,11 @@ TESTING
 =======
     tests/CodeBrix.Ollama.ModelManager.Tests -- xunit.v3 4.0.1,
     Microsoft.NET.Test.Sdk 18.10.1, xunit.runner.visualstudio 4.0.0 and
-    SilverAssertions.ApacheLicenseForever 1.0.248.1071. 27 test classes,
-    332 test members, 789 test cases (the [Theory] members contribute 511
-    [InlineData] rows between them).
+    SilverAssertions.ApacheLicenseForever 1.0.248.1071. 41 test classes,
+    517 test members, 1,074 test cases as of 2026-09-16: 434 [Fact] and 13
+    [EnvGatedFact] members, 65 [Theory] members carrying 567 [InlineData] rows
+    between them, and 5 more [Theory] members whose [MemberData] walks the
+    live-bundle definitions and contributes 60 rows.
 
     tests/CodeBrix.Ollama.ModelRunner.Tests -- the same four packages at the
     same versions. 44 test classes, 481 test members, 1,258 test cases: 391
@@ -275,7 +332,7 @@ TESTING
     set.
 
 BOTH SUITES ARE OFFLINE BY DEFAULT. Neither needs a daemon, a server, a model
-file or a network: ModelManager's runs in under two seconds on a warm machine
+file or a network: ModelManager's runs in a few seconds on a warm machine
 and ModelRunner's in under three, and ModelRunner's three seconds include
 loading the tiny conformance model through the real native library and checking
 the logits it produces. The tests that are exceptions are gated - see THE
@@ -327,18 +384,24 @@ maxParallelThreads 1, because tests may share on-disk state. Keep it serial.
 
 THE ENVIRONMENT GATE
 --------------------
-THREE VARIABLES, read by each test project's own
+FIVE VARIABLES, read by each test project's own
 Infrastructure/EnvGatedFactAttribute.cs - a FactAttribute subclass that sets
-Skip unless the variables it names hold the expected value - and, in
-ModelRunner.Tests, named as consts in Infrastructure/TestGates.cs:
+Skip unless the variables it names hold the expected value - and named as
+consts, in ModelRunner.Tests in Infrastructure/TestGates.cs and in
+ModelManager.Tests on Infrastructure/MusicModelDefinitions.cs:
 
     CODEBRIX_OLLAMA_RUN_LIVE_TESTS=1    the live tests in BOTH suites
     CODEBRIX_OLLAMA_RUN_QWEN35_TESTS=1  the Qwen 3.5 class, on top of that
+    CODEBRIX_OLLAMA_RUN_MUSECOCO_TESTS=1    the two MuseCoco bundles, on top
+                                        of the live gate
+    CODEBRIX_OLLAMA_RUN_LARGE_MUSIC_TESTS=1 the seven remaining large bundle
+                                        definitions, on top of the live gate
     CODEBRIX_OLLAMA_TEST_MODEL_DIR      where ModelRunner's live tests cache
                                         the model files they download
 
-The first two are gates and take the value "1". The third is not a gate: it
-only moves the cache. Unset, the cache is
+The first four are gates and take the value "1"; a test that names two of them
+runs only when both are set. The fifth is not a gate: it only moves the cache.
+Unset, the cache is
 
     <LocalApplicationData>/CodeBrix.Ollama/test-models
 
@@ -347,18 +410,58 @@ which is ~/.local/share/CodeBrix.Ollama/test-models on macOS and Linux alike -
 NOT to ~/Library/Application Support - and
 %LOCALAPPDATA%\CodeBrix.Ollama\test-models on Windows.
 
-IN ModelManager.Tests the first variable gates EXACTLY ONE test -
+IN ModelManager.Tests THIRTEEN MEMBERS ARE GATED. One is
 ModelStoreLiveTests.PullAsync_FromTheRealRegistry_DownloadsResolvesListsAnd
-DeletesTheModel. Nothing else in that suite is gated. The default run is
-therefore 789 total / 788 passed / 1 skipped; with the gate open it is
-789 / 789 / 0.
+DeletesTheModel, which pulls a GGUF model from registry.ollama.ai. The other
+twelve are MusicModelLiveTests, which pull real bundles from their publishers:
 
-THAT TEST REALLY DOWNLOADS. It pulls smollm:135m - about 92 MB - from
-registry.ollama.ai into a fresh TempStoreDirectory, asserts the progress stream
-starts at "pulling manifest" and ends at "success", resolves the model, reads
-its GGUF metadata back, checks the resolved file's length against the manifest
-layer's size, lists it, deletes it and confirms the blobs directory is empty
-again.
+    LIVE alone                      3 definitions, about 1.05 GiB together
+    LIVE + MUSECOCO                 2 more, about 14.8 GiB
+    LIVE + LARGE_MUSIC              7 more, about 10.4 GiB
+
+The default run is therefore 1074 total / 1061 passed / 13 skipped as of
+2026-09-16; with the live gate alone it is 1074 / 1065 / 9, and with all three
+open it is 1074 / 1074 / 0.
+
+WHAT A BUNDLE LIVE TEST DOES, in one helper every one of the twelve calls:
+pull the definition into a fresh TempStoreDirectory, check that the progress
+stream starts at a "listing" status and ends at "success", then check the
+licence ShowAsync reports and the commit the config recorded, then every
+expected file's size and sha256 through ResolveAsync and on the blob itself,
+then the tree MaterializeAsync writes into a second temporary directory, then
+the listing, then DeleteAsync and that no blob is left behind. What each
+definition expects is DATA - MusicModelDefinitions, generated from the spike
+record ~/ClaudeHome/SPIKE_codebrix_ollama_music_models_2026-09-16.json - so a
+publisher who moves a file, a hash or a licence tag fails a test loudly rather
+than quietly.
+
+NOTHING STAYS ON THE MACHINE. Both temporary directories are removed however
+the test ends, and no model file is cached between runs: a bundle run
+downloads everything it needs each time, which is the price of not keeping
+gigabytes of somebody else's model files around.
+
+THE TEMPORARY STORE MUST BE ON DISK. TempStoreDirectory sits under the system
+temporary directory, and on a machine whose /tmp is a RAM-backed tmpfs - which
+is most Linux desktops - a 14 GB pull would be a 14 GB allocation of memory.
+Point TMPDIR at a real file system before opening the MuseCoco or the large
+gate, and count on about 25 GB free transiently:
+
+    TMPDIR=/var/tmp/codebrix-ollama-tests \
+    CODEBRIX_OLLAMA_RUN_LIVE_TESTS=1 \
+    CODEBRIX_OLLAMA_RUN_MUSECOCO_TESTS=1 \
+    tests/CodeBrix.Ollama.ModelManager.Tests/bin/Release/net10.0/\
+CodeBrix.Ollama.ModelManager.Tests
+
+Those runs belong in a backgrounded run of the BUILT EXECUTABLE with its
+output kept in a log - the large gate is tens of gigabytes over a domestic
+connection - never inside one short-lived tool call.
+
+THE REGISTRY LIVE TEST REALLY DOWNLOADS TOO. It pulls smollm:135m - about
+92 MB - from registry.ollama.ai into a fresh TempStoreDirectory, asserts the
+progress stream starts at "pulling manifest" and ends at "success", resolves
+the model, reads its GGUF metadata back, checks the resolved file's length
+against the manifest layer's size, lists it, deletes it and confirms the blobs
+directory is empty again.
 
 IN ModelRunner.Tests 30 members are gated, in three classes:
 
@@ -401,6 +504,11 @@ a fresh download, which is when a truncated transfer would show. A cached file
 of the wrong size is an error telling you to delete it, never a silent
 re-download.
 
+TIMINGS ON THE LINUX WORKSTATION (i7-12850HX, 16 physical cores, 62 GiB, CPU
+only, 2026-09-16): the whole suite with both gates open ran in 43 s with the
+Qwen file warm in the page cache - a 4.9 s load and 16.5 to 17.5 tokens a
+second - so the class is not slow where the hardware is not.
+
 TIMINGS ON THE INTEL MAC MINI (six cores, 32 GiB, CPU only). The two SmolLM
 classes add a few seconds once the file is cached. Qwen35LiveTests loads the
 20 GB file ONCE for the whole class through Engine/Qwen35ModelFixture.cs and
@@ -419,13 +527,17 @@ TREAT THE GATED RUNS AS PART OF A RELEASE CHECK, NOT AN OPTIONAL EXTRA.
 
 THE TEST INFRASTRUCTURE
 -----------------------
-ModelManager.Tests has FIVE pieces under Infrastructure/, and each exists so
+ModelManager.Tests has NINE pieces under Infrastructure/, and each exists so
 that a whole tier can be tested without a network or a real model:
 
-  EnvGatedFactAttribute.cs   the gate above. It takes the variable name and the
-                             expected value (default "1") and forwards the
-                             compiler-supplied file path and line number to
-                             FactAttribute, so a gated test keeps its location.
+  EnvGatedFactAttribute.cs   the gate above, in two forms: one variable with
+                             the value it must carry (default "1"), and a
+                             string[] of variables that must ALL carry "1",
+                             which is how a MuseCoco or large-bundle test asks
+                             for its own gate on top of the live gate. Either
+                             way it forwards the compiler-supplied file path
+                             and line number to FactAttribute, so a gated test
+                             keeps its location.
 
   FakeRegistryHandler.cs     an in-memory Docker-distribution v2 registry behind
                              an HttpMessageHandler: manifests by
@@ -439,6 +551,39 @@ that a whole tier can be tested without a network or a real model:
                              request is recorded. It reaches the library through
                              the PUBLIC ModelStoreOptions.HttpMessageHandler
                              surface - there is no test-only hook.
+
+  FakeHttpHandlerBase.cs     what every fake service needs and none of them
+                             should write twice: the record of the requests it
+                             saw, the byte-range serving the download engine is
+                             exercised against, and the failure a test injects
+                             into one attempt at one range - a dropped
+                             connection, a stall until cancelled, a chosen
+                             status. Attempts are counted per address AND per
+                             range, so several files in flight each get their
+                             own attempt numbers. FakeRegistryHandler,
+                             FakeHubHandler and FakeBucketHandler all derive
+                             from it; a derived handler decides what lives at
+                             which address and this decides how the bytes are
+                             served once it has found them.
+
+  FakeHubHandler.cs          an in-memory Hugging Face Hub: the repository
+                             document with its commit, its licence tag and its
+                             card, the recursive tree of one commit with
+                             files, nested directories and large-file entries,
+                             and the resolve addresses that answer a redirect
+                             to a content delivery host which then serves the
+                             bytes. Its knobs cover what the source has to
+                             cope with - a gated or private repository, one
+                             that answers 404 without a token, a Hub that
+                             demands a token, a tree that arrives in pages.
+
+  FakeBucketHandler.cs       an in-memory public storage bucket: the XML
+                             listing of the objects under a prefix, paged when
+                             a test asks for it, and the objects themselves
+                             with the two x-goog-hash headers a real bucket
+                             sends - a CRC32C and an MD5, both base64 - which
+                             is how the md5 verification path is reached
+                             offline.
 
   GgufTestFileBuilder.cs     builds small synthetic GGUF files in memory:
                              header, key-values, tensor descriptors and a
@@ -460,6 +605,21 @@ that a whole tier can be tested without a network or a real model:
                              test works inside one. Its Dispose swallows
                              IOException and UnauthorizedAccessException: a
                              leftover directory must never fail a test.
+
+  MusicModelDefinitions.cs   the live-bundle data: twelve BundleDefinitions
+  MusicModel.cs              with, for each, the gate that opens it, the
+  ExpectedBundleFile.cs      commit it is pinned to, the licence identifier
+                             ShowAsync is expected to report and every file it
+                             should produce with that file's size and sha256.
+                             MusicModel is one such record and
+                             ExpectedBundleFile one expected file. It is
+                             GENERATED from the spike record
+                             ~/ClaudeHome/SPIKE_codebrix_ollama_music_models_
+                             2026-09-16.json, and it is the only place in the
+                             repository where a particular model is named: the
+                             library ships no definitions and knows nothing
+                             about any of these models. Regenerate it, do not
+                             hand-edit hashes into it.
 
 ModelRunner.Tests has SIX, and the rule they follow is the same one: the
 offline suite must be able to exercise every tier without a network and without
@@ -757,6 +917,15 @@ There is no banner comment above the using block - ported files follow the same
 top-of-file layout as every other file (Ollama's Go sources carry no per-file
 licence header, so there is nothing to preserve verbatim), and the licence and
 copyright attribution live in THIRD-PARTY-NOTICES.txt, not in each file.
+
+The Go STANDARD LIBRARY files that ModelRunner ports DO carry one, and the
+family rule is to preserve an upstream header verbatim whenever there is one
+(and never to write one when there is not). So the files under
+src/CodeBrix.Ollama.ModelRunner/Templates/OllamaGo/ whose marker names golang/go
+begin with the three-line "Copyright 20xx The Go Authors. All rights reserved."
+notice exactly as their upstream file has it, then one blank line, then the
+using block or the namespace line. Nothing else in either library carries a
+header, because no other upstream file does.
 27 files in the library carry the marker today, naming types/model/name.go, the
 five fs/gguf files, parser/parser.go with api/types.go, the three manifest/
 files, server/images.go, server/create.go, server/model.go,
@@ -942,6 +1111,36 @@ in place; GGUF reading is one eager forward pass producing an immutable snapshot
 rather than the lazy iterator machinery; and LoRA ADAPTER files ARE accepted,
 which is older Ollama behaviour - the upstream commit rejects them.
 
+BUNDLE MANIFESTS AND OLLAMA INTERCHANGE - WHAT WAS CHECKED FIRST
+----------------------------------------------------------------
+A bundle's manifest goes in the SAME manifests tree as a GGUF model's and its
+blobs in the same blobs directory, with one layer per file carrying a media
+type of this library's own, application/vnd.codebrix.model.file. That was only
+done after Ollama's own source was read at the commit this port is pinned to,
+a43fad18, to see what such a manifest does to an Ollama install sharing the
+directory:
+
+  - `ollama list` reads only the config blob, so it lists a model it could
+    never load;
+  - `ollama show` reads a weights file only when a GGUF model layer exists,
+    and a bundle has none;
+  - the layer walk has NO DEFAULT CASE, so a media type it does not know is
+    carried along and ignored rather than rejected;
+  - `ollama rm` prunes generically, by digest, so it removes a bundle cleanly;
+  - `ollama run` fails on such a model, which is the right answer - there is
+    nothing there for it to load;
+  - the name grammar accepts every name shape a bundle uses, the host "local"
+    included.
+
+The files read were server/model_list.go (listModels, describeModel),
+server/images.go (GetModel), server/routes.go (GetModelInfo),
+manifest/manifest.go (Manifests, ParseNamedManifest), manifest/layer.go and
+types/model/name.go (isValidPart, isValidLen). Jeremy installs Ollama nowhere -
+this repository is what replaces it - but another user may well run both
+against one store, and the compatibility costs nothing. A future Ollama release
+could tighten its manifest reading; the family's periodic re-sync of the
+reference commit is what would surface it.
+
 THE DELIBERATE DEVIATIONS IN ModelRunner
 ----------------------------------------
 Same rule: decisions, not omissions, and the ones most likely to be "fixed" by
@@ -1093,15 +1292,22 @@ test projects alike.
     Microsoft packages are fine; xUnit and SilverAssertions in the .Tests
     projects are the standing exception.
 
-  - THE P/INVOKE RULES, which apply to ModelRunner's Native/ folder and
-    nowhere else in this repository:
+  - THE P/INVOKE RULES. Nearly every platform call in this repository lives
+    in ModelRunner's Native/ folder and the rules below are written for it;
+    ModelManager makes one small platform call of its own, to make a hard
+    link, and the first two rules reach it as well:
 
-      * [LibraryImport], NEVER [DllImport]. All 302 imports are
-        source-generated, so the marshalling is visible in generated code
-        rather than inferred at run time. The only DllImport-shaped thing in
-        the tree is NativeLibrary.SetDllImportResolver in
+      * [LibraryImport], NEVER [DllImport], in both libraries. Every import
+        is source-generated, so its marshalling is visible in generated code
+        rather than inferred at run time; both libraries enable unsafe code,
+        which the generator needs. The only DllImport-shaped thing in the
+        tree is NativeLibrary.SetDllImportResolver in ModelRunner's
         NativeLibraryLoader.cs, which is what finds runtimes/<rid>/native/ in
         the first place.
+      * A PLATFORM CALL IN ModelManager ANSWERS, IT DOES NOT THROW. The one it
+        makes says "it worked" or "it did not" and catches every failure the
+        runtime can raise on the way, because the caller's next step - copy
+        the bytes instead - is the same whatever went wrong.
       * ONE LIBRARY NAME, and it is the const NativeLibraryLoader.LibraryName
         ("codebrix_llama") in every single import - the resolver does the rest.
         Never hard-code a file name, an extension or a path in an import.
@@ -1113,9 +1319,10 @@ test projects alike.
         tests/.../Native/NativeDefaultsTests.cs pins the sizes and the default
         values the engine hands back. Add the check in the same commit as the
         struct; a layout that is wrong by four bytes fails nowhere obvious.
-      * unsafe IS ALLOWED HERE, and only here and in the seven Engine/ files
-        that walk a logits array or a batch. It is not a licence to use it in
-        a parser or a template engine.
+      * unsafe IS FOR THE BINDING and for the engine code that walks a logits
+        array or a batch, and nowhere else. It is not a licence to use it in a
+        parser or a template engine, and ModelManager does not turn it on at
+        all.
       * ONE TYPE PER FILE STILL APPLIES to every enum and every struct, which
         is why Native/ is 68 files. The exception the folder does make is
         NativeMethods, which is ONE partial class split by subject
@@ -1132,10 +1339,14 @@ test projects alike.
     IsValid_with_null_returns_false), pure snake_case when it does not.
     The leading token matches the member's casing exactly; everything after
     the first underscore is lowercase snake_case. Multi-statement tests carry
-    //Arrange //Act //Assert comments, and TestContext.Current.CancellationToken
-    is passed to every cancellable call (xUnit1051). Assertions are
-    SilverAssertions fluent style throughout - .Should().Be(), .BeNull(),
-    .BeTrue(), .HaveCount(), .BeEmpty() - not raw Assert.* calls.
+    //Arrange //Act //Assert comments (or the combined //Act and assert), a
+    single-statement test is expression-bodied (=> x.Should().Be(y);), and
+    TestContext.Current.CancellationToken is passed to every cancellable call
+    (xUnit1051). Assertions are SilverAssertions fluent style throughout -
+    .Should().Be(), .BeNull(), .BeTrue(), .HaveCount(), .BeEmpty() - and an
+    expected exception is an Action or Func<Task> named under //Arrange or
+    //Act with act.Should().Throw<T>() / await act.Should().ThrowAsync<T>()
+    under //Assert (.Which reaches the exception). No raw Assert.* calls.
 
   - PROSE RULES for anything written in this repository: no firearm metaphors
     ("pitfall", "gotcha", "sharp edge" instead), and the family's banned-name
@@ -1162,8 +1373,9 @@ do not describe the commit state in this file, because it goes stale.
 
 WHAT HAS BEEN VALIDATED, AND ON WHAT
 ------------------------------------
-Everything below was done on ONE machine: the Intel Mac mini (2018), i7-8700B,
-macOS 15.8, x86_64, .NET SDK 10.0.401. (Later the same day, on the Windows 11
+Everything below was done on the Intel Mac mini (2018), i7-8700B, macOS 15.8,
+x86_64, .NET SDK 10.0.401, except where a bullet names another machine. (Later
+the same day, on the Windows 11
 x64 machine with the same SDK: the solution built 0/0 in Release, the packed
 ModelRunner listed all seven runtimes/<rid>/native/ pairs with no doubled
 path, and the ModelManager executable ran 789/788/1 - but see the
@@ -1175,7 +1387,8 @@ path, and the ModelManager executable ran 789/788/1 - but see the
     GenerateDocumentationFile on and no <NoWarn> anywhere.
   * The ModelManager suite - 789 total, 788 passed, 1 skipped, about two
     seconds, with no network. Run both ways: through `dotnet test` and by
-    running the built executable directly.
+    running the built executable directly. That was the suite before the
+    bundle work; the counts to expect now are under THE ENVIRONMENT GATE.
   * The ModelRunner suite, 2026-09-16, as the built executable - 1258 total,
     1228 passed, 0 failed, 30 skipped, 2.6 seconds, with no network. Opening
     CODEBRIX_OLLAMA_RUN_LIVE_TESTS leaves 9 skipped (the Qwen class); opening
@@ -1190,6 +1403,50 @@ path, and the ModelManager executable ran 789/788/1 - but see the
     vocabulary - at 8.8 to 9.3 tokens a second on six CPU cores, loading in 31
     to 44 seconds warm and about 86 cold, with a peak resident size of about
     23.5 GB on a 32 GiB machine.
+  * ModelManager'S LIVE PULL TEST, RUN FOR THE FIRST TIME on 2026-09-16, on the
+    Linux workstation, with CODEBRIX_OLLAMA_RUN_LIVE_TESTS=1: the whole
+    ModelManager suite 789 total / 789 passed / 0 skipped in 12.5 s, the one
+    gated test pulling smollm:135m from registry.ollama.ai into a temporary
+    store, resolving it, reading its GGUF metadata back, listing it and
+    deleting it. ModelRunner's two SmolLM live classes ran on the same machine
+    the same day, through the built executable: 1258 total / 1249 passed /
+    9 skipped (the Qwen class) in 46 s, including the 368 MiB download into
+    a cache that had been empty.
+  * ModelManager'S FIRST LIVE BUNDLE RUN, 2026-09-16, on the Linux
+    workstation, with CODEBRIX_OLLAMA_RUN_LIVE_TESTS=1: the three gate-A
+    definitions pulled from their publishers - two Hugging Face file
+    repositories and one public storage bucket - 1,132,311,807 bytes in 75 s.
+    Every pinned size, every pinned sha256, the commit each Hugging Face pull
+    resolved to and the licence identifier each ShowAsync reported matched the
+    definitions exactly; each bundle was then resolved, materialized as its
+    publisher's file tree and deleted, and the store's blobs directory was
+    empty afterwards. Later the same day all three gates were opened together
+    on the same machine and all twelve definitions passed the same checks:
+    28,218,571,513 bytes (26.3 GiB) in 1,416 s, about 20 MB/s, the 14.5 GB
+    MuseCoco checkpoint included, with the temporary store on disk (TMPDIR)
+    because /tmp there is RAM-backed. Nothing was left on the machine.
+  * ModelRunner'S LIVE TESTS ON linux-x64, 2026-09-16, BOTH GATES OPEN, on the
+    Linux workstation (16 physical cores, 62 GiB): 1258 total / 1258 passed /
+    0 skipped in 43 s, as the built executable with -showLiveOutput. The Qwen
+    file was fetched by hand into the cache first (20.5 GiB in 17 minutes,
+    sha256 verified), the SmolLM file by the suite itself. Qwen 3.5 35B-A3B
+    Q4_K_M loaded in 4.9 s warm (0.7 s without the extra buffer types),
+    generated at 16.5 to 17.5 tokens a second on the default thread count
+    (the physical cores), evaluated a 288-token tool prompt in 4.5 s, answered
+    the tool call as get_weather({"city":"Paris"}), and kept its reasoning
+    apart from a one-word answer. The engine reported a 20,985.64 MiB
+    CPU_Mapped model buffer plus an 11,520 MiB CPU_REPACK buffer with the
+    extra buffer types on.
+  * THE WHOLE STACK ON linux-x64, 2026-09-16, on a Debian-family x64
+    workstation (i7-12850HX, 16 physical cores, 62 GiB, no GPU, .NET SDK
+    10.0.401): `dotnet build CodeBrix.Ollama.slnx -c Release --no-incremental`
+    0 warnings / 0 errors; the ModelManager executable 789 total / 788 passed
+    / 1 skipped; the ModelRunner executable 1258 total / 1228 passed / 30
+    skipped - which means the binding loaded the committed libcodebrix_llama.so
+    out of runtimes/linux-x64/native/, the NativeDefaultsTests size checks
+    passed against that compiler's layouts, and the conformance logits matched
+    EXPECTED.txt. `dotnet test --solution CodeBrix.Ollama.slnx -c Release
+    --no-build` on that SDK found and ran all 2046 (2015 passed, 31 skipped).
   * Both packages packed and unzipped. Each carries the five packed root files
     and lib/net10.0, each nuspec carries an EMPTY net10.0 dependency group, and
     the ModelRunner package carries all seven runtimes/<rid>/native/ folders -
@@ -1204,30 +1461,29 @@ path, and the ModelManager executable ran 789/788/1 - but see the
 
 WHAT HAS NOT BEEN VALIDATED
 ---------------------------
-  * THE MANAGED SUITE ON WINDOWS - RUN ONCE, 2026-09-15, WITH ONE OPEN
-    QUESTION. On the Windows 11 x64 machine (.NET SDK 10.0.401) the solution
-    built 0 warnings / 0 errors in Release, and the built executable
+  * THE ModelManager SUITE ON WINDOWS - RUN ONCE, 2026-09-15; THE ModelRunner
+    SUITE ON WINDOWS - NEVER. On the Windows 11 x64 machine (.NET SDK
+    10.0.401) the solution built 0 warnings / 0 errors in Release, and the
+    built executable
     tests/.../bin/Release/net10.0/CodeBrix.Ollama.ModelManager.Tests.exe ran
     789 total / 788 passed / 1 skipped in 3.7 s - the same result as macOS
-    and Linux, so the Path.Combine argument now has evidence behind it. BUT
-    `dotnet test tests/CodeBrix.Ollama.ModelManager.Tests -c Release`
-    reported "Zero tests ran", exit code 5, with and without --no-build -
-    the Microsoft.Testing.Platform runner mode that global.json selects did
-    not find the tests on this machine, while the same assembly run directly
-    found all 789. Not investigated further that night (the run was a
-    by-product of adopting the win-x64 native); whoever next works on the
-    test projects on Windows should find out why before trusting `dotnet
-    test` there. (Linux IS covered: on 2026-09-15 the solution built 0/0 with
-    --no-incremental and the suite ran 789 total / 788 passed / 1 skipped on
-    a Debian-family x64 workstation with the same SDK, as the built
-    executable.)
-
-  * ModelManager'S LIVE PULL TEST HAS STILL NEVER BEEN RUN. Say that plainly
-    rather than assuming it works. CODEBRIX_OLLAMA_RUN_LIVE_TESTS=1 HAS now
-    been set in this repository - that is how ModelRunner's live tests ran on
-    2026-09-16 - but only against ModelRunner's executable. The one test that
-    reaches registry.ollama.ai has only ever been skipped. Running it is the
-    first thing to do before any release.
+    and Linux, so the Path.Combine argument now has evidence behind it.
+    `dotnet test tests/CodeBrix.Ollama.ModelManager.Tests -c Release` on that
+    machine reported "Zero tests ran", exit code 5, with and without
+    --no-build. That is a known Microsoft.Testing.Platform behaviour across
+    the CodeBrix family, not a fault in this repository: on some SDK and
+    machine combinations the runner mode that global.json selects finds no
+    tests in an xunit.v3 project, while the same assembly run as the
+    executable runs every one. The executable's counts are authoritative;
+    quote those. (On the Linux workstation the same SDK found and ran all
+    2046 through `dotnet test --solution`, so it varies by machine.) The
+    ModelRunner suite's first Windows run is also the first execution of the
+    Windows branch of Engine/EnginePhysicalCores.cs
+    (GetLogicalProcessorInformationEx filtered to RelationProcessorCore),
+    which was written on Linux, compiles everywhere and has run nowhere;
+    ParameterMapperTests.ResolveThreads_falls_back_to_the_physical_core_count
+    is the test that exercises it, and on a hyper-threaded machine the count
+    it reports should be half of Environment.ProcessorCount.
 
   * THE WIN-ARM64 NATIVE SLICE HAS NEVER BEEN EXECUTED: cross-built and
     statically checked on x64, adopted by decision, as described under THE
@@ -1236,12 +1492,12 @@ WHAT HAS NOT BEEN VALIDATED
     riscv64 under qemu-user emulation) but have not yet run on real arm64 or
     riscv64 hardware. win-x64 is fully gated and adopted.
 
-  * SIX OF THE SEVEN NATIVES HAVE NEVER BEEN LOADED FROM .NET. ModelRunner is
-    written and its whole suite passes, but every run of it has been on ONE
-    machine and ONE runtime identifier: osx-x64, the Intel Mac mini, CPU only,
-    no Metal. osx-arm64, linux-x64, linux-arm64, linux-riscv64, win-x64 and
-    win-arm64 have been verified only by llama-native-tools' own gate - by C
-    programs - and win-arm64 not even by that. The first thing to run
+  * FIVE OF THE SEVEN NATIVES HAVE NEVER BEEN LOADED FROM .NET. ModelRunner's
+    suite has run on two runtime identifiers - osx-x64 on the Intel Mac mini
+    and linux-x64 on a Debian-family workstation, both CPU only, no Metal.
+    osx-arm64, linux-arm64, linux-riscv64, win-x64 and win-arm64 have been
+    verified only by llama-native-tools' own gate - by C programs - and
+    win-arm64 not even by that. The first thing to run
     elsewhere is the OFFLINE ModelRunner suite: it loads the conformance model
     through the real native library, so it proves both that the
     runtimes/<rid>/native/ probing finds what the packing block puts there and
@@ -1253,11 +1509,6 @@ WHAT HAS NOT BEEN VALIDATED
     so far set GpuLayers = 0. The osx-arm64 native carries Metal and its
     conformance was checked by the native gate on the Apple Silicon mini, but
     no managed test has offloaded a single layer.
-
-  * ModelRunner'S LIVE TESTS HAVE RUN ON THIS MACHINE ONLY, and they are the
-    only tests that download. Their two files were already cached here when
-    they ran; a first run elsewhere fetches 368 MiB, or 20.5 GiB with the Qwen
-    gate open.
 
 TWO DESIGN CHOICES, SO THEY ARE NOT MISTAKEN FOR OVERSIGHTS
 ----------------------------------------------------------

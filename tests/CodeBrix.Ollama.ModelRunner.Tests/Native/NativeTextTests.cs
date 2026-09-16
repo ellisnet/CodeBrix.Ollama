@@ -41,17 +41,22 @@ public sealed class NativeTextTests
         //Arrange
         NativeLibraryLoader.EnsureLoaded();
 
-        //Act and assert
-        Assert.Throws<ChatTemplateException>(
-            () => NativeText.ApplyChatTemplate("not-a-template-this-engine-knows", new[] { "user" }, new[] { "Hi." }, false));
+        //Act
+        Action act = () => NativeText.ApplyChatTemplate("not-a-template-this-engine-knows", new[] { "user" }, new[] { "Hi." }, false);
+
+        //Assert
+        act.Should().Throw<ChatTemplateException>();
     }
 
     /// <summary>The two arrays have to describe the same messages.</summary>
     [Fact]
     public void ApplyChatTemplate_rejects_mismatched_arrays()
     {
-        Assert.Throws<ArgumentException>(
-            () => NativeText.ApplyChatTemplate("chatml", new[] { "user", "assistant" }, new[] { "Hi." }, false));
+        //Arrange
+        Action act = () => NativeText.ApplyChatTemplate("chatml", new[] { "user", "assistant" }, new[] { "Hi." }, false);
+
+        //Assert
+        act.Should().Throw<ArgumentException>();
     }
 
     /// <summary>The engine lists the templates it has built in.</summary>
@@ -80,9 +85,7 @@ public sealed class NativeTextTests
         string[] roles,
         string[] contents,
         int expected)
-    {
-        NativeText.EstimateRenderCapacity(roles, contents).Should().Be(expected);
-    }
+        => NativeText.EstimateRenderCapacity(roles, contents).Should().Be(expected);
 
     /// <summary>Text becomes NUL-terminated UTF-8, never the platform's code page.</summary>
     [Fact]

@@ -51,4 +51,18 @@ public static class MediaTypes
 
     /// <summary>Deprecated embeddings layer; read and ignored.</summary>
     public const string Embed = "application/vnd.ollama.image.embed";
+
+    /// <summary>
+    /// One file of a bundle: a model that is not a GGUF file on an Ollama-protocol registry - a Hugging
+    /// Face file repository, a list of addresses, a folder on disk. The layer's
+    /// <see cref="ModelLayer.Name"/> carries the publisher's relative path, so the tree can be written
+    /// out again exactly as the publisher wrote it.
+    /// </summary>
+    /// <remarks>
+    /// This media type is this library's own rather than Ollama's, which has none for the purpose.
+    /// Ollama's own layer walk carries a media type it does not know and ignores it, so a store holding
+    /// such a manifest stays readable by an Ollama install that shares the directory: it lists the
+    /// model, reports its size and removes it, and refuses to run it, which is the right answer.
+    /// </remarks>
+    public const string BundleFile = "application/vnd.codebrix.model.file";
 }

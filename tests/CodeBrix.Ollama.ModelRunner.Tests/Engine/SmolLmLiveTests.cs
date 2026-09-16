@@ -220,9 +220,11 @@ public sealed class SmolLmLiveTests : IClassFixture<SmolLmModelFixture>
         IRunningModel model = await fixture.ModelAsync(TestContext.Current.CancellationToken);
         GenerationOptions options = new GenerationOptions { MaxTokens = 4, Grammar = "this is not gbnf (" };
 
-        //Act and assert
-        await Assert.ThrowsAsync<GrammarException>(() => model.GenerateToEndAsync(
-            "anything", options, TestContext.Current.CancellationToken));
+        //Act
+        Func<Task> act = () => model.GenerateToEndAsync("anything", options, TestContext.Current.CancellationToken);
+
+        //Assert
+        await act.Should().ThrowAsync<GrammarException>();
     }
 
     /// <summary>Repeating a prompt re-uses what is already in the context rather than evaluating it again.</summary>

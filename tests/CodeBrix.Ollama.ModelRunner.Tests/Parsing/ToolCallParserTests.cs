@@ -47,64 +47,51 @@ public sealed class ToolCallParserTests
     /// <summary>Output with no tool call at all is content.</summary>
     [Fact]
     public void AddContent_plain_text_is_content()
-    {
-        AssertParse(QwenTemplate, new[] { "Hello, how can I help you today?" }, "Hello, how can I help you today?");
-    }
+        => AssertParse(QwenTemplate, new[] { "Hello, how can I help you today?" }, "Hello, how can I help you today?");
 
     /// <summary>An empty chunk produces nothing.</summary>
     [Fact]
     public void AddContent_empty_input()
-    {
-        AssertParse(QwenTemplate, new[] { "" }, "");
-    }
+        => AssertParse(QwenTemplate, new[] { "" }, "");
 
     /// <summary>A single tagged call is parsed and nothing is shown to the user.</summary>
     [Fact]
     public void AddContent_one_tool_call()
-    {
-        AssertParse(QwenTemplate,
+        => AssertParse(QwenTemplate,
             new[]
             {
                 "<tool_call>{\"name\": \"get_conditions\", \"arguments\": {\"location\": \"San Francisco\"}}</tool_call>",
             },
             "",
             "get_conditions", "{\"location\":\"San Francisco\"}");
-    }
 
     /// <summary>A call with no arguments is still a call.</summary>
     [Fact]
     public void AddContent_empty_arguments()
-    {
-        AssertParse(QwenTemplate, new[] { "<tool_call>{\"name\": \"get_conditions\", \"arguments\": {}}</tool_call>" },
+        => AssertParse(QwenTemplate, new[] { "<tool_call>{\"name\": \"get_conditions\", \"arguments\": {}}</tool_call>" },
             "", "get_conditions", "{}");
-    }
 
     /// <summary>Text before the tag is emitted as content.</summary>
     [Fact]
     public void AddContent_text_before_a_tool_call()
-    {
-        AssertParse(QwenTemplate,
+        => AssertParse(QwenTemplate,
             new[]
             {
                 "Let me check the weather. <tool_call>{\"name\": \"get_temperature\", \"arguments\": {\"city\": \"New York\"}}</tool_call>",
             },
             "Let me check the weather. ",
             "get_temperature", "{\"city\":\"New York\"}");
-    }
 
     /// <summary>Naming a tool in prose does not call it.</summary>
     [Fact]
     public void AddContent_a_tool_name_in_prose_is_not_a_call()
-    {
-        AssertParse(QwenTemplate, new[] { "Let me say hello to the user. I'll use the say_hello tool. " },
+        => AssertParse(QwenTemplate, new[] { "Let me say hello to the user. I'll use the say_hello tool. " },
             "Let me say hello to the user. I'll use the say_hello tool. ");
-    }
 
     /// <summary>Mistral's bracketed list yields both calls.</summary>
     [Fact]
     public void AddContent_two_calls_in_a_list()
-    {
-        AssertParse(MistralTemplate,
+        => AssertParse(MistralTemplate,
             new[]
             {
                 "[TOOL_CALLS] [{\"name\": \"get_temperature\", \"arguments\": {\"city\": \"London\", \"format\": \"fahrenheit\"}}, {\"name\": \"get_conditions\", \"arguments\": {\"location\": \"Tokyo\"}}][/TOOL_CALLS]",
@@ -112,13 +99,11 @@ public sealed class ToolCallParserTests
             "",
             "get_temperature", "{\"city\":\"London\",\"format\":\"fahrenheit\"}",
             "get_conditions", "{\"location\":\"Tokyo\"}");
-    }
 
     /// <summary>Two tagged calls after some text yield two calls.</summary>
     [Fact]
     public void AddContent_two_tagged_calls()
-    {
-        AssertParse(QwenTemplate,
+        => AssertParse(QwenTemplate,
             new[]
             {
                 "Okay, let's call both tools! <tool_call>{\"name\": \"get_temperature\", \"arguments\": {\"city\": \"London\", \"format\": \"fahrenheit\"}}</tool_call><tool_call>{\"name\": \"get_conditions\", \"arguments\": {\"location\": \"Tokyo\"}}</tool_call>",
@@ -126,13 +111,11 @@ public sealed class ToolCallParserTests
             "Okay, let's call both tools! ",
             "get_temperature", "{\"city\":\"London\",\"format\":\"fahrenheit\"}",
             "get_conditions", "{\"location\":\"Tokyo\"}");
-    }
 
     /// <summary>An argument-less call followed by one with arguments.</summary>
     [Fact]
     public void AddContent_empty_arguments_followed_by_arguments()
-    {
-        AssertParse(QwenTemplate,
+        => AssertParse(QwenTemplate,
             new[]
             {
                 "Let me say hello and check the weather. <tool_call>{\"name\": \"say_hello\", \"arguments\": {}}</tool_call><tool_call>{\"name\": \"get_temperature\", \"arguments\": {\"city\": \"London\", \"format\": \"fahrenheit\"}}</tool_call>",
@@ -140,13 +123,11 @@ public sealed class ToolCallParserTests
             "Let me say hello and check the weather. ",
             "say_hello", "{}",
             "get_temperature", "{\"city\":\"London\",\"format\":\"fahrenheit\"}");
-    }
 
     /// <summary>The same tool called twice, once without arguments.</summary>
     [Fact]
     public void AddContent_same_tool_twice()
-    {
-        AssertParse(QwenTemplate,
+        => AssertParse(QwenTemplate,
             new[]
             {
                 "Let me check the weather. <tool_call>{\"name\": \"get_conditions\", \"arguments\": {}}</tool_call><tool_call>{\"name\": \"get_conditions\", \"arguments\": {\"location\": \"Tokyo\"}}",
@@ -154,26 +135,22 @@ public sealed class ToolCallParserTests
             "Let me check the weather. ",
             "get_conditions", "{}",
             "get_conditions", "{\"location\":\"Tokyo\"}");
-    }
 
     /// <summary>DeepSeek's markers separate the reasoning from the call.</summary>
     [Fact]
     public void AddContent_deepseek()
-    {
-        AssertParse(DeepSeekTemplate,
+        => AssertParse(DeepSeekTemplate,
             new[]
             {
                 "<think>Wait, I need to call a tool</think><|tool\u2581calls\u2581begin|><|tool\u2581call\u2581begin|>function<|tool\u2581sep|>get_temperature\n```json\n{\"city\": \"Tokyo\"}\n```<|tool\u2581call\u2581end|><|tool\u2581calls\u2581end|><|end\u2581of\u2581sentence|>",
             },
             "<think>Wait, I need to call a tool</think>",
             "get_temperature", "{\"city\":\"Tokyo\"}");
-    }
 
     /// <summary>The same DeepSeek response cut across its own markers.</summary>
     [Fact]
     public void AddContent_deepseek_in_chunks()
-    {
-        AssertParse(DeepSeekTemplate,
+        => AssertParse(DeepSeekTemplate,
             new[]
             {
                 "<think>Wait",
@@ -193,28 +170,22 @@ public sealed class ToolCallParserTests
             },
             "<think>Wait, I need to call a tool</think>",
             "get_temperature", "{\"city\":\"Tokyo\"}");
-    }
 
     /// <summary>A model whose template writes bare JSON is parsed from the first brace.</summary>
     [Fact]
     public void AddContent_bare_json()
-    {
-        AssertParse(BareJsonTemplate, new[] { "{", "\"name\": \"get_temperature\",", "\"arguments\": {", "\"city\": \"Tokyo\"", "}", "}" },
+        => AssertParse(BareJsonTemplate, new[] { "{", "\"name\": \"get_temperature\",", "\"arguments\": {", "\"city\": \"Tokyo\"", "}", "}" },
             "", "get_temperature", "{\"city\":\"Tokyo\"}");
-    }
 
     /// <summary>An unfinished bare JSON call produces nothing yet.</summary>
     [Fact]
     public void AddContent_bare_json_still_incomplete()
-    {
-        AssertParse(BareJsonTemplate, new[] { "{", "\"name\": \"get_temperature\",", "\"arguments\": {" }, "");
-    }
+        => AssertParse(BareJsonTemplate, new[] { "{", "\"name\": \"get_temperature\",", "\"arguments\": {" }, "");
 
     /// <summary>Bare JSON naming a tool that was not offered is content.</summary>
     [Fact]
     public void AddContent_bare_json_naming_an_unknown_tool()
-    {
-        AssertParse(BareJsonTemplate,
+        => AssertParse(BareJsonTemplate,
             new[]
             {
                 "{",
@@ -225,46 +196,38 @@ public sealed class ToolCallParserTests
                 "}",
             },
             "{\"name\": \"search\", \"arguments\": {\"query\": \"What is the capital of Canada?\"}}");
-    }
 
     /// <summary>Once bare JSON turns out not to be a call, the rest is content.</summary>
     [Fact]
     public void AddContent_bare_json_object_then_a_call()
-    {
-        AssertParse(BareJsonTemplate,
+        => AssertParse(BareJsonTemplate,
             new[]
             {
                 "{\"name\": \"jeff\"}",
                 "{\"name\": \"get_conditions\", \"arguments\": {\"location\": \"San Francisco\"}}",
             },
             "{\"name\": \"jeff\"}{\"name\": \"get_conditions\", \"arguments\": {\"location\": \"San Francisco\"}}");
-    }
 
     /// <summary>The same, with the second object split across chunks.</summary>
     [Fact]
     public void AddContent_bare_json_object_then_a_call_split()
-    {
-        AssertParse(BareJsonTemplate,
+        => AssertParse(BareJsonTemplate,
             new[]
             {
                 "{\"name\": \"jeff\"} {",
                 "\"name\": \"get_conditions\", \"arguments\": {\"location\": \"San Francisco\"}}",
             },
             "{\"name\": \"jeff\"} {\"name\": \"get_conditions\", \"arguments\": {\"location\": \"San Francisco\"}}");
-    }
 
     /// <summary>Code that merely contains a brace is content.</summary>
     [Fact]
     public void AddContent_code_with_braces_is_content()
-    {
-        AssertParse(BareJsonTemplate, new[] { "for { fmt.Println(\"hello\") }" }, "for { fmt.Println(\"hello\") }");
-    }
+        => AssertParse(BareJsonTemplate, new[] { "for { fmt.Println(\"hello\") }" }, "for { fmt.Println(\"hello\") }");
 
     /// <summary>A bare JSON list yields every call in it.</summary>
     [Fact]
     public void AddContent_bare_list_of_calls()
-    {
-        AssertParse(BareListTemplate,
+        => AssertParse(BareListTemplate,
             new[]
             {
                 "[",
@@ -284,21 +247,17 @@ public sealed class ToolCallParserTests
             "",
             "get_temperature", "{\"city\":\"London\"}",
             "get_conditions", "{\"location\":\"Tokyo\"}");
-    }
 
     /// <summary>A list whose bracket never closes still yields the call in it.</summary>
     [Fact]
     public void AddContent_bare_list_not_yet_closed()
-    {
-        AssertParse(BareListTemplate, new[] { "[{", "\"name\": \"get_conditions\", ", "\"arguments\": {", "\"location\": \"Tokyo\"", "}", "}" },
+        => AssertParse(BareListTemplate, new[] { "[{", "\"name\": \"get_conditions\", ", "\"arguments\": {", "\"location\": \"Tokyo\"", "}", "}" },
             "", "get_conditions", "{\"location\":\"Tokyo\"}");
-    }
 
     /// <summary>A list naming a tool that was not offered yields nothing.</summary>
     [Fact]
     public void AddContent_bare_list_naming_an_unknown_tool()
-    {
-        AssertParse(BareListTemplate,
+        => AssertParse(BareListTemplate,
             new[]
             {
                 "[",
@@ -310,13 +269,11 @@ public sealed class ToolCallParserTests
                 "}",
             },
             "");
-    }
 
     /// <summary>Extra closing brackets after a list are ignored.</summary>
     [Fact]
     public void AddContent_bare_list_with_a_trailing_bracket()
-    {
-        AssertParse(BareListTemplate,
+        => AssertParse(BareListTemplate,
             new[]
             {
                 "[",
@@ -331,28 +288,22 @@ public sealed class ToolCallParserTests
             },
             "",
             "get_conditions", "{\"location\":\"Tokyo\"}");
-    }
 
     /// <summary>Text in brackets is content, not a list of calls.</summary>
     [Fact]
     public void AddContent_bare_list_that_is_not_a_call()
-    {
-        AssertParse(BareListTemplate, new[] { "[special", " del", "ivery]" }, "[special delivery]");
-    }
+        => AssertParse(BareListTemplate, new[] { "[special", " del", "ivery]" }, "[special delivery]");
 
     /// <summary>A name that is still growing is held back until it settles.</summary>
     [Fact]
     public void AddContent_tool_name_that_is_a_prefix_of_another()
-    {
-        AssertParse(QwenTemplate, new[] { "<tool_call>", "{", "\"name\": \"say_hello", "_world\",", "\"arguments\": {}}", "}" },
+        => AssertParse(QwenTemplate, new[] { "<tool_call>", "{", "\"name\": \"say_hello", "_world\",", "\"arguments\": {}}", "}" },
             "", "say_hello_world", "{}");
-    }
 
     /// <summary>The long name then the short name, each called once.</summary>
     [Fact]
     public void AddContent_both_tools_of_a_colliding_pair()
-    {
-        AssertParse(QwenTemplate,
+        => AssertParse(QwenTemplate,
             new[]
             {
                 "<tool_call>",
@@ -371,20 +322,16 @@ public sealed class ToolCallParserTests
             "",
             "say_hello_world", "{}",
             "say_hello", "{}");
-    }
 
     /// <summary>A name that could still grow yields nothing.</summary>
     [Fact]
     public void AddContent_ambiguous_name_at_the_end_of_the_stream()
-    {
-        AssertParse(QwenTemplate, new[] { "<tool_call>{\"name\": \"say_hello" }, "");
-    }
+        => AssertParse(QwenTemplate, new[] { "<tool_call>{\"name\": \"say_hello" }, "");
 
     /// <summary>Both colliding names arriving together are matched correctly.</summary>
     [Fact]
     public void AddContent_colliding_names_in_one_chunk()
-    {
-        AssertParse(QwenTemplate,
+        => AssertParse(QwenTemplate,
             new[]
             {
                 "<tool_call>{\"name\": \"say_hello\", \"arguments\": {}}</tool_call><tool_call>{\"name\": \"say_hello_world\", \"arguments\": {}}",
@@ -392,47 +339,36 @@ public sealed class ToolCallParserTests
             "",
             "say_hello", "{}",
             "say_hello_world", "{}");
-    }
 
     /// <summary>The shorter of two colliding names on its own.</summary>
     [Fact]
     public void AddContent_shorter_of_two_colliding_names()
-    {
-        AssertParse(QwenTemplate, new[] { "<tool_call>{\"name\": \"say_hello\", \"arguments\": {}}</tool_call>" },
+        => AssertParse(QwenTemplate, new[] { "<tool_call>{\"name\": \"say_hello\", \"arguments\": {}}</tool_call>" },
             "", "say_hello", "{}");
-    }
 
     /// <summary>The longer of two colliding names on its own.</summary>
     [Fact]
     public void AddContent_longer_of_two_colliding_names()
-    {
-        AssertParse(QwenTemplate, new[] { "<tool_call>{\"name\": \"say_hello_world\", \"arguments\": {}}</tool_call>" },
+        => AssertParse(QwenTemplate, new[] { "<tool_call>{\"name\": \"say_hello_world\", \"arguments\": {}}</tool_call>" },
             "", "say_hello_world", "{}");
-    }
 
     /// <summary>A tool name that also appears as an argument key.</summary>
     [Fact]
     public void AddContent_tool_name_that_is_a_substring_of_a_key()
-    {
-        AssertParse(BareJsonTemplate, new[] { "{", "\"name\": \"get_address\",", "\"arguments\": {", "\"location\": \"London\"", "}", "}" },
+        => AssertParse(BareJsonTemplate, new[] { "{", "\"name\": \"get_address\",", "\"arguments\": {", "\"location\": \"London\"", "}", "}" },
             "", "get_address", "{\"location\":\"London\"}");
-    }
 
     /// <summary>The same call, tagged.</summary>
     [Fact]
     public void AddContent_tool_name_that_is_a_substring_of_a_key_tagged()
-    {
-        AssertParse(QwenTemplate, new[] { "<tool_call>{\"name\": \"get_address\", \"arguments\": {\"location\": \"London\"}}</tool_call>" },
+        => AssertParse(QwenTemplate, new[] { "<tool_call>{\"name\": \"get_address\", \"arguments\": {\"location\": \"London\"}}</tool_call>" },
             "", "get_address", "{\"location\":\"London\"}");
-    }
 
     /// <summary>Arguments written before the name are still found.</summary>
     [Fact]
     public void AddContent_arguments_written_before_the_name()
-    {
-        AssertParse(QwenTemplate, new[] { "<tool_call>{\"arguments\": {\"a\": \"5\", \"b\": \"10\"}, \"name\": \"add\"}</tool_call>" },
+        => AssertParse(QwenTemplate, new[] { "<tool_call>{\"arguments\": {\"a\": \"5\", \"b\": \"10\"}, \"name\": \"add\"}</tool_call>" },
             "", "add", "{\"a\":\"5\",\"b\":\"10\"}");
-    }
 
     /// <summary>A Qwen 3.5 style tagged call arriving one character at a time is still one call.</summary>
     [Fact]
@@ -465,8 +401,7 @@ public sealed class ToolCallParserTests
     /// <summary>A Qwen 3.5 style call preceded by text emits that text as content.</summary>
     [Fact]
     public void AddContent_qwen35_call_after_text()
-    {
-        AssertParse(QwenTemplate,
+        => AssertParse(QwenTemplate,
             new[]
             {
                 "I will look that up. ",
@@ -475,13 +410,11 @@ public sealed class ToolCallParserTests
             },
             "I will look that up. ",
             "get_temperature", "{\"city\":\"Paris\"}");
-    }
 
     /// <summary>Two Qwen 3.5 style calls in a row yield two calls.</summary>
     [Fact]
     public void AddContent_qwen35_two_calls()
-    {
-        AssertParse(QwenTemplate,
+        => AssertParse(QwenTemplate,
             new[]
             {
                 "<tool_call>\n{\"name\": \"get_temperature\", \"arguments\": {\"city\": \"Paris\"}}\n</tool_call>",
@@ -490,24 +423,19 @@ public sealed class ToolCallParserTests
             "",
             "get_temperature", "{\"city\":\"Paris\"}",
             "get_conditions", "{\"location\":\"Paris\"}");
-    }
 
     /// <summary>Malformed JSON after the tag never becomes a call.</summary>
     [Fact]
     public void AddContent_malformed_json_is_not_a_call()
-    {
-        AssertParse(QwenTemplate,
+        => AssertParse(QwenTemplate,
             new[] { "<tool_call>{name: get_temperature, arguments: {city: Paris}}</tool_call>" }, "");
-    }
 
     /// <summary>A tagged call naming a tool that was not offered yields no call.</summary>
     [Fact]
     public void AddContent_a_tool_that_was_not_offered_is_not_called()
-    {
-        AssertParse(QwenTemplate,
+        => AssertParse(QwenTemplate,
             new[] { "<tool_call>{\"name\": \"launch_rocket\", \"arguments\": {\"when\": \"now\"}}</tool_call>" },
             "");
-    }
 
     /// <summary>Feeding a response one character at a time gives the same result as feeding it whole.</summary>
     [Theory]

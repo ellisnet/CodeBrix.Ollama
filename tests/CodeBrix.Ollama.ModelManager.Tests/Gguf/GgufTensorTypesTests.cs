@@ -50,15 +50,11 @@ public sealed class GgufTensorTypesTests
     [InlineData(GgufTensorType.NVFP4, "nvfp4")]
     [InlineData(GgufTensorType.Q1_0, "q1_0")]
     public void GetName_returns_ggml_name_for_every_known_type(GgufTensorType tensorType, string expected)
-    {
-        GgufTensorTypes.GetName(tensorType).Should().Be(expected);
-    }
+        => GgufTensorTypes.GetName(tensorType).Should().Be(expected);
 
     [Fact]
     public void GetName_returns_unknown_for_unknown_id()
-    {
-        GgufTensorTypes.GetName((GgufTensorType)9999).Should().Be("unknown");
-    }
+        => GgufTensorTypes.GetName((GgufTensorType)9999).Should().Be("unknown");
 
     [Theory]
     [InlineData(GgufTensorType.F32, 0u)]
@@ -84,9 +80,7 @@ public sealed class GgufTensorTypesTests
     [InlineData(GgufTensorType.NVFP4, 40u)]
     [InlineData(GgufTensorType.Q1_0, 41u)]
     public void GgufTensorType_has_ggml_id_for_every_type(GgufTensorType tensorType, uint expected)
-    {
-        ((uint)tensorType).Should().Be(expected);
-    }
+        => ((uint)tensorType).Should().Be(expected);
 
     [Theory]
     [InlineData(GgufTensorType.F32, 1L, 4L)]
@@ -145,9 +139,7 @@ public sealed class GgufTensorTypesTests
     [InlineData(GgufTensorType.IQ4_NL_4_8)]
     [InlineData(GgufTensorType.IQ4_NL_8_8)]
     public void GetTypeSize_returns_zero_for_types_with_no_defined_size(GgufTensorType tensorType)
-    {
-        GgufTensorTypes.GetTypeSize(tensorType).Should().Be(0L);
-    }
+        => GgufTensorTypes.GetTypeSize(tensorType).Should().Be(0L);
 
     [Theory]
     [InlineData(GgufTensorType.F32, 4d)]
@@ -159,7 +151,5 @@ public sealed class GgufTensorTypesTests
     [InlineData(GgufTensorType.NVFP4, 0.5625d)]
     [InlineData(GgufTensorType.Q1_0, 0.140625d)]
     public void GetBytesPerElement_divides_type_size_by_block_size(GgufTensorType tensorType, double expected)
-    {
-        GgufTensorTypes.GetBytesPerElement(tensorType).Should().Be(expected);
-    }
+        => GgufTensorTypes.GetBytesPerElement(tensorType).Should().Be(expected);
 }

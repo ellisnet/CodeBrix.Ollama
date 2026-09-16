@@ -115,7 +115,6 @@ public sealed class Qwen35ModelFixture : IAsyncDisposable
                         GpuLayers = 0,
                         ContextSize = ContextSize,
                         LoadMode = ModelLoadMode.MemoryMap,
-                        Threads = 6,
                     },
                     cancellationToken);
             }

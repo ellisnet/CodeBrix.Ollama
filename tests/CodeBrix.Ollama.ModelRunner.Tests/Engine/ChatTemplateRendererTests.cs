@@ -1,3 +1,4 @@
+using System;
 using SilverAssertions;
 using Xunit;
 
@@ -111,8 +112,11 @@ public sealed class ChatTemplateRendererTests
         ChatRequest request = new ChatRequest();
         request.Messages.Add(new ChatMessage(ChatRole.User, "hello"));
 
-        //Act and assert
-        Assert.Throws<ChatTemplateException>(() => renderer.Render(request));
+        //Act
+        Action act = () => renderer.Render(request);
+
+        //Assert
+        act.Should().Throw<ChatTemplateException>();
     }
 
     /// <summary>The Ollama dialect renders through the Go template engine.</summary>
@@ -237,9 +241,11 @@ public sealed class ChatTemplateRendererTests
         request.Messages.Add(new ChatMessage(ChatRole.User, "weather?"));
         request.Tools.Add(new ToolDefinition { Name = "get_weather" });
 
-        //Act and assert
-        ChatTemplateException caught = Assert.Throws<ChatTemplateException>(() => renderer.Render(request));
-        caught.Message.Should().Contain("tools");
+        //Act
+        Action act = () => renderer.Render(request);
+
+        //Assert
+        act.Should().Throw<ChatTemplateException>().Which.Message.Should().Contain("tools");
     }
 
     /// <summary>Each dialect reports the template text its parsers should be built from.</summary>

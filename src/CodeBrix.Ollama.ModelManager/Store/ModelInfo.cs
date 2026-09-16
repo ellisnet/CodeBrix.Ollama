@@ -39,8 +39,27 @@ public sealed class ModelInfo
     /// <summary>The params layer decoded, or <see langword="null"/> when the model has none.</summary>
     public ModelParameters Parameters { get; set; }
 
-    /// <summary>Every license layer's text, in manifest order; empty when there are none.</summary>
+    /// <summary>
+    /// Every license layer's text, in manifest order, followed by the text of every <c>LICENSE</c> file
+    /// a bundle ships; empty when there are none.
+    /// </summary>
     public IReadOnlyList<string> Licenses { get; set; }
+
+    /// <summary>
+    /// What the source states about the licence: the identifier and the address it was read from, as
+    /// the config layer recorded them when the model was pulled or imported.
+    /// <see cref="LicenseRecord.None"/> when nothing is stated, which is also what a model pulled from
+    /// an Ollama-protocol registry reports. Never <see langword="null"/>.
+    /// </summary>
+    public LicenseRecord License { get; set; }
+
+    /// <summary>
+    /// What the model's weights are: the config layer's model format, which is "gguf" for a model
+    /// pulled from an Ollama-protocol registry and one of the bundle formats - "huggingface",
+    /// "pytorch", "onnx", "tensorflow-checkpoint", "mixed", "files", "imported" - for a bundle.
+    /// <see langword="null"/> when the config states none and no GGUF weights layer says otherwise.
+    /// </summary>
+    public string Format { get; set; }
 
     /// <summary>The messages layer decoded; empty when there is none.</summary>
     public IReadOnlyList<ModelMessage> Messages { get; set; }

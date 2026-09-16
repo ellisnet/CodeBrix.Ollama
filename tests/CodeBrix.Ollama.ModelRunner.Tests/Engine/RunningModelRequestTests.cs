@@ -136,10 +136,11 @@ public sealed class RunningModelRequestTests
         model.Dispose();
 
         //Assert
-        await Assert.ThrowsAnyAsync<ObjectDisposedException>(async () => await step);
+        Func<Task> next = async () => await step;
+        await next.Should().ThrowAsync<ObjectDisposedException>();
 
-        await Assert.ThrowsAsync<ObjectDisposedException>(
-            () => model.ClearCacheAsync(TestContext.Current.CancellationToken));
+        Func<Task> clear = () => model.ClearCacheAsync(TestContext.Current.CancellationToken);
+        await clear.Should().ThrowAsync<ObjectDisposedException>();
 
         // A second disposal, and the enumeration's own, still have to be ordinary.
         model.Dispose();
@@ -166,7 +167,8 @@ public sealed class RunningModelRequestTests
         await model.DisposeAsync();
 
         //Assert
-        await Assert.ThrowsAnyAsync<ObjectDisposedException>(async () => await step);
+        Func<Task> next = async () => await step;
+        await next.Should().ThrowAsync<ObjectDisposedException>();
 
         await updates.DisposeAsync();
     }
@@ -186,8 +188,8 @@ public sealed class RunningModelRequestTests
         await foreach (GenerationUpdate update in engine.GenerateFromTokensAsync(
             EngineExpectedLogits.Prompt, Greedy(), false, TestContext.Current.CancellationToken))
         {
-            caught = await Assert.ThrowsAsync<InvalidOperationException>(
-                () => model.ClearCacheAsync(TestContext.Current.CancellationToken));
+            Func<Task> clear = () => model.ClearCacheAsync(TestContext.Current.CancellationToken);
+            caught = (await clear.Should().ThrowAsync<InvalidOperationException>()).Which;
         }
 
         //Assert
@@ -211,8 +213,8 @@ public sealed class RunningModelRequestTests
         await foreach (GenerationUpdate update in engine.GenerateFromTokensAsync(
             EngineExpectedLogits.Prompt, Greedy(), false, TestContext.Current.CancellationToken))
         {
-            caught = await Assert.ThrowsAsync<InvalidOperationException>(
-                () => model.EmbedAsync(new[] { "anything" }, TestContext.Current.CancellationToken));
+            Func<Task> embed = () => model.EmbedAsync(new[] { "anything" }, TestContext.Current.CancellationToken);
+            caught = (await embed.Should().ThrowAsync<InvalidOperationException>()).Which;
         }
 
         //Assert
@@ -235,8 +237,9 @@ public sealed class RunningModelRequestTests
         await foreach (GenerationUpdate update in engine.GenerateFromTokensAsync(
             EngineExpectedLogits.Prompt, Greedy(), false, TestContext.Current.CancellationToken))
         {
-            caught = Assert.Throws<InvalidOperationException>(() => engine.GenerateFromTokensAsync(
-                EngineExpectedLogits.Prompt, Greedy(), false, TestContext.Current.CancellationToken));
+            Action second = () => engine.GenerateFromTokensAsync(
+                EngineExpectedLogits.Prompt, Greedy(), false, TestContext.Current.CancellationToken);
+            caught = second.Should().Throw<InvalidOperationException>().Which;
         }
 
         //Assert
@@ -254,11 +257,10 @@ public sealed class RunningModelRequestTests
         RunningModel engine = (RunningModel)model;
 
         //Act
-        InferenceException caught = await Assert.ThrowsAsync<InferenceException>(
-            () => engine.DecodeForLogitsAsync(new[] { 4096 }, TestContext.Current.CancellationToken));
+        Func<Task> act = () => engine.DecodeForLogitsAsync(new[] { 4096 }, TestContext.Current.CancellationToken);
 
         //Assert
-        caught.Message.Should().Contain("invalid input");
+        (await act.Should().ThrowAsync<InferenceException>()).Which.Message.Should().Contain("invalid input");
     }
 
     /// <summary>A probe of a path that is not a path faults its task rather than throwing from the call.</summary>
@@ -270,7 +272,8 @@ public sealed class RunningModelRequestTests
 
         //Act and assert
         probe.Should().NotBeNull();
-        await Assert.ThrowsAsync<ArgumentException>(() => probe);
+        Func<Task> awaiting = () => probe;
+        await awaiting.Should().ThrowAsync<ArgumentException>();
     }
 
     /// <summary>An embedding is as wide as the model's output, falling back to its hidden width.</summary>
@@ -279,9 +282,7 @@ public sealed class RunningModelRequestTests
     [InlineData(0, 2048, 2048)]
     [InlineData(-1, 960, 960)]
     public void EmbeddingWidth_prefers_the_models_output_width(int output, int hidden, int expected)
-    {
-        RunningModel.EmbeddingWidth(output, hidden).Should().Be(expected);
-    }
+        => RunningModel.EmbeddingWidth(output, hidden).Should().Be(expected);
 
     /// <summary>One input is limited by the physical batch, not by the logical one or the context alone.</summary>
     [Theory]
@@ -290,9 +291,7 @@ public sealed class RunningModelRequestTests
     [InlineData(0, 512, 512)]
     [InlineData(2048, 0, 1)]
     public void EmbeddingInputLimit_is_the_physical_batch(int room, int physical, int expected)
-    {
-        RunningModel.EmbeddingInputLimit(room, physical).Should().Be(expected);
-    }
+        => RunningModel.EmbeddingInputLimit(room, physical).Should().Be(expected);
 
     private static async Task<List<int>> DrainAsync(RunningModel engine, CancellationToken cancellationToken)
     {

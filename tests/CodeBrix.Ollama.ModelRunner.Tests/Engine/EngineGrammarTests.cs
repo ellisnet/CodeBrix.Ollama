@@ -1,3 +1,4 @@
+using System;
 using SilverAssertions;
 using Xunit;
 
@@ -14,6 +15,7 @@ public sealed class EngineGrammarTests
     [Fact]
     public void Select_with_nothing_asked_for_is_unconstrained()
     {
+        //Act and assert
         EngineGrammar.Select(null).Should().BeNull();
         EngineGrammar.Select(new GenerationOptions()).Should().BeNull();
         EngineGrammar.Select(new GenerationOptions(), null).Should().BeNull();
@@ -55,10 +57,8 @@ public sealed class EngineGrammarTests
     /// <summary>JSON mode is the any-JSON grammar.</summary>
     [Fact]
     public void Select_turns_json_mode_into_the_any_json_grammar()
-    {
-        EngineGrammar.Select(new GenerationOptions { JsonMode = true })
+        => EngineGrammar.Select(new GenerationOptions { JsonMode = true })
             .Should().Be(JsonSchemaGrammar.JsonGrammar);
-    }
 
     /// <summary>A chat request's response format is the coarsest instruction and comes last.</summary>
     [Fact]
@@ -77,7 +77,10 @@ public sealed class EngineGrammarTests
     [Fact]
     public void Select_refuses_a_schema_that_is_not_json()
     {
-        Assert.Throws<GrammarException>(
-            () => EngineGrammar.Select(new GenerationOptions { JsonSchema = "not json" }));
+        //Arrange
+        Action act = () => EngineGrammar.Select(new GenerationOptions { JsonSchema = "not json" });
+
+        //Assert
+        act.Should().Throw<GrammarException>();
     }
 }

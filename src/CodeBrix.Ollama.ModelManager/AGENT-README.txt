@@ -9,10 +9,11 @@ OVERVIEW
 CodeBrix.Ollama.ModelManager is a cross-platform, zero-dependency .NET 10
 library that maintains a local store of large language models in exactly
 Ollama's on-disk layout, pulls models into it from any registry that speaks
-Ollama's manifest-and-blob protocol, and resolves a model name to the GGUF
-files on disk that an in-process runner loads.
+Ollama's manifest-and-blob protocol, obtains the files of a model that no such
+registry serves, and resolves a model name to the files on disk that an
+in-process runner loads.
 
-It does three things, and they build on one another:
+It does four things, and they build on one another:
 
   1. NAMES -- Ollama's model-name syntax, parsed and validated by Ollama's own
      rules, completed from configurable defaults, and turned into the
@@ -25,7 +26,16 @@ It does three things, and they build on one another:
      sha256 digest. registry.ollama.ai is the default registry, and a name
      such as hf.co/<user>/<repo>:<quant> reaches Hugging Face through the
      same code.
-  3. THE FILE FORMATS -- a Modelfile parser that accepts what Ollama's parser
+  3. BUNDLES -- the same store, filled from where a publisher actually keeps
+     a model that no such registry serves: a Hugging Face file repository, a
+     plain list of HTTPS addresses (the objects under a public storage bucket
+     among them), or a folder already on disk. The files are fetched over
+     plain HTTPS, verified against whatever the publisher stated, and stored
+     as ordinary blobs and layers, so listing, showing, resolving, copying,
+     deleting and pruning work on them unchanged. What a publisher states
+     about the licence is reported, and MaterializeAsync writes the files
+     back out as the file tree the publisher wrote.
+  4. THE FILE FORMATS -- a Modelfile parser that accepts what Ollama's parser
      accepts, with the same messages and line numbers, and a GGUF header
      reader that returns every key-value and tensor descriptor without ever
      touching tensor data.
@@ -62,8 +72,8 @@ never appears in a namespace, a using directive, an assembly name or a type
 name; the assembly is CodeBrix.Ollama.ModelManager and the single namespace is
 CodeBrix.Ollama.ModelManager. NuGet dependencies: NONE -- the dependency group
 is empty, JSON goes through the in-box System.Text.Json, hashing through
-System.Security.Cryptography, and there is no native component. License: MIT,
-with license acceptance required.
+System.Security.Cryptography, and no native library ships in the package.
+License: MIT, with license acceptance required.
 
 NULLABLE REFERENCE TYPES ARE OFF in the library, so the compiler will not warn
 you about anything it hands back. Where a member can be null its XML
@@ -79,10 +89,15 @@ KEY NAMESPACES / USINGS
 
     using CodeBrix.Ollama.ModelManager;   // EVERY public type in the package
 
-That is the whole story. The library declares ONE namespace, and all
-thirty-four public types live in it. The repository folders (Common/, Names/,
-Gguf/, Modelfile/, Store/, Registry/) are FILE ORGANIZATION ONLY, not
-namespaces: `using CodeBrix.Ollama.ModelManager.Store;` is a CS0246 error.
+That is the whole story. The library declares ONE namespace, and every
+public type lives in it - the bundle vocabulary (BundleDefinition,
+BundleFile, BundleListing, FileFilter, LicenseRecord, PullOptions, PullSource,
+ImportOptions, MaterializeOptions, MaterializeLink, ResolvedFile) and the two
+sources (HuggingFaceHubSource, HttpFileListSource, with the helper
+GoogleCloudStorageListing) among them. The repository folders (Common/, Names/,
+Gguf/, Modelfile/, Store/, Registry/, Bundles/, Sources/) are FILE
+ORGANIZATION ONLY, not namespaces:
+`using CodeBrix.Ollama.ModelManager.Store;` is a CS0246 error.
 Everything under Registry/ is internal -- the registry client, the blob
 downloader and the challenge parser are reached only through PullAsync. You
 will also want the ordinary framework usings: System,
@@ -126,6 +141,16 @@ and what it hands back:
     MODELFILES                      Modelfile.Parse and the typed views
     GGUF METADATA                   GgufMetadata.ReadAsync and the header model
     THE DATA TYPES                  manifests, layers, config and parameters
+    BUNDLES                         models that no Ollama-protocol registry
+                                    serves, and the pull that fetches them
+    THE SOURCES                     the Hugging Face Hub, a list of addresses,
+                                    a storage bucket, and the file filter
+    DESCRIBING A MODEL              BundleDefinition and LicenseRecord
+    MATERIALIZING                   writing a bundle out as the publisher's
+                                    own file tree
+    IMPORTING A FOLDER              a folder already on disk as a bundle
+    RESOLVING A BUNDLE              ResolvedModel.Format and .Files
+    SHOWING AND LISTING             what a bundle reports about itself
     THE ERROR MODEL                 every exception and when it is thrown
     THREAD SAFETY AND CONCURRENCY   what is and is not coordinated
 
@@ -287,6 +312,15 @@ substitute your own in tests.
 
     string StoreDirectory { get; }
     IAsyncEnumerable<PullProgress> PullAsync(string name, CancellationToken)
+    IAsyncEnumerable<PullProgress> PullAsync(string name, PullOptions options,
+                                             CancellationToken)
+    Task ImportBundleAsync(string name, string directory,
+                           ImportOptions options = null, CancellationToken)
+    Task<IReadOnlyList<string>> MaterializeAsync(string name,
+                                                 string targetDirectory,
+                                                 MaterializeOptions options
+                                                     = null,
+                                                 CancellationToken)
     Task<IReadOnlyList<ModelSummary>> ListAsync(CancellationToken)
     Task<bool>          ExistsAsync(string name, CancellationToken)
     Task<ModelInfo>     ShowAsync(string name, CancellationToken)
@@ -362,6 +396,11 @@ manifest), DigestMismatchException, ModelManagerException (safetensors). A pull
 of a model that is already complete is cheap but not free -- the manifest is
 fetched again, every blob confirmed present and the manifest rewritten -- so
 guard the call with ExistsAsync when you only want to know it is there.
+
+THE SECOND OVERLOAD, PullAsync(name, options), fetches a BUNDLE - a model that
+no Ollama-protocol registry serves - and is described under BUNDLES below. It
+is never taken by accident: options of null, and PullOptions.ForRegistry(),
+both run exactly the pull described here.
 
 ListAsync
 ---------
@@ -801,6 +840,474 @@ ModelCapability (enum)  Completion, Tools, Insert, Vision, Audio, Embedding,
     Thinking.
 
 
+BUNDLES
+=======
+A BUNDLE is a model that is not a GGUF file on an Ollama-protocol registry: a
+Hugging Face file repository, the objects under a public storage bucket prefix,
+a folder of files that arrived some other way. The registry protocol cannot
+serve any of it - Hugging Face answers "Repository is not GGUF or is not
+compatible with llama.cpp" for such a repository - so the files are fetched
+over plain HTTPS instead and stored in the SAME content-addressed layout as
+every GGUF model: one blob per file, one layer per file carrying the
+publisher's own relative path, one config layer recording where the files came
+from. ListAsync, ExistsAsync, ShowAsync, ResolveAsync, CopyAsync, DeleteAsync
+and PruneAsync work on a bundle unchanged, and MaterializeAsync writes its
+files back out as the tree its publisher wrote.
+
+A BUNDLE PULL IS ALWAYS ASKED FOR. PullAsync(name) - the overload with no
+options - means exactly what it has always meant, the registry protocol and
+nothing else, and a name that protocol cannot serve fails there as it always
+has. There is no sniffing and no fallback. The explicit overload is:
+
+    IAsyncEnumerable<PullProgress> PullAsync(string name, PullOptions options,
+                                             CancellationToken)
+
+Options of null, and PullOptions.ForRegistry(), both run the registry pull
+described above, down to the same code path.
+
+NAMES ARE THE EXISTING GRAMMAR; nothing new parses:
+
+    hf.co/<namespace>/<repository>             tag latest, revision "main"
+    hf.co/<namespace>/<repository>:<revision>  tag = a branch, tag or commit
+    <host>/<namespace>/<model>:<tag>           any host, for a list of
+                                               addresses - the host is a label
+                                               here, nothing is requested from
+                                               it unless a file's address
+                                               names it
+    local/<namespace>/<model>:<tag>            the convention for an imported
+                                               folder
+
+PullOptions
+
+    PullSource Source                Registry (the default) | HuggingFaceFiles
+                                     | FileList
+    string Repository                <namespace>/<repository>; null takes it
+                                     from the name, whose namespace and model
+                                     part spell the same thing
+    string Revision                  a branch, tag or commit; null takes the
+                                     name's tag, and the tag "latest" means
+                                     DefaultRevision
+    IReadOnlyList<BundleFile> Files  the files of a FileList pull; never null,
+                                     an unset list reads as empty
+    FileFilter Filter                never null; unset reads as
+                                     FileFilter.Default
+    bool RequireHashes               false; true refuses a file the source
+                                     states no hash for
+    const  DefaultRevision "main"
+    static ForRegistry(), ForHuggingFace(repository, revision, filter),
+           ForFileList(files, filter)
+
+PullSource is Registry, HuggingFaceFiles or FileList. It chooses the listing
+step and the wire protocol and nothing else: every source ends in the same
+blobs and the same manifest layout.
+
+THE PROGRESS STREAM OF A BUNDLE PULL, IN ORDER
+
+    "listing <repository>"      once, before anything is fetched; a list of
+                                addresses reports "listing file list"
+    "pulling <path>"            one stream of reports per file, in the order
+                                the source listed them, carrying the
+                                PUBLISHER'S RELATIVE PATH rather than the
+                                twelve hexadecimal characters a registry layer
+                                report carries. A file whose source stated a
+                                sha256 carries that digest from the first
+                                report; a file whose source stated none
+                                carries its digest only in the final report,
+                                because until the bytes are all there nothing
+                                knows what it is
+    "verifying sha256 digest"   once, when every blob the new manifest will
+                                name is confirmed present at the recorded size
+    "writing manifest"          once, before the manifest is written
+    "success"                   always the last report of a successful pull
+
+WHAT THE MANIFEST AND THE CONFIG RECORD. Every file becomes a layer whose
+media type is MediaTypes.BundleFile ("application/vnd.codebrix.model.file")
+and whose Name is the publisher's relative path. The config layer carries:
+
+    model_format    what the file names say the weights are: "onnx",
+                    "pytorch", "tensorflow-checkpoint", or "mixed" when more
+                    than one kind is present. When no file decides, the source
+                    does: "huggingface", "files" or "imported"
+    model_family    the model part of the name
+    source          "hf.co", "url" or "local"
+    repository      <namespace>/<repository>, the folder that was imported, or
+                    null
+    revision        the COMMIT a Hugging Face listing resolved to - never the
+                    branch or tag that was asked for - or null
+    licenseId       the identifier the source states, or null
+    licenseSource   the address that statement was read from, or null
+    pulledAt        when the pull ran, ISO-8601 in UTC
+
+A property the source said nothing about is written as a JSON null rather than
+left out, so a reader can tell "the source stated nothing" from "this config
+was written by something that did not know about the property".
+
+RE-PULLS AND REVISIONS. A Hugging Face listing resolves the branch or tag once
+and pins every address to the commit it resolved to, so a pull cannot take half
+of one revision and half of the next. Pulling the same name again re-lists,
+re-verifies and rewrites the manifest: when the revision has not moved every
+file whose source states a sha256 is already in the store and costs no request
+at all, and when it has moved the new manifest replaces the old one and the
+blobs only the old one referenced are removed. Compare the config's revision
+before and after to tell "unchanged" from "moved".
+
+
+THE SOURCES
+===========
+A source says what a bundle holds before anything is downloaded. Each one
+implements IBundleSource:
+
+    Task<BundleListing> ListAsync(CancellationToken)
+
+and each is IDisposable, because each holds an HTTP client of its own. You do
+not need a source to pull - PullAsync builds the one the options name - but
+listing first is how you report the size of a pull before starting it.
+
+BundleListing   string RepositoryId (what was listed, or null for a plain
+    list); string ResolvedRevision (the commit, or null for a source with no
+    commits); LicenseRecord License, with the shortcuts LicenseId and
+    LicenseSource; IReadOnlyList<BundleFile> Files, ALREADY FILTERED; long
+    TotalBytes, the sum of the stated sizes, which is a floor rather than a
+    promise when a file states none.
+
+HuggingFaceHubSource
+--------------------
+    new HuggingFaceHubSource(repository, revision, filter, options)
+
+reads the Hub's own HTTP API - no Python, no Hub client library. The repository
+document gives the commit to pin and the licence the publisher states; the
+recursive tree document gives every file with its size, its git object
+identifier and, for a file kept in large-file storage, the SHA-256 of its
+content. A tree that arrives in pages is followed to the end.
+
+    const   HubHost "huggingface.co", ShortHubHost "hf.co",
+            DefaultRevision "main"
+    props   Repository, Revision, Filter
+    static  IsHubHost(host), NormalizeRevision(revision),
+            BuildFileUrl(repository, revision, path)
+    method  ListAsync(CancellationToken), Dispose()
+
+  - THE COMMIT IS PINNED. NormalizeRevision turns null, empty and the store's
+    default tag "latest" into "main"; the listing then resolves that to a
+    commit and names the commit in every address it builds.
+  - HASHES: the sha256 of a large-file entry is the hash of the CONTENT and is
+    what a download is held to. The git object identifier is recorded as
+    BundleFile.GitSha1 and NEVER verified against, because it hashes the
+    object as git stores it, not the bytes that arrive. A small file that the
+    Hub keeps in git itself therefore states no verifiable hash at all.
+  - GATED OR PRIVATE repositories are refused with a message that says what to
+    do, unless ModelStoreOptions.BearerToken holds an access token. A token
+    that exists travels with the FIRST request here, because the Hub answers
+    an anonymous request for a private repository with a plain 404 rather than
+    a challenge; it is offered to the Hub host and to no other host, ever, and
+    never follows the redirect to the content delivery host that serves the
+    bytes.
+  - URL ENCODING: every path segment of the repository, the revision and the
+    file path is escaped, so a space or a character outside the ASCII range in
+    a publisher's file name survives the trip.
+
+HttpFileListSource and GoogleCloudStorageListing
+-----------------------------------------------
+    new HttpFileListSource(files, filter)
+    new HttpFileListSource(files, filter, options)
+
+lists a bundle that is nothing but a list of addresses: you already know what
+the files are, and this fills in what you do not. A file whose size you stated
+costs no request. A file whose size is unknown is asked for with a HEAD and,
+when the server refuses a HEAD, with a request for its first byte, whose
+Content-Range states the whole length; the MD5 a storage bucket sends in a
+header is taken while the server is answering. A server that will say neither
+is a RegistryException.
+
+    static Task<IReadOnlyList<BundleFile>> GoogleCloudStorageListing.ListAsync(
+        bucket, prefix, handler, CancellationToken)
+    static string GoogleCloudStorageListing.BuildObjectUrl(bucket, key)
+    const  GoogleCloudStorageListing.StorageHost "storage.googleapis.com"
+
+turns a public bucket prefix into that list. A bucket speaks no model protocol
+at all: it answers an XML listing of the objects under a prefix, paged, and
+each object answers a HEAD with the hashes the bucket holds for it. The prefix
+is stripped off the front of every key, so listing "models/example-model/"
+yields "checkpoints/<name>" rather than the whole key, and a key that ends in a
+slash is the placeholder a console makes for a folder and is left out. The
+handler argument is the HttpMessageHandler the requests go through, null for a
+default one.
+
+BundleFile
+----------
+One file of a bundle, in the one shape every source describes a file in:
+
+    ctor    (path, url), (path, url, size),
+            (path, url, size, sha256, md5, gitSha1)
+    props   Path, Uri Url, Size, Sha256, Md5, GitSha1, FileName, HasSize,
+            HasVerifiableHash
+    const   UnknownSize (-1, because 0 is a valid size)
+    methods WithSize(size), WithMd5(md5), ToString()
+
+Path is always relative and always spelled with forward slashes: it is the path
+the publisher uses and the path MaterializeAsync lays out on disk. A backslash
+is read as a separator and rewritten, a leading "./" is dropped, and a path
+that is rooted, that names a drive or that walks up with ".." is an
+ArgumentException - a bundle must never be able to write outside the directory
+it is materialized into. Sizes and hashes are what the SOURCE STATED, not what
+was measured: Size is UnknownSize when the source did not say, and each hash is
+null when the source did not state that hash. A hash that is not hexadecimal of
+the length its algorithm calls for is refused; the case is normalized to lower
+case.
+
+FileFilter
+----------
+Which files are pulled: a set of include patterns and a set of exclude patterns
+over the publisher's relative path. A path is kept when it matches at least one
+include pattern, or there are no include patterns at all, AND matches no
+exclude pattern.
+
+    ctor    (), (includeGlobs, excludeGlobs)
+    static  Default, ExcludeTrainingArtifacts
+    props   IncludeGlobs, ExcludeGlobs, KeepsEverything
+    methods WithIncludes(params string[]), WithExcludes(params string[]),
+            ShouldInclude(string path), ShouldInclude(BundleFile file),
+            Apply(IEnumerable<BundleFile>)
+
+THE GLOB RULES: patterns match the WHOLE relative path, case-sensitively, with
+forward slashes as separators. "*" is any run of characters within one path
+segment, "**" is any run including separators, "?" is one character within a
+segment, and a leading "**/" also matches no directory at all, so "**/*.pt"
+matches "model.pt" as well as "weights/model.pt".
+
+ONE RULE STANDS ABOVE THE PATTERNS: a file whose own name is LICENSE,
+LICENSE.<anything>, README or README.<anything> is ALWAYS KEPT, whatever the
+patterns say and whatever the source, because the licence and the readme are
+what a later ShowAsync reports the publisher's terms from. That comparison
+ignores case.
+
+FileFilter.Default keeps everything. FileFilter.ExcludeTrainingArtifacts is
+opt-in and leaves out what a training run wrote and nothing else needs: the
+"logs" tree, every TensorBoard event file wherever it sits, and optimizer state
+("optimizer.pt" and any "optimizer*.pt" below the root). Weights,
+configuration, tokenizer files and any ONNX files the publisher shipped are all
+kept. The filter a source uses when nothing is said is Default, so a pull takes
+the publisher's repository as it stands unless you ask for less.
+
+WHAT IS VERIFIED, FILE BY FILE
+------------------------------
+    stated sha256   the download is held to it, and the blob is named by it
+                    before a byte arrives - which is what lets a file already
+                    in the store cost no request at all
+    stated md5      verified as the bytes stream past, when that is the only
+                    hash the source states
+    nothing stated  downloaded, and the store computes the SHA-256 itself,
+                    names the blob by it and records it - so a second pull
+                    verifies against the first
+
+PullOptions.RequireHashes turns "nothing stated" into a ModelManagerException
+naming the file, before that file is fetched. A mismatch against either stated
+hash is a DigestMismatchException, the bad bytes are already gone, and no
+manifest is written.
+
+
+DESCRIBING A MODEL
+==================
+BundleDefinition is the vocabulary you write your own models down in - name,
+source, what to fetch, what the publisher states about the licence - so that a
+catalogue of models is data rather than code. THE LIBRARY SHIPS NO DEFINITIONS
+AND NAMES NO PARTICULAR MODEL ANYWHERE.
+
+    static  ForHuggingFace(name, repository, revision, filter, license, notes)
+            ForFileList(name, files, filter, license, notes)
+            ForRegistry(name, license, notes)
+    ctor    (name, source, repository, revision, files, filter, license, notes)
+    props   Name, Source, Repository, Revision, Files, Filter, License, Notes
+    method  ToPullOptions()
+
+A definition is checked when it is built, so a definition that exists is one a
+pull can be started from: the name parses in the store's own grammar (an
+InvalidModelNameException if not), a Hugging Face definition names a repository
+as <namespace>/<repository>, and a file-list definition carries at least one
+file. A ForRegistry definition exists so that one catalogue can hold every kind
+of model, GGUF models included.
+
+ToPullOptions() carries the source, the repository, the revision, the files and
+the filter into a PullOptions. THE LICENCE AND THE NOTES ARE NOT CARRIED: they
+describe the bundle, and a pull reports what the SOURCE states rather than what
+a definition claims. That is what makes a definition's licence field worth
+asserting against in a test - when a publisher changes a tag, the two disagree
+and you find out.
+
+LicenseRecord is what a source states about a licence, and nothing more:
+
+    ctor    (licenseId), (licenseId, licenseSource, note)
+    static  None
+    props   LicenseId, LicenseSource, Note, IsStated
+    method  ToString()
+
+LicenseId is the identifier as the source spells it, for example "apache-2.0"
+or "mit"; LicenseSource is the address it was read from - a repository page, a
+licence file; Note is anything a human should know that the identifier does
+not say. None states nothing, which is what a source with no licence
+information reports and what every model pulled from an Ollama-protocol
+registry reports. THE LIBRARY APPLIES NO RULE OF ITS OWN: it never refuses a
+pull over a licence or the absence of one, and whether a set of model files may
+be used, shipped or published is your decision to make from what is reported.
+
+
+MATERIALIZING
+=============
+The store keeps a bundle's files content addressed, under names that say what
+they are and not what they are called. MaterializeAsync puts the publisher's
+names back:
+
+    Task<IReadOnlyList<string>> MaterializeAsync(string name,
+        string targetDirectory, MaterializeOptions options = null,
+        CancellationToken cancellationToken = default)
+
+It returns the absolute paths it wrote, in manifest order. The target directory
+is created if it is missing, and so is every directory a publisher's path
+implies.
+
+MaterializeOptions   MaterializeLink Link (default Hardlink); bool Overwrite
+    (default false).
+
+MaterializeLink
+
+    Hardlink   a second directory entry for bytes already on disk: no disk
+               space, no copying time. A link the platform or the file system
+               will not make - across a volume, on a file system without hard
+               links - BECOMES A COPY BY ITSELF, so this is always usable
+    Copy       the bytes, which costs the space and the time and leaves a file
+               that is independent of the store: deleting the model afterwards
+               leaves it standing
+    Symlink    a symbolic link to the blob. It is never chosen by itself and
+               NEVER falls back to anything: a caller that asks for symbolic
+               links wants the store's own file to be what a reader ends up
+               at, and quietly writing a copy instead would hide that it did
+               not happen. A link that cannot be made is a
+               ModelManagerException saying so
+
+OVERWRITE is false by default: a file already at one of the target paths fails
+the call and nothing further is written, so a directory that holds work of its
+own is never overwritten by accident. A DIRECTORY already at a target path
+fails the call whatever Overwrite says.
+
+A GGUF MODEL IS REFUSED: a model with no publisher file tree - which is every
+model pulled from an Ollama-protocol registry - is an InvalidOperationException
+saying so. ResolveAsync names the files of such a model instead.
+
+PATH SAFETY. Every layer name is checked against the target directory before
+anything is written: a name that is rooted, that names a drive, that walks up
+with ".." or that otherwise lands outside the target directory is a
+ModelManagerException rather than a file written where it was told to. A layer
+name comes from a manifest on disk, which a bundle pull wrote but which nothing
+stops a third party from editing.
+
+
+IMPORTING A FOLDER
+==================
+    Task ImportBundleAsync(string name, string directory,
+        ImportOptions options = null,
+        CancellationToken cancellationToken = default)
+
+walks a folder to its full depth, hashes every file the filter keeps, stores it
+as a blob and records it as a layer carrying its path relative to the folder.
+This is the route for anything a publisher keeps behind a sign-in - fetch it
+however it has to be fetched, then hand the folder over - and for any set of
+files you produced yourself. The paths are sorted, so two imports of one folder
+write the same manifest.
+
+ImportOptions   FileFilter Filter (never null; unset keeps every file the walk
+    finds, and a licence or a readme is kept whatever it says); bool Link
+    (default false); LicenseRecord License (null means: if the folder holds a
+    LICENSE file, record that file as the place the terms are stated and state
+    no identifier, since what a licence file says is for a human to read).
+
+LINK hard-links each file into the blobs directory instead of copying it. That
+costs no space and no time and is right for a folder about to be thrown away,
+and it falls back to a copy by itself when the file system will not link. What
+it does mean is that the file and the blob are then the SAME BYTES ON DISK:
+editing the file in place afterwards edits the blob, which is why copying is
+what an unset option does.
+
+THE HOST "local" IS THE CONVENTION for an imported bundle -
+local/<namespace>/<model>:<tag> - because the name grammar accepts it like any
+other host and no registry can ever be confused with it. Nothing enforces it;
+any name that parses is accepted.
+
+A directory that does not exist, and a directory that holds no file the filter
+keeps, are both a ModelManagerException.
+
+
+RESOLVING A BUNDLE
+==================
+ResolveAsync answers for a bundle exactly as it does for a GGUF model, with two
+members that carry the difference:
+
+    string Format                        the config layer's model format:
+                                         "gguf" for a model pulled from an
+                                         Ollama-protocol registry, and one of
+                                         "huggingface", "pytorch", "onnx",
+                                         "tensorflow-checkpoint", "mixed",
+                                         "files" or "imported" for a bundle.
+                                         null when the config states none and
+                                         no GGUF weights layer says otherwise
+    IReadOnlyList<ResolvedFile> Files    the files of a bundle, in manifest
+                                         order. EMPTY, never null, for a GGUF
+                                         model, whose files are named by
+                                         ModelPath and the lists beside it
+
+ResolvedFile   string Name (the publisher's relative path, with forward
+    slashes); string BlobPath (the absolute path of the blob the content lives
+    in); long Size; string Digest ("sha256:<hex>"). ToString() gives the path
+    and the size.
+
+FOR A BUNDLE, ModelPath IS NULL and ModelShardPaths, ProjectorPaths,
+AdapterPaths and DraftPath are empty: there is no GGUF weights layer to name.
+Read the files through Files, or materialize them. As for any resolve, paths
+are computed from digests and no file is opened, so check File.Exists if you
+cannot rule out a blob deleted by hand.
+
+
+SHOWING AND LISTING
+===================
+ShowAsync adds two members to what it reports for any model, and fills a third
+one differently:
+
+    LicenseRecord License   what the SOURCE stated, as the config layer
+                            recorded it when the model was pulled or imported:
+                            the identifier and the address it was read from.
+                            LicenseRecord.None when nothing is stated, which is
+                            what every model pulled from an Ollama-protocol
+                            registry reports. NEVER null
+    string Format           the config layer's model format, exactly as
+                            described for ResolvedModel.Format above
+    IReadOnlyList<string> Licenses
+                            every licence LAYER's text, as before, followed by
+                            THE TEXT OF EVERY LICENSE FILE THE BUNDLE SHIPS -
+                            which is why a licence file is always pulled,
+                            whatever the filter says
+
+ModelInfo.Metadata is null for a bundle and ProjectorMetadata is empty: nothing
+tries to read a GGUF header that is not there, so ShowAsync on a bundle opens no
+weights file at all - the only blobs it reads are the small text ones, the
+licence files among them.
+
+ListAsync shows bundles beside GGUF models, newest first, and
+ModelSummary.Config.ModelFormat is what tells them apart - "gguf" against one
+of the bundle formats. Only the manifest and the small config blob are read, as
+always.
+
+COPY, DELETE, EXISTS AND PRUNE ARE THE SAME CODE PATHS for a bundle as for
+anything else: CopyAsync gives it a second name and shares every blob,
+DeleteAsync removes the manifest and then every blob no remaining manifest
+references, and PruneAsync sweeps what nothing references at all.
+
+INTERCHANGE WITH OLLAMA SURVIVES A BUNDLE. Its manifest sits in the same
+manifests tree and its blobs in the same blobs directory, and its file layers
+carry a media type of this library's own. Ollama's layer walk carries a media
+type it does not know and ignores it, so an Ollama install sharing the
+directory lists the model, reports its size and removes it, and refuses to run
+it - which is the right answer, since there is nothing there for it to load.
+
+
 THE ERROR MODEL
 ===============
 Everything this library raises derives from ModelManagerException, itself an
@@ -828,6 +1335,42 @@ Exception. Catch the base type to catch all of it.
                                    manifest. StatusCode is null when no
                                    response arrived; ResponseBody holds the
                                    body when one was read, else null
+
+WHAT THE BUNDLE PATHS ADD, exception by exception:
+
+    ArgumentException           a Hugging Face pull under a name whose host is
+                                not the Hub with PullOptions.Repository unset;
+                                a file-list pull with no files; a PullSource a
+                                bundle cannot be pulled from; a BundleFile
+                                whose path is rooted, names a drive or walks
+                                up with "..", whose address is missing,
+                                relative or neither http nor https, or whose
+                                stated hash is not hexadecimal of the length
+                                its algorithm calls for; a BundleDefinition
+                                with no repository or no files; a missing
+                                directory argument
+    InvalidModelNameException   a BundleDefinition whose name does not parse
+    ModelManagerException       RequireHashes is set and the source states no
+                                hash for a file; the source listed nothing to
+                                pull; the folder to import does not exist or
+                                holds no file the filter keeps; a file is
+                                already at a materialize target path and
+                                Overwrite is not set; a layer names a blob the
+                                store does not have, or a path that would land
+                                outside the target directory; a symbolic link
+                                was asked for and could not be made
+    InvalidOperationException   MaterializeAsync on a model with no publisher
+                                file tree - which is every model pulled from
+                                an Ollama-protocol registry
+    RegistryException           a gated or private repository and no token; a
+                                repository, revision or object that is not
+                                there; an answer that is not a Hub document, a
+                                file tree or a bucket listing; a server that
+                                will say neither how large a file is nor serve
+                                a byte of it
+    DigestMismatchException     the bytes do not match the sha256 or the md5
+                                the source stated; the message says which, and
+                                the bad file is already gone
 
 Framework exceptions you will also see: ArgumentException (a null or blank
 model name or store directory), ArgumentNullException (a null Modelfile, a null
@@ -992,6 +1535,142 @@ EXAMPLE 4 - HANDLING THE ERRORS A PULL CAN RAISE
         Console.Error.WriteLine(ex.Message);
     }
 
+EXAMPLE 5 - PULL A HUGGING FACE FILE REPOSITORY, MATERIALIZE IT, DELETE IT
+--------------------------------------------------------------------------
+    using var store = new ModelStore(new ModelStoreOptions
+    {
+        StoreDirectory = "/data/models",
+    });
+
+    // Substitute the repository you want; any public one works the same way.
+    const string name = "hf.co/example-org/example-model";
+
+    // 1. PULL. A bundle pull is ASKED FOR: PullAsync(name) on its own still
+    //    means the registry protocol, which cannot serve such a repository.
+    PullOptions options = PullOptions.ForHuggingFace(
+        null,                      // repository: taken from the name
+        null,                      // revision: the name's tag, "latest" -> "main"
+        FileFilter.ExcludeTrainingArtifacts);   // no logs, no optimizer state
+
+    await foreach (PullProgress progress in store.PullAsync(name, options))
+    {
+        Console.WriteLine(progress.Digest == null
+            ? progress.Status
+            : $"{progress.Status} {progress.Percent:F1}%");
+    }
+    // listing example-org/example-model / pulling config.json 100.0% /
+    // pulling model.safetensors 12.4% ... / verifying sha256 digest /
+    // writing manifest / success
+
+    // 2. WHAT THE STORE NOW KNOWS. The licence is REPORTED, never applied.
+    ModelInfo info = await store.ShowAsync(name);
+    Console.WriteLine(info.Format);            // pytorch, onnx, mixed ...
+    Console.WriteLine(info.License.LicenseId);      // stated, or null
+    Console.WriteLine(info.License.LicenseSource);  // where it was read
+    foreach (string text in info.Licenses)          // the LICENSE files
+        Console.WriteLine(text.Length);
+
+    // 3. RESOLVE, then MATERIALIZE the publisher's own file tree.
+    ResolvedModel resolved = await store.ResolveAsync(name);
+    Console.WriteLine(resolved.ModelPath);     // null: no GGUF weights here
+    foreach (ResolvedFile file in resolved.Files)
+        Console.WriteLine($"{file.Name}  {file.Size:N0}  {file.BlobPath}");
+
+    IReadOnlyList<string> written = await store.MaterializeAsync(
+        name,
+        "/work/example-model",
+        new MaterializeOptions { Link = MaterializeLink.Hardlink });
+    Console.WriteLine(written[0]);   // /work/example-model/config.json
+
+    // 4. DELETE. The manifest goes, then every blob nothing else references.
+    //    What was materialized with hard links is still readable afterwards.
+    await store.DeleteAsync(name);
+
+EXAMPLE 6 - PULL A LIST OF ADDRESSES FROM A PUBLIC BUCKET
+---------------------------------------------------------
+    // A storage bucket speaks no model protocol at all: list it, then pull
+    // the list. Each object's md5 comes back with it and is verified as the
+    // bytes stream past; the store computes the sha256 in any case.
+    IReadOnlyList<BundleFile> files = await GoogleCloudStorageListing.ListAsync(
+        "example-bucket",              // the bucket
+        "models/example-model/",   // the prefix, stripped off each key
+        null);                     // HttpMessageHandler, null for a default
+
+    long total = 0;
+    foreach (BundleFile file in files)
+    {
+        Console.WriteLine($"{file.Path}  {file.Size:N0}  md5 {file.Md5}");
+        total += file.HasSize ? file.Size : 0;
+    }
+    Console.WriteLine($"{files.Count} files, {total:N0} bytes to fetch");
+
+    using var store = new ModelStore();
+
+    // The host of the name is a label here - the addresses in the list are
+    // what is actually fetched.
+    const string name =
+        "storage.googleapis.com/example-bucket/example-model:v1";
+
+    await foreach (PullProgress progress in store.PullAsync(
+        name, PullOptions.ForFileList(files, null)))
+    {
+        Console.WriteLine(progress.Status);
+    }
+
+    ModelInfo info = await store.ShowAsync(name);
+    Console.WriteLine(info.Format);   // tensorflow-checkpoint, pytorch ...
+
+    // Any other host works the same way: build the BundleFile list yourself.
+    var byHand = new[]
+    {
+        new BundleFile("weights/model.safetensors",
+            "https://files.example.org/example-model/model.safetensors",
+            467_701_064L,
+            "82ac8b2217f8f66f79737e444fe60c686d3cbfee54b0c8ef717f701213bbbb83",
+            null,
+            null),
+        new BundleFile("config.json",
+            "https://files.example.org/example-model/config.json"),
+    };
+    await foreach (PullProgress _ in store.PullAsync(
+        "files.example.org/example-org/example-model:v1",
+        PullOptions.ForFileList(byHand, null))) { }
+
+EXAMPLE 7 - IMPORT A FOLDER YOU DOWNLOADED BY HAND
+--------------------------------------------------
+    // The route for anything behind an interactive sign-in: fetch it however
+    // it has to be fetched, then hand the folder over. Nothing is requested.
+    using var store = new ModelStore();
+
+    const string name = "local/example-org/example-model:v1";
+
+    await store.ImportBundleAsync(name, "/downloads/example-model",
+        new ImportOptions
+        {
+            Filter = FileFilter.ExcludeTrainingArtifacts,
+            Link = false,   // copy: the folder stays independent of the store
+            License = new LicenseRecord(
+                "mit", "https://example.org/example-model/terms", null),
+        });
+
+    ModelInfo info = await store.ShowAsync(name);
+    Console.WriteLine(info.Config.ModelFormat);   // pytorch, onnx, imported
+    Console.WriteLine(info.License.LicenseId);    // mit
+    foreach (ModelLayer layer in info.Manifest.Layers)
+        Console.WriteLine($"{layer.Name}  {layer.Size:N0}  {layer.Digest}");
+
+    // It lists, copies, materializes and deletes like any other bundle.
+    foreach (ModelSummary summary in await store.ListAsync())
+        Console.WriteLine(
+            $"{summary.DisplayName}  {summary.Config.ModelFormat}");
+
+    await store.MaterializeAsync(name, "/work/example-model",
+        new MaterializeOptions
+        {
+            Link = MaterializeLink.Copy,
+            Overwrite = true,
+        });
+
 
 MINIMUM VIABLE PROJECT TEMPLATE
 ===============================
@@ -1080,6 +1759,22 @@ PERFORMANCE TIPS
     ten a second.
   - CopyAsync MOVES NO BLOB BYTES: only the manifest is copied and every blob
     is shared, so giving a model a second name costs a few hundred bytes.
+  - FILTER BEFORE YOU FETCH. A repository often ships the same weights twice -
+    a .bin beside a .safetensors, or an ONNX export beside both - and the
+    training logs on top. A FileFilter that excludes what you will not open is
+    the difference between a few hundred megabytes and several gigabytes, and
+    FileFilter.ExcludeTrainingArtifacts is the ready-made one for logs and
+    optimizer state. Listing a source first reports the size before you commit
+    to it.
+  - STATED HASHES MAKE A RE-PULL FREE. A file whose source states a sha256 is
+    written straight to the blob that digest names, so a second pull of an
+    unmoved revision costs one listing and no file requests at all. A file
+    whose source states nothing is fetched again every time, because until the
+    bytes are there nothing can know it is the file already in the store.
+  - MATERIALIZE WITH HARD LINKS, WHICH IS THE DEFAULT. A hard link is a second
+    directory entry for bytes already on disk: no space, no copying time, and
+    a fallback to a copy only where the platform or the file system will not
+    link. Laying a 10 GB bundle out twice costs nothing twice over.
 
 
 COMMON PITFALLS TO AVOID
@@ -1139,6 +1834,47 @@ COMMON PITFALLS TO AVOID
     nothing coordinates them and they share a partial file. Different models in
     parallel are fine.
 
+14. DO NOT expect PullAsync(name) to fetch a bundle. The plain overload is the
+    registry protocol and nothing else, and a Hugging Face repository without
+    GGUF fails there exactly as it always has. Ask for the bundle:
+    PullAsync(name, PullOptions.ForHuggingFace(...)) or ForFileList(...).
+
+15. DO NOT read "latest" as a Hugging Face revision. The store's default tag
+    "latest" maps to the branch "main" for an hf.co bundle, and the manifest
+    then records the COMMIT that branch resolved to, not the branch. A name
+    with no tag is therefore pinned to whatever "main" pointed at that day;
+    pull again to find out whether it moved.
+
+16. DO NOT expect a file with no stated hash to be free on a re-pull. The Hub
+    states a sha256 only for files in large-file storage, so small files - a
+    config, a tokenizer, a readme - are fetched again every time. They are
+    also the cheap ones, which is why this is a note and not a warning.
+
+17. DO NOT call MaterializeAsync on a model pulled from a registry: it has no
+    publisher file tree and the call is an InvalidOperationException.
+    ResolveAsync names the files of a GGUF model. And materializing refuses to
+    replace anything by default - set MaterializeOptions.Overwrite when you
+    mean it.
+
+18. DO NOT assume materializing always costs nothing. A hard link cannot cross
+    a volume or work on a file system without links, and the call quietly
+    copies instead, which costs the space. MaterializeLink.Symlink is the one
+    that never falls back: it fails loudly instead, and on Windows it needs
+    developer mode or the privilege to create links.
+
+19. DO NOT set PullOptions.RequireHashes against a repository of small files.
+    It refuses any file the source states neither a sha256 nor an md5 for, and
+    for a Hugging Face repository that is every file the Hub keeps in git
+    itself. Use it when only content a publisher vouched for is acceptable,
+    and expect to pair it with a filter.
+
+20. DO NOT read a reported licence as permission. The library reports the
+    identifier a source states and the address it read it from, and hands you
+    the LICENSE text a bundle ships; it applies no rule, refuses no pull, and
+    has no opinion. What may be used, shipped or published is yours to decide
+    from what is reported, and a source that states nothing reports
+    LicenseRecord.None rather than a guess.
+
 
 WHAT THIS PACKAGE DOES NOT DO
 =============================
@@ -1164,8 +1900,8 @@ Do NOT reach for this package to:
     in manifest order; the split.* keys are readable through GgufMetadata but
     are not used to order, group or validate the shards.
   - Run a model, tokenize, embed or constrain output with a grammar. That is
-    the separate CodeBrix.Ollama.ModelRunner package. There is no native code
-    and no GPU anywhere in this one; it hands you file paths.
+    the separate CodeBrix.Ollama.ModelRunner package. No native library and
+    no GPU anywhere in this one; it hands you file paths.
   - Listen on a port or talk to a daemon. It is not a server -- no listener,
     no endpoint -- and it does not need Ollama installed: no binary is looked
     for, no process started, no configuration file of Ollama's read.
@@ -1175,12 +1911,27 @@ Do NOT reach for this package to:
   - Garbage-collect a store on its own. Blobs are removed by DeleteAsync, by
     the pruning PullAsync and CreateAsync do for the name they just wrote, and
     by PruneAsync when you call it; nothing runs in the background.
+  - RUN or CONVERT the files of a bundle. They are fetched, verified, stored
+    and laid out again as the publisher's tree; nothing here loads a
+    checkpoint, exports one to ONNX, quantizes anything or runs a tool over
+    it. What you do with the files is yours.
+  - DECIDE ANYTHING ABOUT A LICENCE. It reports what a source states - an
+    identifier, the address it was read from, the LICENSE text a bundle ships
+    - and applies no rule of its own: no pull is refused over a licence or the
+    absence of one, nothing is interpreted, and there is no policy to
+    configure.
+  - Reach a source that needs an INTERACTIVE SIGN-IN. A share link only a
+    browser session can follow is out of reach whatever token you hold. Fetch
+    it by hand and hand the folder to ImportBundleAsync.
   - Offer synchronous APIs, or run on .NET below 10.0.
 
 This package IS for: keeping a local, Ollama-compatible model store; pulling
-models into it with resumable, verified downloads; listing, describing,
-copying, deleting and deriving models; parsing and writing Modelfiles; reading
-GGUF headers; and turning a name into the paths a runner opens.
+models into it with resumable, verified downloads, from an Ollama-protocol
+registry or from the Hugging Face repository, the list of addresses or the
+folder a publisher keeps a model in; listing, describing, copying, deleting and
+deriving models; laying a bundle out as its publisher's own file tree; parsing
+and writing Modelfiles; reading GGUF headers; and turning a name into the paths
+a runner opens.
 
 
 WORKING EXAMPLES ON GITHUB
@@ -1264,14 +2015,64 @@ Feature-to-test-file map:
     https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Gguf/GgufTensorTypesTests.cs
     https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Gguf/GgufFileTypesTests.cs
 
-  The one live test, gated behind CODEBRIX_OLLAMA_RUN_LIVE_TESTS=1, that
-  pulls a real model from registry.ollama.ai and then resolves, lists and
-  deletes it
+  Pulling a bundle: the progress vocabulary, one layer per file, the config
+  that records the source, the revision and the licence, the filter, the
+  licence and readme that are pulled whatever the filter says, the second pull
+  that costs nothing, the revision that moved, and the plain overload that
+  still means the registry
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Store/ModelStoreBundlePullTests.cs
+
+  Resolving and materializing a bundle: Format and Files, hard links, copies
+  and symbolic links, what is already there, and the two things that are
+  refused
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Store/ModelStoreBundleResolveTests.cs
+
+  Importing a folder: the layers and config it writes, linking against
+  copying, where the licence comes from, and the folders that are refused
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Store/ModelStoreBundleImportTests.cs
+
+  A bundle through the operations it was meant to leave alone: listed beside a
+  GGUF model and told apart by its format, shown, copied, deleted and pruned
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Store/ModelStoreBundleListShowDeletePruneTests.cs
+
+  The sources: the Hugging Face listing and its commit pinning, hashes,
+  filters, licence reporting and credential refusals; a plain list of
+  addresses and the servers that will not answer a HEAD; a storage bucket's
+  XML listing, its paging and its hash headers
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Sources/HuggingFaceHubSourceTests.cs
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Sources/HttpFileListSourceTests.cs
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Sources/GoogleCloudStorageListingTests.cs
+
+  Downloading by address: ranged parts, the sidecar a second run resumes from,
+  the redirect that the token never follows, verification against a stated
+  sha256 or md5, and the sha256 computed when nothing is stated
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Registry/FileDownloadTests.cs
+
+  The bundle vocabulary: what a definition insists on and fills in, what a
+  file accepts and refuses, the glob rules and the always-kept licence and
+  readme, and the options a pull starts from
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Bundles/BundleDefinitionTests.cs
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Bundles/BundleFileTests.cs
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Bundles/FileFilterTests.cs
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Bundles/PullOptionsTests.cs
+
+  The live tests, skipped by default, that pull real repositories and real
+  bucket objects from their publishers, check every file against what was
+  stated, materialize the tree and delete everything again
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Store/MusicModelLiveTests.cs
+
+  The one live test, skipped by default, that pulls a real model from
+  registry.ollama.ai and then resolves, lists and deletes it
     https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Store/ModelStoreLiveTests.cs
 
   Test infrastructure worth copying into your own tests: the registry double,
-  a GGUF file builder, a fake model builder and a temporary store directory
+  an in-memory Hugging Face Hub, an in-memory storage bucket, the byte-range
+  and failure-injection base they share, a GGUF file builder, a fake model
+  builder and a temporary store directory
     https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Infrastructure/FakeRegistryHandler.cs
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Infrastructure/FakeHubHandler.cs
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Infrastructure/FakeBucketHandler.cs
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Infrastructure/FakeHttpHandlerBase.cs
     https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Infrastructure/GgufTestFileBuilder.cs
     https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Infrastructure/FakeModelBuilder.cs
     https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Infrastructure/TempStoreDirectory.cs
@@ -1283,6 +2084,7 @@ QUICK REFERENCE CARD
 INSTALL     dotnet add package CodeBrix.Ollama.ModelManager.MitLicenseForever
 USING       using CodeBrix.Ollama.ModelManager;
 TARGET      .NET 10 or later   DEPENDENCIES  none   LICENSE  MIT
+            no native library ships in the package
 NULLABLE    off in the library -- read the per-member notes
 STORE       using var store = new ModelStore();
 DEFAULT DIR OLLAMA_MODELS, else ~/.ollama/models
@@ -1298,6 +2100,32 @@ OPERATIONS  PullAsync (lazy, resumable), ListAsync (newest first),
             only), CopyAsync, DeleteAsync, CreateAsync, PruneAsync(grace)
 PULL STATUS pulling manifest -> pulling <12 hex> (per layer) -> verifying
             sha256 digest -> writing manifest -> [removing unused] -> success
+BUNDLES     a model that is not GGUF on a registry - a Hugging Face file
+            repository, a list of HTTPS addresses, a folder on disk - stored
+            in the same blobs and manifests. ASK FOR IT:
+            PullAsync(name, PullOptions.ForHuggingFace(repo, rev, filter)) |
+            PullAsync(name, PullOptions.ForFileList(files, filter));
+            PullOptions.RequireHashes, PullOptions.DefaultRevision "main"
+SOURCES     HuggingFaceHubSource(repository, revision, filter, options),
+            HttpFileListSource(files, filter[, options]) -> ListAsync ->
+            BundleListing (RepositoryId, ResolvedRevision, License, Files,
+            TotalBytes); GoogleCloudStorageListing.ListAsync(bucket, prefix,
+            handler) -> IReadOnlyList<BundleFile>
+FILTERS     new FileFilter(includes, excludes) | FileFilter.Default |
+            FileFilter.ExcludeTrainingArtifacts; globs over the whole path,
+            ** crosses separators; LICENSE and README are always kept
+DESCRIBE    BundleDefinition.ForHuggingFace / ForFileList / ForRegistry ->
+            ToPullOptions(); LicenseRecord(licenseId, licenseSource, note) |
+            LicenseRecord.None - REPORTED, never applied
+BUNDLE OUT  MaterializeAsync(name, directory, MaterializeOptions { Link =
+            Hardlink | Copy | Symlink, Overwrite }) -> the paths written;
+            ImportBundleAsync(name, directory, ImportOptions { Filter, Link,
+            License }) for a folder, by convention under host "local"
+BUNDLE IN   ResolvedModel.Files (ResolvedFile: Name, BlobPath, Size, Digest)
+            and .Format; ModelInfo.License, .Format and .Licenses;
+            ModelSummary.Config.ModelFormat tells a bundle from a GGUF model
+BUNDLE STATUS   listing <repository> -> pulling <path> (per file) -> verifying
+            sha256 digest -> writing manifest -> success
 MODELFILE   Modelfile.Parse(text) | Parse(reader) | ReadFileAsync(path); FROM
             LICENSE TEMPLATE SYSTEM ADAPTER DRAFT RENDERER PARSER PARAMETER
             MESSAGE REQUIRES;  GetParameters() -> ModelParameters

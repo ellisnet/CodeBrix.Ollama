@@ -134,7 +134,8 @@ public sealed unsafe class NativeConformanceTests
         batch.Batch.Token[0].Should().Be(3);
         batch.Batch.Pos[1].Should().Be(1);
         batch.Batch.Logits[1].Should().Be((sbyte)1);
-        Assert.Throws<InvalidOperationException>(() => batch.Add(0, 2, 0, true));
+        Action overfill = () => batch.Add(0, 2, 0, true);
+        overfill.Should().Throw<InvalidOperationException>();
 
         batch.Clear();
         batch.Count.Should().Be(0);

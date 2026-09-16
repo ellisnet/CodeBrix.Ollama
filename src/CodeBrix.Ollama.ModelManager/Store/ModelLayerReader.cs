@@ -16,6 +16,7 @@ internal sealed class ModelLayerReader
     private static readonly IReadOnlyList<string> NoStrings = Array.Empty<string>();
     private static readonly IReadOnlyList<ModelMessage> NoMessages = Array.Empty<ModelMessage>();
 
+    private readonly List<ResolvedFile> _bundleFiles = new List<ResolvedFile>();
     private readonly List<string> _modelShardPaths = new List<string>();
     private readonly List<string> _projectorPaths = new List<string>();
     private readonly List<string> _projectorDigests = new List<string>();
@@ -30,6 +31,18 @@ internal sealed class ModelLayerReader
     /// The config layer contents, or an empty config when the manifest has none or it cannot be read.
     /// </summary>
     public ModelConfig Config { get; private set; } = new ModelConfig();
+
+    /// <summary>
+    /// The files of a bundle, in manifest order: every layer whose media type is
+    /// <see cref="MediaTypes.BundleFile"/>, with the publisher's path it carries and the blob it names.
+    /// Empty for a GGUF model. Nothing here is opened; the GGUF walk above takes no notice of these
+    /// layers, and resolving and materializing a bundle both read them from here so the two can never
+    /// disagree about what a bundle holds.
+    /// </summary>
+    public IReadOnlyList<ResolvedFile> BundleFiles
+    {
+        get { return _bundleFiles; }
+    }
 
     /// <summary>
     /// The absolute path of the first model-weights blob, or <see langword="null"/> when there is none.
@@ -203,6 +216,11 @@ internal sealed class ModelLayerReader
                 case MediaTypes.License:
                     reader._licenses.Add(await LayerFactory
                         .ReadBlobTextAsync(paths, layer.Digest, cancellationToken).ConfigureAwait(false));
+                    break;
+                case MediaTypes.BundleFile:
+                    // A bundle file is recorded and never opened, and it takes no part in any of the
+                    // GGUF answers above: a bundle has no weights layer, no projector and no adapter.
+                    reader._bundleFiles.Add(new ResolvedFile(layer.Name, blobPath, layer.Size, layer.Digest));
                     break;
                 default:
                     // Deprecated embeddings layers and anything a newer Ollama adds are carried in the

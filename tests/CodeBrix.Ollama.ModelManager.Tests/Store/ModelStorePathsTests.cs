@@ -261,7 +261,5 @@ public sealed class ModelStorePathsTests
     [InlineData("sha256-" + SixtyFourHex, false)]
     [InlineData("", false)]
     public void IsPartialSidecarFileName_recognizes_only_this_librarys_leftovers(string fileName, bool expected)
-    {
-        ModelStorePaths.IsPartialSidecarFileName(fileName).Should().Be(expected);
-    }
+        => ModelStorePaths.IsPartialSidecarFileName(fileName).Should().Be(expected);
 }

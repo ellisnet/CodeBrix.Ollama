@@ -12,11 +12,26 @@ using System.Threading.Tasks;
 namespace CodeBrix.Ollama.ModelManager; //was previously: ollama/ollama server/download.go;
 
 /// <summary>
-/// One blob download: the blob is split into byte ranges, the ranges are fetched concurrently into a
+/// One file download: the file is split into byte ranges, the ranges are fetched concurrently into a
 /// single partial file, their progress is recorded in a JSON sidecar so an interrupted download can be
-/// resumed, and the finished file is verified against its digest before it is moved into place.
+/// resumed, and the finished file is verified against whatever hash the source stated before it is
+/// moved into place.
 /// </summary>
 /// <remarks>
+/// <para>
+/// There are two ways in. A REGISTRY download names a model and a blob digest, which is what a pull
+/// from an Ollama-protocol registry does and what every behaviour below was written for. An ADDRESS
+/// download names a <see cref="Uri"/>, the size the source stated and the hashes the source stated,
+/// which is what a bundle pull from a Hugging Face repository, a storage bucket or a plain list of
+/// addresses does. The ranged fetching, the sidecar, the resume, the stall watchdog and the retries are
+/// the same code in both; what differs is where the address comes from, what a missing size is asked
+/// for with, and what the finished bytes are checked against.
+/// </para>
+/// <para>
+/// The SHA-256 of the finished file is computed in every case and handed back, so that a bundle file
+/// whose source stated no hash at all can still be named by its content and verified against itself on
+/// a later pull.
+/// </para>
 /// <para>
 /// This is the port of Ollama's <c>blobDownload</c>. The shape of the work is the same: Prepare splits
 /// or resumes, Run resolves the direct URL and downloads the ranges, and each range is retried on its
@@ -42,8 +57,14 @@ internal sealed class BlobDownload
 
     private readonly RegistryClient _client;
     private readonly ModelStoreOptions _options;
+    private readonly bool _fromRegistry;
     private readonly ModelName _name;
     private readonly string _digest;
+    private readonly Uri _sourceUrl;
+    private readonly string _expectedDigest;
+    private readonly string _expectedMd5;
+    private readonly string _stateKey;
+    private readonly string _subject;
     private readonly long _expectedSize;
     private readonly string _destinationPath;
     private readonly string _partialDataPath;
@@ -89,8 +110,78 @@ internal sealed class BlobDownload
 
         _client = client;
         _options = options;
+        _fromRegistry = true;
         _name = name;
         _digest = NormalizeDigest(digest);
+        _expectedDigest = _digest;
+        _stateKey = _digest;
+        _subject = "blob " + _digest;
+        _expectedSize = expectedSize;
+        _destinationPath = destinationPath;
+        _partialDataPath = partialDataPath;
+        _partialStatePath = partialStatePath;
+        _retryBaseDelay = retryBaseDelay > TimeSpan.Zero ? retryBaseDelay : TimeSpan.FromSeconds(1);
+    }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="BlobDownload"/> class for a file at an address
+    /// rather than a blob on a registry.
+    /// </summary>
+    /// <param name="client">The client the requests go through, for its redirect and token rules.</param>
+    /// <param name="options">The store options that set the part sizes, the retries and the timeouts.</param>
+    /// <param name="url">The address the bytes are fetched from.</param>
+    /// <param name="expectedSize">
+    /// The size the source stated, or -1 to ask the server for it with a HEAD request.
+    /// </param>
+    /// <param name="expectedSha256">
+    /// The SHA-256 the source stated, with or without the <c>sha256:</c> prefix, or
+    /// <see langword="null"/> when it stated none.
+    /// </param>
+    /// <param name="expectedMd5">
+    /// The MD5 the source stated as hexadecimal, or <see langword="null"/> when it stated none.
+    /// </param>
+    /// <param name="destinationPath">
+    /// Where the finished, verified file is moved to, or <see langword="null"/> or empty to leave it at
+    /// <paramref name="partialDataPath"/> for a caller that names the file by the digest the download
+    /// computes.
+    /// </param>
+    /// <param name="partialDataPath">The file the bytes are written to while the download runs.</param>
+    /// <param name="partialStatePath">The JSON sidecar that records the byte ranges and their progress.</param>
+    /// <param name="retryBaseDelay">The base delay of the back-off between retries of a failed range.</param>
+    /// <exception cref="ArgumentNullException">The client, the options or the address is <see langword="null"/>.</exception>
+    public BlobDownload(
+        RegistryClient client,
+        ModelStoreOptions options,
+        Uri url,
+        long expectedSize,
+        string expectedSha256,
+        string expectedMd5,
+        string destinationPath,
+        string partialDataPath,
+        string partialStatePath,
+        TimeSpan retryBaseDelay)
+    {
+        if (client == null)
+        {
+            throw new ArgumentNullException(nameof(client));
+        }
+        if (options == null)
+        {
+            throw new ArgumentNullException(nameof(options));
+        }
+        if (url == null)
+        {
+            throw new ArgumentNullException(nameof(url));
+        }
+
+        _client = client;
+        _options = options;
+        _fromRegistry = false;
+        _sourceUrl = url;
+        _expectedDigest = string.IsNullOrEmpty(expectedSha256) ? null : NormalizeDigest(expectedSha256).ToLowerInvariant();
+        _expectedMd5 = string.IsNullOrEmpty(expectedMd5) ? null : expectedMd5.ToLowerInvariant();
+        _stateKey = ModelStorePaths.GetDownloadKey(url);
+        _subject = "file " + url.AbsoluteUri;
         _expectedSize = expectedSize;
         _destinationPath = destinationPath;
         _partialDataPath = partialDataPath;
@@ -152,7 +243,7 @@ internal sealed class BlobDownload
 
         _total = _expectedSize >= 0
             ? _expectedSize
-            : await _client.GetBlobSizeAsync(_name, _digest, cancellationToken).ConfigureAwait(false);
+            : await AskForTheSizeAsync(cancellationToken).ConfigureAwait(false);
 
         CreateParts();
         PersistState();
@@ -171,18 +262,24 @@ internal sealed class BlobDownload
     /// <param name="cancellationToken">
     /// A token that cancels the download, leaving the partial file and its sidecar in place.
     /// </param>
-    /// <returns>A task that completes when the file is at the destination path.</returns>
+    /// <returns>
+    /// The digest the bytes hash to, their size and where the finished file is. For a file that was
+    /// already in the store nothing is fetched and the result says so.
+    /// </returns>
     /// <exception cref="ModelNotFoundException">The registry answered 404 for the blob.</exception>
-    /// <exception cref="DigestMismatchException">The downloaded bytes do not hash to the digest.</exception>
-    /// <exception cref="RegistryException">A byte range failed every retry, or the registry answered an error.</exception>
-    public async Task RunAsync(Action<long, long> progress, CancellationToken cancellationToken = default)
+    /// <exception cref="DigestMismatchException">The downloaded bytes do not match a hash the source stated.</exception>
+    /// <exception cref="RegistryException">
+    /// A byte range failed every retry; the server answered an error; or the server states a size other
+    /// than the one the source stated.
+    /// </exception>
+    public async Task<BlobDownloadResult> RunAsync(Action<long, long> progress, CancellationToken cancellationToken = default)
     {
-        if (File.Exists(_destinationPath))
+        if (!string.IsNullOrEmpty(_destinationPath) && File.Exists(_destinationPath))
         {
             // Cache hit: the blob is already in the store, so there is nothing to fetch.
             long existingSize = new FileInfo(_destinationPath).Length;
             ReportProgress(progress, existingSize, existingSize);
-            return;
+            return new BlobDownloadResult(_expectedDigest, _expectedMd5, existingSize, _destinationPath, true);
         }
 
         await PrepareAsync(cancellationToken).ConfigureAwait(false);
@@ -193,11 +290,14 @@ internal sealed class BlobDownload
             ? Task.CompletedTask
             : ReportProgressPeriodicallyAsync(progress, progressCancellation.Token);
 
+        BlobDownloadResult result;
         try
         {
-            (Uri Url, bool SendAuthorization) direct = await ResolveDirectUrlAsync(cancellationToken).ConfigureAwait(false);
+            (Uri Url, bool SendAuthorization, long StatedSize) direct =
+                await ResolveDirectUrlAsync(cancellationToken).ConfigureAwait(false);
+            EnsureStatedSizeAgrees(direct.Url, direct.StatedSize);
             await DownloadPartsAsync(direct.Url, direct.SendAuthorization, cancellationToken).ConfigureAwait(false);
-            await FinishAsync(cancellationToken).ConfigureAwait(false);
+            result = await FinishAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -206,21 +306,29 @@ internal sealed class BlobDownload
         }
 
         ReportProgress(progress, Total, Total);
+        return result;
     }
 
     /// <summary>
     /// Finds the address the bytes are actually fetched from. A registry usually answers the blob
     /// address with a redirect to a content delivery host, and that redirected address carries its own
     /// signature, so it is used without the <c>Authorization</c> header. A 200 means the registry
-    /// serves the blob itself, and then the blob address is used with the header.
+    /// serves the blob itself, and then the blob address is used with the header. A Hugging Face
+    /// resolve address behaves exactly like the first case.
     /// </summary>
     /// <param name="cancellationToken">A token that cancels the lookup.</param>
-    /// <returns>The address to fetch from and whether it may carry the <c>Authorization</c> header.</returns>
+    /// <returns>
+    /// The address to fetch from, whether it may carry the <c>Authorization</c> header, and the size
+    /// the answer stated, which is -1 when it stated none.
+    /// </returns>
     /// <exception cref="ModelNotFoundException">The registry answered 404 for the blob.</exception>
-    /// <exception cref="RegistryException">Every attempt within the time budget failed.</exception>
-    private async Task<(Uri Url, bool SendAuthorization)> ResolveDirectUrlAsync(CancellationToken cancellationToken)
+    /// <exception cref="RegistryException">
+    /// The address answered 404, or every attempt within the time budget failed.
+    /// </exception>
+    private async Task<(Uri Url, bool SendAuthorization, long StatedSize)> ResolveDirectUrlAsync(
+        CancellationToken cancellationToken)
     {
-        Uri blobUri = _client.GetBlobUri(_name, _digest);
+        Uri blobUri = _fromRegistry ? _client.GetBlobUri(_name, _digest) : _sourceUrl;
 
         // Ollama gives this step 30 seconds. Here the budget is thirty times the retry base delay,
         // which is the same 30 seconds at the default one-second delay and stays proportional when a
@@ -238,33 +346,46 @@ internal sealed class BlobDownload
 
                 if (response.StatusCode == HttpStatusCode.NotFound)
                 {
-                    throw new ModelNotFoundException(
-                        _name.ToString(), "blob " + _digest + " of model " + _name + " not found on " + _name.Host);
+                    if (_fromRegistry)
+                    {
+                        throw new ModelNotFoundException(
+                            _name.ToString(), "blob " + _digest + " of model " + _name + " not found on " + _name.Host);
+                    }
+
+                    throw new RegistryException(
+                        "the server at " + blobUri.Host + " does not have " + _subject,
+                        HttpStatusCode.NotFound,
+                        null);
                 }
 
                 if (RegistryClient.IsRedirect(response.StatusCode) && response.Headers.Location != null)
                 {
                     Uri location = new Uri(blobUri, response.Headers.Location);
                     bool sameHost = string.Equals(location.Host, blobUri.Host, StringComparison.OrdinalIgnoreCase);
-                    return (location, sameHost);
+                    return (location, sameHost, ReadStatedSize(response));
                 }
 
                 if (response.StatusCode == HttpStatusCode.OK)
                 {
-                    return (blobUri, true);
+                    return (blobUri, true, ReadStatedSize(response));
                 }
 
                 string body = await RegistryClient.ReadBodyAsync(response, cancellationToken).ConfigureAwait(false);
                 throw new RegistryException(
                     "unexpected status code "
                         + ((int)response.StatusCode).ToString(CultureInfo.InvariantCulture)
-                        + " for blob " + _digest,
+                        + " for " + _subject,
                     response.StatusCode,
                     body);
             }
             catch (RegistryException exception)
             {
-                if (exception.StatusCode == HttpStatusCode.Unauthorized || DateTime.UtcNow >= deadline)
+                // A refusal and a plain "it is not there" are answers, not transport trouble, so neither
+                // is worth the back-off. Nothing on the registry path raises a 404 this way: that path
+                // reports a missing blob as a ModelNotFoundException, which is not caught here at all.
+                if (exception.StatusCode == HttpStatusCode.Unauthorized
+                    || exception.StatusCode == HttpStatusCode.NotFound
+                    || DateTime.UtcNow >= deadline)
                 {
                     throw;
                 }
@@ -352,7 +473,7 @@ internal sealed class BlobDownload
             throw new RegistryException(
                 "max retries exceeded downloading part "
                     + part.N.ToString(CultureInfo.InvariantCulture)
-                    + " of blob " + _digest + ": " + reason,
+                    + " of " + _subject + ": " + reason,
                 lastError);
         }
         finally
@@ -408,23 +529,19 @@ internal sealed class BlobDownload
                 {
                     throw new RegistryException(
                         "the server ignored the Range header for part "
-                            + part.N.ToString(CultureInfo.InvariantCulture) + " of blob " + _digest,
+                            + part.N.ToString(CultureInfo.InvariantCulture) + " of " + _subject,
                         response.StatusCode,
                         null);
                 }
             }
             else if (response.StatusCode != HttpStatusCode.PartialContent)
             {
-                await RegistryClient.ThrowForErrorStatusAsync(
-                    response,
-                    _name,
-                    "blob " + _digest + " of model " + _name + " not found on " + _name.Host,
-                    attemptCancellation.Token).ConfigureAwait(false);
+                await ThrowForErrorStatusAsync(response, attemptCancellation.Token).ConfigureAwait(false);
 
                 throw new RegistryException(
                     "unexpected status code "
                         + ((int)response.StatusCode).ToString(CultureInfo.InvariantCulture)
-                        + " for part " + part.N.ToString(CultureInfo.InvariantCulture) + " of blob " + _digest,
+                        + " for part " + part.N.ToString(CultureInfo.InvariantCulture) + " of " + _subject,
                     response.StatusCode,
                     null);
             }
@@ -462,7 +579,7 @@ internal sealed class BlobDownload
                     "the connection ended with "
                         + remaining.ToString(CultureInfo.InvariantCulture)
                         + " bytes of part " + part.N.ToString(CultureInfo.InvariantCulture)
-                        + " of blob " + _digest + " still missing",
+                        + " of " + _subject + " still missing",
                     null,
                     null);
             }
@@ -480,26 +597,47 @@ internal sealed class BlobDownload
     }
 
     /// <summary>
-    /// Verifies the partial file against the digest, drops the sidecar and moves the file to the
-    /// destination.
+    /// Verifies the partial file against every hash the source stated, drops the sidecar and moves the
+    /// file to the destination.
     /// </summary>
     /// <param name="cancellationToken">A token that cancels the verification.</param>
-    /// <returns>A task that completes when the file is at the destination path.</returns>
+    /// <returns>The digest the bytes hash to, their size and where the finished file is.</returns>
     /// <exception cref="DigestMismatchException">
-    /// The bytes do not hash to the digest. The partial file and its sidecar have been deleted, so the
-    /// next attempt starts over.
+    /// The bytes do not match a hash the source stated. The partial file and its sidecar have been
+    /// deleted, so the next attempt starts over.
     /// </exception>
-    private async Task FinishAsync(CancellationToken cancellationToken)
+    /// <remarks>
+    /// The SHA-256 is computed whatever the source stated, in one pass over the finished file, and the
+    /// MD5 is computed in the same pass when the source stated one. A registry download states a
+    /// SHA-256 and nothing else, which is exactly the check this class has always made.
+    /// </remarks>
+    private async Task<BlobDownloadResult> FinishAsync(CancellationToken cancellationToken)
     {
-        string actualDigest = await ComputeFileDigestAsync(_partialDataPath, cancellationToken).ConfigureAwait(false);
-        if (!string.Equals(actualDigest, _digest, StringComparison.OrdinalIgnoreCase))
+        (string Digest, string Md5) hashes = await ComputeFileHashesAsync(
+            _partialDataPath, _expectedMd5 != null, cancellationToken).ConfigureAwait(false);
+
+        if (_expectedDigest != null && !string.Equals(hashes.Digest, _expectedDigest, StringComparison.OrdinalIgnoreCase))
         {
             DeleteFile(_partialDataPath);
             DeleteFile(_partialStatePath);
-            throw new DigestMismatchException(_digest, actualDigest);
+            throw new DigestMismatchException(_expectedDigest, hashes.Digest);
+        }
+
+        if (_expectedMd5 != null && !string.Equals(hashes.Md5, _expectedMd5, StringComparison.OrdinalIgnoreCase))
+        {
+            DeleteFile(_partialDataPath);
+            DeleteFile(_partialStatePath);
+            throw new DigestMismatchException("md5:" + _expectedMd5, "md5:" + hashes.Md5);
         }
 
         DeleteFile(_partialStatePath);
+
+        if (string.IsNullOrEmpty(_destinationPath))
+        {
+            // No destination was named because only the digest just computed can name the file. The
+            // verified bytes stay where they are and the caller moves them.
+            return new BlobDownloadResult(hashes.Digest, hashes.Md5, Total, _partialDataPath, false);
+        }
 
         string destinationDirectory = Path.GetDirectoryName(_destinationPath);
         if (!string.IsNullOrEmpty(destinationDirectory))
@@ -508,6 +646,7 @@ internal sealed class BlobDownload
         }
 
         File.Move(_partialDataPath, _destinationPath, true);
+        return new BlobDownloadResult(hashes.Digest, hashes.Md5, Total, _destinationPath, false);
     }
 
     /// <summary>
@@ -605,7 +744,7 @@ internal sealed class BlobDownload
     /// <returns><see langword="true"/> when the state can be resumed.</returns>
     private bool IsUsableState(BlobDownloadState state)
     {
-        if (!string.Equals(state.Digest, _digest, StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(state.Digest, _stateKey, StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
@@ -649,7 +788,7 @@ internal sealed class BlobDownload
         {
             var state = new BlobDownloadState
             {
-                Digest = _digest,
+                Digest = _stateKey,
                 Total = _total,
                 Parts = new List<BlobDownloadPart>(_parts.Count)
             };
@@ -785,17 +924,136 @@ internal sealed class BlobDownload
     }
 
     /// <summary>
-    /// Hashes a file with SHA-256 and formats the result the way a manifest digest is written.
+    /// Hashes a file in one pass: always with SHA-256, and with MD5 as well when the caller asks for it.
     /// </summary>
     /// <param name="path">The file to hash.</param>
+    /// <param name="includeMd5">Whether the MD5 is wanted too.</param>
     /// <param name="cancellationToken">A token that cancels the hashing.</param>
-    /// <returns>The digest in <c>sha256:&lt;hex&gt;</c> form.</returns>
-    private static async Task<string> ComputeFileDigestAsync(string path, CancellationToken cancellationToken)
+    /// <returns>
+    /// The digest in <c>sha256:&lt;hex&gt;</c> form and, when it was asked for, the MD5 as lower-case
+    /// hexadecimal; the MD5 is <see langword="null"/> when it was not.
+    /// </returns>
+    private static async Task<(string Digest, string Md5)> ComputeFileHashesAsync(
+        string path, bool includeMd5, CancellationToken cancellationToken)
     {
-        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, CopyBufferSize, true);
-        using var algorithm = SHA256.Create();
-        byte[] hash = await algorithm.ComputeHashAsync(stream, cancellationToken).ConfigureAwait(false);
-        return "sha256:" + Convert.ToHexStringLower(hash);
+        using IncrementalHash sha256 = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        using IncrementalHash md5 = includeMd5 ? IncrementalHash.CreateHash(HashAlgorithmName.MD5) : null;
+
+        using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, CopyBufferSize, true))
+        {
+            byte[] buffer = new byte[CopyBufferSize];
+            while (true)
+            {
+                int read = await stream.ReadAsync(buffer.AsMemory(), cancellationToken).ConfigureAwait(false);
+                if (read <= 0)
+                {
+                    break;
+                }
+
+                sha256.AppendData(buffer, 0, read);
+                if (md5 != null)
+                {
+                    md5.AppendData(buffer, 0, read);
+                }
+            }
+        }
+
+        string digest = "sha256:" + Convert.ToHexStringLower(sha256.GetCurrentHash());
+        string md5Hex = md5 == null ? null : Convert.ToHexStringLower(md5.GetCurrentHash());
+        return (digest, md5Hex);
+    }
+
+    /// <summary>
+    /// Asks for the size of what is being downloaded: the registry for a blob, the server for a file.
+    /// </summary>
+    /// <param name="cancellationToken">A token that cancels the request.</param>
+    /// <returns>The size in bytes.</returns>
+    /// <exception cref="RegistryException">The server reported no size.</exception>
+    private Task<long> AskForTheSizeAsync(CancellationToken cancellationToken)
+    {
+        return _fromRegistry
+            ? _client.GetBlobSizeAsync(_name, _digest, cancellationToken)
+            : _client.GetContentLengthAsync(_sourceUrl, true, cancellationToken);
+    }
+
+    /// <summary>
+    /// Refuses a download whose server states a size other than the one the source stated. A registry
+    /// download never reaches this check: its size comes from the manifest and the digest is what the
+    /// bytes are held to.
+    /// </summary>
+    /// <param name="url">The address the size was stated at, for the message.</param>
+    /// <param name="statedSize">The size the server stated, or -1 when it stated none.</param>
+    /// <exception cref="RegistryException">The two sizes disagree.</exception>
+    private void EnsureStatedSizeAgrees(Uri url, long statedSize)
+    {
+        if (_fromRegistry || _expectedSize < 0 || statedSize < 0 || statedSize == _expectedSize)
+        {
+            return;
+        }
+
+        throw new RegistryException(
+            "the server at " + url.Host + " reports " + statedSize.ToString(CultureInfo.InvariantCulture)
+                + " bytes for " + _subject + " but " + _expectedSize.ToString(CultureInfo.InvariantCulture)
+                + " were expected",
+            null,
+            null);
+    }
+
+    /// <summary>
+    /// The size an answer states: its <c>Content-Length</c>, or the <c>x-linked-size</c> a Hugging Face
+    /// redirect carries in place of one.
+    /// </summary>
+    /// <param name="response">The answer to read.</param>
+    /// <returns>The size in bytes, or -1 when the answer states none.</returns>
+    private static long ReadStatedSize(HttpResponseMessage response)
+    {
+        if (response.Headers.TryGetValues("x-linked-size", out IEnumerable<string> linked))
+        {
+            foreach (string value in linked)
+            {
+                if (long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out long parsed))
+                {
+                    return parsed;
+                }
+            }
+        }
+
+        long? contentLength = response.Content == null ? null : response.Content.Headers.ContentLength;
+        return contentLength ?? -1L;
+    }
+
+    /// <summary>
+    /// Turns an error status into the exception this download reports it with: the registry path keeps
+    /// Ollama's mapping, and a file at an address reports a plain registry exception because there is
+    /// no model name a "not found" could be about.
+    /// </summary>
+    /// <param name="response">The answer to inspect.</param>
+    /// <param name="cancellationToken">A token that cancels reading the body.</param>
+    /// <returns>A task that completes when the answer has been inspected.</returns>
+    /// <exception cref="ModelNotFoundException">A registry download was answered 404.</exception>
+    /// <exception cref="RegistryException">The status is 400 or above.</exception>
+    private async Task ThrowForErrorStatusAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        if (_fromRegistry)
+        {
+            await RegistryClient.ThrowForErrorStatusAsync(
+                response,
+                _name,
+                "blob " + _digest + " of model " + _name + " not found on " + _name.Host,
+                cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        if ((int)response.StatusCode < 400)
+        {
+            return;
+        }
+
+        string body = await RegistryClient.ReadBodyAsync(response, cancellationToken).ConfigureAwait(false);
+        throw new RegistryException(
+            ((int)response.StatusCode).ToString(CultureInfo.InvariantCulture) + " for " + _subject + ": " + body,
+            response.StatusCode,
+            body);
     }
 
     /// <summary>

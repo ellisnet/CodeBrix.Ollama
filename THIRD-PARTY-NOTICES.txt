@@ -78,7 +78,8 @@ HOW THE BSD-3-CLAUSE NOTICE REQUIREMENT IS SATISFIED
     distribution". This file is one of those materials: both library projects
     pack THIRD-PARTY-NOTICES.txt into the NuGet package beside LICENSE and
     README.md, so the full texts in entries 5 and 7 travel with every copy of
-    the assembly that carries the ported code.
+    the assembly that carries the ported code. The forty-one source files
+    ported from Go (entry 5) also keep their upstream copyright header.
 
 WHAT WAS COPIED FROM UPSTREAM, AND WHAT WAS NOT
     Six top-level paths, complete and unmodified: CMakeLists.txt, LICENSE,
@@ -941,7 +942,13 @@ WHAT WAS INCORPORATED
       src/encoding/json/encode.go
           -> GoJson.cs
 
-    Forty-one files in all. Three more, under Parsing/, name text/template/
+    Forty-one files in all, and each of them keeps, verbatim, the three-line
+    header its upstream file carries above its using block - "Copyright 2011
+    The Go Authors. All rights reserved." for the text/template files, 2009
+    for fmt and strconv, 2010 for encoding/json, followed by "Use of this
+    source code is governed by a BSD-style license that can be found in the
+    LICENSE file." The LICENSE that header refers to is the one reproduced
+    below. Three more, under Parsing/, name text/template/
     parse as REFERENCE ONLY: GoTemplateOutline.cs, GoTemplateOutlineKind.cs
     and GoTemplateOutlineNode.cs are a small structural walker written for
     this library, which borrows the idea of a node tree and the names of a few

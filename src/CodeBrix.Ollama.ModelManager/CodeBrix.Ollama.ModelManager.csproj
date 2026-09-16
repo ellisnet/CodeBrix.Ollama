@@ -6,6 +6,7 @@
     <RootNamespace>CodeBrix.Ollama.ModelManager</RootNamespace>
     <AssemblyName>CodeBrix.Ollama.ModelManager</AssemblyName>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <!--
@@ -55,7 +56,7 @@
     <Product>CodeBrix.Ollama.ModelManager</Product>
     <Title>CodeBrix.Ollama.ModelManager</Title>
     <Authors>Jeremy Ellis</Authors>
-    <Description>A cross-platform, zero-dependency .NET library that downloads and maintains a local store of LLM models. Pulls models from the Ollama registry with sha256 verification and resumable downloads, keeps them in Ollama's own on-disk blob and manifest layout, lists, shows, copies, deletes and creates models from Modelfiles, reads GGUF metadata, and resolves a model name to the GGUF file on disk for an in-process runner such as CodeBrix.Ollama.ModelRunner. Pure managed code; no server, no native code.</Description>
+    <Description>A cross-platform, zero-dependency .NET library that downloads and maintains a local store of LLM models. Pulls models from the Ollama registry with sha256 verification and resumable downloads, keeps them in Ollama's own on-disk blob and manifest layout, lists, shows, copies, deletes and creates models from Modelfiles, reads GGUF metadata, and resolves a model name to the GGUF file on disk for an in-process runner such as CodeBrix.Ollama.ModelRunner. Also obtains models that no such registry serves - the files of a Hugging Face repository, of any list of HTTPS addresses or of a folder on disk - into the same store, and materializes them as the publisher's own file tree. Pure managed code; no server, no native libraries.</Description>
     <Copyright>Copyright (c) 2026 Jeremy Ellis and contributors</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/ellisnet/CodeBrix.Ollama</PackageProjectUrl>
@@ -66,7 +67,7 @@
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
     <IsPackable>true</IsPackable>
-    <PackageTags>ollama;llm;gguf;model;registry;download;modelfile;ai;local-ai;CodeBrix</PackageTags>
+    <PackageTags>ollama;llm;gguf;model;registry;download;modelfile;huggingface;bundles;ai;local-ai;CodeBrix</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>

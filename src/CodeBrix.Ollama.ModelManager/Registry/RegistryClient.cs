@@ -294,6 +294,65 @@ internal sealed class RegistryClient : IDisposable
     }
 
     /// <summary>
+    /// Asks a server how large the thing at an address is, with a HEAD request, and reads the answer's
+    /// <c>Content-Length</c>. Redirects are followed, so the length is the one the host that actually
+    /// serves the bytes reports.
+    /// </summary>
+    /// <param name="requestUri">The address to ask about.</param>
+    /// <param name="sendAuthorization">
+    /// Whether the <c>Authorization</c> header may be sent. It only ever reaches the host the request
+    /// starts at, never a host a redirect leads to.
+    /// </param>
+    /// <param name="cancellationToken">A token that cancels the request.</param>
+    /// <returns>The size in bytes.</returns>
+    /// <exception cref="RegistryException">
+    /// The server answered an error status, or no size at all, or the request never arrived.
+    /// </exception>
+    internal async Task<long> GetContentLengthAsync(
+        Uri requestUri, bool sendAuthorization, CancellationToken cancellationToken)
+    {
+        using HttpResponseMessage response = await SendWithChallengeAsync(
+            HttpMethod.Head, requestUri, null, null, sendAuthorization, false, cancellationToken).ConfigureAwait(false);
+
+        if ((int)response.StatusCode >= 400)
+        {
+            string body = await ReadBodyAsync(response, cancellationToken).ConfigureAwait(false);
+            throw new RegistryException(
+                ((int)response.StatusCode).ToString(CultureInfo.InvariantCulture) + " asking for the size of " + requestUri,
+                response.StatusCode,
+                body);
+        }
+
+        long? contentLength = response.Content.Headers.ContentLength;
+        if (contentLength == null)
+        {
+            throw new RegistryException(
+                "the server at " + requestUri.Host + " did not report a size for " + requestUri,
+                response.StatusCode,
+                null);
+        }
+        return contentLength.Value;
+    }
+
+    /// <summary>
+    /// Marks the configured bearer token as established, so that the very first request to the host a
+    /// request starts at carries it instead of waiting for a 401 to ask for it. A source whose service
+    /// answers an anonymous request with a plain 404 rather than a challenge - the Hugging Face Hub API
+    /// does this for a private repository - needs the token offered up front.
+    /// </summary>
+    /// <remarks>
+    /// This changes nothing about where the token may go: it is still sent only to the host the request
+    /// started at, and a redirect to another host drops it.
+    /// </remarks>
+    internal void UseBearerTokenProactively()
+    {
+        if (!string.IsNullOrEmpty(_options.BearerToken))
+        {
+            Interlocked.Exchange(ref _bearerTokenEstablished, 1);
+        }
+    }
+
+    /// <summary>
     /// Sends a request, following redirects, and answers a 401 once by repeating the request with the
     /// configured bearer token. This is the port of Ollama's <c>makeRequestWithRetry</c>, with the
     /// token taken from the options instead of fetched from the challenge realm.

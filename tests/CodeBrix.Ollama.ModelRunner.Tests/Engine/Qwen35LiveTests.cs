@@ -272,7 +272,6 @@ public sealed class Qwen35LiveTests : IClassFixture<Qwen35ModelFixture>
                     GpuLayers = 0,
                     ContextSize = Qwen35ModelFixture.ContextSize,
                     LoadMode = ModelLoadMode.MemoryMap,
-                    Threads = 6,
                     UseExtraBufferTypes = false,
                 },
                 TestContext.Current.CancellationToken);

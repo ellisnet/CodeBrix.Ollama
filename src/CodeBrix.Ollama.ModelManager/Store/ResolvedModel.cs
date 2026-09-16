@@ -47,4 +47,19 @@ public sealed class ResolvedModel
 
     /// <summary>The config layer contents, or an empty config when the manifest has none.</summary>
     public ModelConfig Config { get; set; }
+
+    /// <summary>
+    /// What the model's weights are: the config layer's model format, which is "gguf" for a model
+    /// pulled from an Ollama-protocol registry and one of the bundle formats - "huggingface",
+    /// "pytorch", "onnx", "tensorflow-checkpoint", "mixed", "files", "imported" - for a bundle.
+    /// <see langword="null"/> when the config states none and no GGUF weights layer says otherwise.
+    /// </summary>
+    public string Format { get; set; }
+
+    /// <summary>
+    /// The files of a bundle, in manifest order, each with the publisher's path and the blob its
+    /// content lives in. Empty - never <see langword="null"/> - for a GGUF model, whose files are
+    /// named by <see cref="ModelPath"/> and the lists beside it instead.
+    /// </summary>
+    public IReadOnlyList<ResolvedFile> Files { get; set; }
 }

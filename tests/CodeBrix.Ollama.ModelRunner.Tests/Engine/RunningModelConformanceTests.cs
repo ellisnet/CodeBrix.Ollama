@@ -126,9 +126,11 @@ public sealed class RunningModelConformanceTests
         //Arrange
         string missing = Path.Combine(AppContext.BaseDirectory, "not-a-model.gguf");
 
-        //Act and assert
-        await Assert.ThrowsAsync<ModelLoadException>(
-            () => ModelRunner.ProbeAsync(missing, TestContext.Current.CancellationToken));
+        //Act
+        Func<Task> act = () => ModelRunner.ProbeAsync(missing, TestContext.Current.CancellationToken);
+
+        //Assert
+        await act.Should().ThrowAsync<ModelLoadException>();
     }
 
     /// <summary>Every logit the loaded model produces matches the recorded reference.</summary>
@@ -210,8 +212,8 @@ public sealed class RunningModelConformanceTests
         model.Dispose();
 
         //Assert
-        await Assert.ThrowsAsync<ObjectDisposedException>(
-            () => model.ClearCacheAsync(TestContext.Current.CancellationToken));
+        Func<Task> clear = () => model.ClearCacheAsync(TestContext.Current.CancellationToken);
+        await clear.Should().ThrowAsync<ObjectDisposedException>();
     }
 
     /// <summary>A named dialect with no template behind it fails the load, and says which one.</summary>
@@ -223,11 +225,10 @@ public sealed class RunningModelConformanceTests
         options.ChatTemplateDialect = ChatTemplateDialect.Jinja;
 
         //Act
-        ModelLoadException error = await Assert.ThrowsAsync<ModelLoadException>(
-            () => ModelRunner.LoadAsync(options, TestContext.Current.CancellationToken));
+        Func<Task> act = () => ModelRunner.LoadAsync(options, TestContext.Current.CancellationToken);
 
         //Assert
-        error.Message.Should().Contain("Jinja");
+        (await act.Should().ThrowAsync<ModelLoadException>()).Which.Message.Should().Contain("Jinja");
     }
 
     /// <summary>The dialect resolution table, exercised without a model behind it.</summary>
@@ -264,6 +265,10 @@ public sealed class RunningModelConformanceTests
     [InlineData(ChatTemplateDialect.Ollama)]
     public void ChatTemplateStrategy_refuses_a_dialect_with_no_template(ChatTemplateDialect requested)
     {
-        Assert.Throws<ModelLoadException>(() => ChatTemplateStrategy.Resolve(requested, null, null, null));
+        //Arrange
+        Action act = () => ChatTemplateStrategy.Resolve(requested, null, null, null);
+
+        //Assert
+        act.Should().Throw<ModelLoadException>();
     }
 }

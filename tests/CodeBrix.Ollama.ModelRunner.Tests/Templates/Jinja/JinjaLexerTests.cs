@@ -54,9 +54,7 @@ public sealed class JinjaLexerTests
     /// <summary>A comment produces no tokens at all.</summary>
     [Fact]
     public void Tokenize_with_a_comment_produces_nothing()
-    {
-        JinjaLexer.Tokenize("{# nothing here #}").Should().HaveCount(1);
-    }
+        => JinjaLexer.Tokenize("{# nothing here #}").Should().HaveCount(1);
 
     /// <summary>String escapes are decoded.</summary>
     /// <param name="source">The tag source.</param>
@@ -147,9 +145,7 @@ public sealed class JinjaLexerTests
     [InlineData("a", "a")]
     [InlineData("", "")]
     public void PrepareSource_drops_one_trailing_newline(string source, string expected)
-    {
-        JinjaLexer.PrepareSource(source).Should().Be(expected);
-    }
+        => JinjaLexer.PrepareSource(source).Should().Be(expected);
 
     /// <summary>An index becomes a one-based line and column.</summary>
     [Fact]

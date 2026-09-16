@@ -33,100 +33,80 @@ public sealed class ThinkingParserTests
     /// <summary>Output with no thinking tag is content, and the buffer is not replayed.</summary>
     [Fact]
     public void AddContent_content_without_a_thinking_tag()
-    {
-        AssertSteps(new ThinkingParser(),
+        => AssertSteps(new ThinkingParser(),
             ("  abc", "", "  abc", ThinkingParserState.ThinkingDone),
             ("def", "", "def", ThinkingParserState.ThinkingDone));
-    }
 
     /// <summary>Content before a thinking tag means there is no thinking block at all.</summary>
     [Fact]
     public void AddContent_content_before_a_thinking_tag_cancels_it()
-    {
-        AssertSteps(new ThinkingParser(),
+        => AssertSteps(new ThinkingParser(),
             ("  abc <think>def</think> ghi", "", "  abc <think>def</think> ghi",
                 ThinkingParserState.ThinkingDone));
-    }
 
     /// <summary>An opening tag arriving a few characters at a time is still recognized.</summary>
     [Fact]
     public void AddContent_building_up_an_opening_tag()
-    {
-        AssertSteps(new ThinkingParser(),
+        => AssertSteps(new ThinkingParser(),
             ("  <th", "", "", ThinkingParserState.LookingForOpening),
             ("in", "", "", ThinkingParserState.LookingForOpening),
             ("k>a", "a", "", ThinkingParserState.Thinking));
-    }
 
     /// <summary>A half-arrived closing tag is held back until it completes.</summary>
     [Fact]
     public void AddContent_partial_closing_tag()
-    {
-        AssertSteps(new ThinkingParser(),
+        => AssertSteps(new ThinkingParser(),
             ("<think>abc</th", "abc", "", ThinkingParserState.Thinking),
             ("ink>def", "", "def", ThinkingParserState.ThinkingDone));
-    }
 
     /// <summary>Text that only looked like a closing tag is released as reasoning.</summary>
     [Fact]
     public void AddContent_partial_closing_tag_that_turns_out_not_to_be_one()
-    {
-        AssertSteps(new ThinkingParser(),
+        => AssertSteps(new ThinkingParser(),
             ("<think>abc</th", "abc", "", ThinkingParserState.Thinking),
             ("ing>def", "</thing>def", "", ThinkingParserState.Thinking),
             ("ghi</thi", "ghi", "", ThinkingParserState.Thinking),
             ("nk>jkl", "", "jkl", ThinkingParserState.ThinkingDone));
-    }
 
     /// <summary>Whitespace between the closing tag and the content is eaten.</summary>
     [Fact]
     public void AddContent_whitespace_after_the_closing_tag()
-    {
-        AssertSteps(new ThinkingParser(),
+        => AssertSteps(new ThinkingParser(),
             ("  <think>abc</think>\n\ndef", "abc", "def", ThinkingParserState.ThinkingDone));
-    }
 
     /// <summary>The same, when the whitespace arrives in its own chunk.</summary>
     [Fact]
     public void AddContent_whitespace_after_the_closing_tag_incrementally()
-    {
-        AssertSteps(new ThinkingParser(),
+        => AssertSteps(new ThinkingParser(),
             ("  <think>abc</think>", "abc", "", ThinkingParserState.ThinkingDoneEatingWhitespace),
             ("\n\ndef", "", "def", ThinkingParserState.ThinkingDone));
-    }
 
     /// <summary>Whitespace inside the content itself is left alone.</summary>
     [Fact]
     public void AddContent_whitespace_inside_the_content_is_kept()
-    {
-        AssertSteps(new ThinkingParser(),
+        => AssertSteps(new ThinkingParser(),
             ("  <think>abc</think>\n\ndef ", "abc", "def ", ThinkingParserState.ThinkingDone),
             (" ghi", "", " ghi", ThinkingParserState.ThinkingDone));
-    }
 
     /// <summary>A response arriving one token at a time walks through every state in turn.</summary>
     [Fact]
     public void AddContent_token_by_token()
-    {
-        AssertSteps(new ThinkingParser(),
+        => AssertSteps(new ThinkingParser(),
             ("<think>", "", "", ThinkingParserState.ThinkingStartedEatingWhitespace),
             ("\n", "", "", ThinkingParserState.ThinkingStartedEatingWhitespace),
             ("</think>", "", "", ThinkingParserState.ThinkingDoneEatingWhitespace),
             ("\n\n", "", "", ThinkingParserState.ThinkingDoneEatingWhitespace),
             ("Hi", "", "Hi", ThinkingParserState.ThinkingDone),
             (" there", "", " there", ThinkingParserState.ThinkingDone));
-    }
 
     /// <summary>Whitespace between the opening tag and the reasoning is eaten.</summary>
     [Fact]
     public void AddContent_leading_thinking_whitespace()
-    {
-        AssertSteps(new ThinkingParser(),
+        => AssertSteps(new ThinkingParser(),
             ("  <think>   \t ", "", "", ThinkingParserState.ThinkingStartedEatingWhitespace),
             ("  these are some ", "these are some ", "", ThinkingParserState.Thinking),
             ("thoughts </think>  ", "thoughts ", "", ThinkingParserState.ThinkingDoneEatingWhitespace),
             ("  more content", "", "more content", ThinkingParserState.ThinkingDone));
-    }
 
     /// <summary>A parser that starts inside a thinking block reads the first token as reasoning.</summary>
     [Fact]

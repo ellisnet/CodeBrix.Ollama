@@ -1,0 +1,26 @@
+# Line endings: LF, everywhere, on every platform.
+#
+# Two things in this repository are line-ending sensitive. The built-in chat
+# templates and their .json companions under
+# src/CodeBrix.Ollama.ModelRunner/Templates/OllamaGo/BuiltIn/ are embedded
+# resources, so whatever bytes are on disk at pack time ship inside the assembly;
+# and the ModelRunner test suite compares rendered templates and generated
+# grammars with its fixture files byte for byte. A checkout that expanded LF to
+# CRLF (core.autocrlf=true on Windows) would fail that suite and would pack CRLF
+# templates into the NuGet package for every consumer, on every platform.
+#
+# The committed blobs are already LF. These rules only stop a checkout from
+# changing them, which also keeps the vendored llama.cpp snapshot under
+# llama-native-tools/llama.cpp/ byte-identical to upstream.
+* text=auto eol=lf
+
+# Never touched. A native library, a model file or an image with newline
+# translation applied to it is silently corrupt, so these are declared rather
+# than left to git's heuristic.
+*.gguf  binary
+*.png   binary
+*.dylib binary
+*.so    binary
+*.dll   binary
+*.pdb   binary
+*.xz    binary

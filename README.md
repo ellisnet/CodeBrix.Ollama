@@ -8,10 +8,13 @@ large language models in-process**, with no Ollama installation and no server:
   that speaks Ollama's manifest-and-blob protocol (`registry.ollama.ai` by default, Hugging Face
   through `hf.co/<user>/<repo>:<quant>` names). It pulls with resumable parallel downloads and
   sha256 verification, lists, shows, copies, deletes and creates models from Modelfiles, reads
-  GGUF metadata, and resolves a model name to the GGUF files on disk. Pure managed code.
-* **CodeBrix.Ollama.ModelRunner** - runs a GGUF model in-process over a self-built llama.cpp
-  engine, bound through hand-written P/Invoke and exposed to the application through an
-  interface contract: completion, streaming chat through the model's own chat template, tool
+  GGUF metadata, and resolves a model name to the GGUF files on disk. It also obtains models
+  that no such registry serves - a Hugging Face file repository, any list of HTTPS addresses, a
+  folder on disk - into the same store, and lays their files back out as the publisher wrote
+  them. Pure managed code.
+* **CodeBrix.Ollama.ModelRunner** - runs a GGUF model in-process over a self-built native
+  inference engine, bound through hand-written P/Invoke and exposed to the application through
+  an interface contract: completion, streaming chat through the model's own chat template, tool
   calling, separated reasoning, embeddings, grammar- and JSON-schema-constrained output,
   tokenization and model metadata. One native library per supported platform ships inside the
   package; nothing is downloaded and nothing is compiled on the machine.
@@ -62,6 +65,16 @@ your application the one it needs. There is no build-time compilation and no run
   registry that serves Ollama's `/v2/<namespace>/<model>/manifests/<tag>` and `blobs/<digest>`
   protocol - with parallel byte-range downloads, resumption after interruption, sha256 verification
   of every layer, and a progress stream
+* Pulling a *bundle* - a model that no such registry serves - from a Hugging Face file
+  repository, or from any list of HTTPS addresses including the objects under a public storage
+  bucket prefix, into the same store: the same resumable, hash-verified downloads, plus
+  include/exclude filters over the publisher's own file paths
+* Importing a folder already on disk as a bundle, which is the route for anything a publisher
+  keeps behind a sign-in
+* Materializing a bundle as the file tree its publisher wrote, hard-linked by default so laying
+  it out costs no disk space
+* Reporting the licence a publisher states - the identifier, the address it was read from, and
+  the `LICENSE` text a bundle ships - and applying no rule of its own
 * A store directory interchangeable with a real Ollama install's `~/.ollama/models` (the default
   location, honoring `OLLAMA_MODELS`), so models pulled by either are visible to both
 * List, show, exists, copy and delete, with unreferenced blobs removed when the last manifest that
@@ -79,7 +92,8 @@ your application the one it needs. There is no build-time compilation and no run
   takes a `CancellationToken` as its last parameter
 
 Not in this package: running a model, rendering chat templates, pushing to a registry,
-safetensors models, or any HTTP server.
+safetensors layers in an Ollama manifest, converting or reducing the files it fetched, deciding
+anything about a licence, or any HTTP server.
 
 ## CodeBrix.Ollama.ModelRunner supports:
 
@@ -118,7 +132,8 @@ serving many conversations from one loaded model at once.
 
 * .NET 10 or later, on Windows, macOS or Linux (x64 everywhere, ARM64 on all three, plus
   RISC-V 64 on Linux).
-* For ModelManager: outbound HTTPS to the registry a model name refers to, for pulls only.
+* For ModelManager: outbound HTTPS to the registry a model name refers to, or to the host a
+  bundle's files come from, for pulls only.
   Everything else works offline against the local store. Disk space for the store; a pull writes
   to the store directory and nowhere else.
 * For ModelRunner: a GGUF file on disk, and enough memory for it. Memory mapping is the default
@@ -145,6 +160,30 @@ await foreach (var progress in store.PullAsync("smollm:135m"))
 var resolved = await store.ResolveAsync("smollm:135m");
 Console.WriteLine($"GGUF: {resolved.ModelPath}");
 Console.WriteLine($"Template: {resolved.Template}");
+```
+
+### Pull a Model's Files from a Hugging Face Repository and Lay Them Out
+
+```csharp
+using CodeBrix.Ollama.ModelManager;
+
+using var store = new ModelStore();
+
+const string name = "hf.co/example-org/example-model";
+
+// A bundle pull is asked for. PullAsync(name) on its own still means the Ollama registry
+// protocol, which cannot serve a repository of a publisher's own files.
+var options = PullOptions.ForHuggingFace(null, null, FileFilter.ExcludeTrainingArtifacts);
+
+await foreach (var progress in store.PullAsync(name, options))
+    Console.WriteLine(progress.Status);   // listing ... / pulling config.json / ... / success
+
+var info = await store.ShowAsync(name);
+Console.WriteLine($"{info.Format}, licence {info.License.LicenseId ?? "not stated"}");
+
+// The publisher's own file tree, hard-linked out of the store.
+foreach (var path in await store.MaterializeAsync(name, "/work/example-model"))
+    Console.WriteLine(path);
 ```
 
 ### Describe What Is in the Store

@@ -163,11 +163,11 @@ public sealed class NativeLibraryLoaderTests
     public void ProbeIdentity_reports_a_missing_export_as_a_load_fault(string entryPoint)
     {
         //Act
-        NativeLibraryException failure = Assert.Throws<NativeLibraryException>(
-            () => NativeLibraryLoader.ProbeIdentity(
-                entryPoint, () => throw new EntryPointNotFoundException(entryPoint)));
+        Action act = () => NativeLibraryLoader.ProbeIdentity(
+            entryPoint, () => throw new EntryPointNotFoundException(entryPoint));
 
         //Assert
+        NativeLibraryException failure = act.Should().Throw<NativeLibraryException>().Which;
         failure.Message.Should().Contain(entryPoint);
         (failure.InnerException is EntryPointNotFoundException).Should().BeTrue();
     }
@@ -177,11 +177,11 @@ public sealed class NativeLibraryLoaderTests
     public void ProbeIdentity_reports_a_missing_library_as_a_load_fault()
     {
         //Act
-        NativeLibraryException failure = Assert.Throws<NativeLibraryException>(
-            () => NativeLibraryLoader.ProbeIdentity(
-                "codebrix_llama_rid", () => throw new DllNotFoundException("codebrix_llama")));
+        Action act = () => NativeLibraryLoader.ProbeIdentity(
+            "codebrix_llama_rid", () => throw new DllNotFoundException("codebrix_llama"));
 
         //Assert
+        NativeLibraryException failure = act.Should().Throw<NativeLibraryException>().Which;
         failure.Message.Should().Contain("codebrix_llama_rid");
         (failure.InnerException is DllNotFoundException).Should().BeTrue();
     }
@@ -189,9 +189,7 @@ public sealed class NativeLibraryLoaderTests
     /// <summary>A probe that answers hands its value straight back.</summary>
     [Fact]
     public void ProbeIdentity_passes_a_successful_probe_through()
-    {
-        NativeLibraryLoader.ProbeIdentity("codebrix_llama_rid", () => "osx-x64").Should().Be("osx-x64");
-    }
+        => NativeLibraryLoader.ProbeIdentity("codebrix_llama_rid", () => "osx-x64").Should().Be("osx-x64");
 
     /// <summary>Threads arriving together run the identity check and the backend start once between them.</summary>
     [Fact]
@@ -227,6 +225,7 @@ public sealed class NativeLibraryLoaderTests
     [Fact]
     public void TypeName_maps_every_device_kind()
     {
+        //Act and assert
         NativeRuntime.TypeName(GgmlBackendDevType.Cpu).Should().Be("CPU");
         NativeRuntime.TypeName(GgmlBackendDevType.Gpu).Should().Be("GPU");
         NativeRuntime.TypeName(GgmlBackendDevType.IGpu).Should().Be("IGPU");

@@ -498,33 +498,25 @@ public sealed class ModelfileTests
     /// <returns>A task.</returns>
     [Fact]
     public async Task ReadFileAsync_with_utf8_file_parses_it()
-    {
-        await RoundTripFileAsync(new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-    }
+        => await RoundTripFileAsync(new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
 
     /// <summary>A UTF-8 file that starts with a byte order mark is read and parsed.</summary>
     /// <returns>A task.</returns>
     [Fact]
     public async Task ReadFileAsync_with_utf8_byte_order_mark_parses_it()
-    {
-        await RoundTripFileAsync(new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
-    }
+        => await RoundTripFileAsync(new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
 
     /// <summary>A little-endian UTF-16 file is read and parsed, as Ollama's BOM override does.</summary>
     /// <returns>A task.</returns>
     [Fact]
     public async Task ReadFileAsync_with_utf16_little_endian_file_parses_it()
-    {
-        await RoundTripFileAsync(new UnicodeEncoding(bigEndian: false, byteOrderMark: true));
-    }
+        => await RoundTripFileAsync(new UnicodeEncoding(bigEndian: false, byteOrderMark: true));
 
     /// <summary>A big-endian UTF-16 file is read and parsed, as Ollama's BOM override does.</summary>
     /// <returns>A task.</returns>
     [Fact]
     public async Task ReadFileAsync_with_utf16_big_endian_file_parses_it()
-    {
-        await RoundTripFileAsync(new UnicodeEncoding(bigEndian: true, byteOrderMark: true));
-    }
+        => await RoundTripFileAsync(new UnicodeEncoding(bigEndian: true, byteOrderMark: true));
 
     /// <summary>A null path is rejected.</summary>
     /// <returns>A task.</returns>
