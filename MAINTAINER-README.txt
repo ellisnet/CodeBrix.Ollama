@@ -47,14 +47,17 @@ to the files on disk. ModelRunner loads a GGUF file and runs it in-process over
 a self-built llama.cpp engine bound through hand-written P/Invoke. An
 application uses the first to get a path and hands that path to the second.
 
-THE STATE OF THINGS, 2026-09-15
+THE STATE OF THINGS, 2026-09-16
 -------------------------------
   * ModelManager is written and tested.
-  * ModelRunner IS NOT WRITTEN YET. Its project contains a csproj, an
-    InternalsVisibleTo.cs and the committed native library for one runtime
-    identifier - no library code at all. Its AGENT-README.txt is a placeholder,
-    and tests/CodeBrix.Ollama.ModelRunner.Tests builds, references the library
-    and links the conformance vectors but holds no test files at all.
+  * ModelRunner IS NOW WRITTEN AND TESTED, as of 2026-09-16. The library is
+    240 .cs files and about 29,500 lines: the hand-written P/Invoke binding
+    over the native engine, two chat-template engines (a clean-room Jinja and
+    a port of Go's text/template carrying Ollama's template package), the
+    thinking and tool-call parsers, the JSON-schema-to-GBNF converter, and the
+    inference engine behind ModelRunner.LoadAsync and IRunningModel. Its suite
+    is 44 test classes and 1,258 test cases. Its AGENT-README.txt at the
+    repository root is a full consumer guide and no longer a placeholder.
   * The native build tooling under llama-native-tools/ is complete, and all
     SEVEN runtime identifiers are adopted. Six were built and fully gated:
     osx-x64, osx-arm64, linux-x64, linux-arm64, linux-riscv64 and win-x64.
@@ -62,9 +65,10 @@ THE STATE OF THINGS, 2026-09-15
     passed, never executed) and adopted by Jeremy's decision on 2026-09-15,
     overruling the gate rule; a native rebuild on an ARM64 machine is the
     plan if it misbehaves.
-
-Statements below about ModelRunner therefore describe its packaging and its
-native payload, not an API that exists.
+  * ONLY osx-x64 HAS EVER RUN THROUGH THE MANAGED BINDING. Everything below
+    about ModelRunner's behaviour was measured on one machine, the Intel Mac
+    mini; the other six natives have still never been loaded from .NET. See
+    WHAT HAS NOT BEEN VALIDATED.
 
 
 REPOSITORY LAYOUT
@@ -100,7 +104,70 @@ REPOSITORY LAYOUT
       AGENT-README.txt           this package's consumer guide (packed)
       InternalsVisibleTo.cs      grants CodeBrix.Ollama.ModelManager.Tests
 
-    src/CodeBrix.Ollama.ModelRunner/    the not-yet-written library
+    src/CodeBrix.Ollama.ModelRunner/    the managed library (240 .cs files)
+      Contracts/                 the public surface the engine implements: the
+                                 static entry point ModelRunner, IRunningModel,
+                                 ModelDetails, the chat types (ChatMessage,
+                                 ChatRole, ChatRequest, ChatUpdate,
+                                 ChatResponse, ToolDefinition, ToolCall,
+                                 ResponseFormat), the completion types
+                                 (GenerationUpdate, GenerationResult,
+                                 GenerationStatistics, FinishReason),
+                                 EmbeddingResult, NativeRuntimeInfo /
+                                 NativeDeviceInfo and ModelRunnerLogLevel
+      Options/                   ModelRunnerOptions, SamplingOptions,
+                                 GenerationOptions, LoraAdapterOptions and the
+                                 enums ModelLoadMode, FlashAttentionMode,
+                                 KvCacheType, EmbeddingPooling and
+                                 ChatTemplateDialect
+      Common/                    the exception hierarchy: ModelRunnerException
+                                 and its five subclasses
+                                 NativeLibraryException, ModelLoadException,
+                                 InferenceException, ChatTemplateException and
+                                 GrammarException
+      Native/                    the binding, 68 files and 302 [LibraryImport]
+                                 declarations: NativeLibraryLoader (the
+                                 resolver), the NativeMethods.* partials, the
+                                 blittable structs and enums transcribed from
+                                 llama.h and the ggml headers, the four
+                                 SafeHandles, LlamaBatchBuffer, NativeText,
+                                 NativeDefaults, NativeLog and NativeRuntime.
+                                 All internal
+      Templates/Jinja/           50 files: an original Jinja implementation -
+                                 lexer, parser, renderer, value model, filters,
+                                 tests, methods and functions - behind the
+                                 public JinjaTemplate
+      Templates/OllamaGo/        48 files: a port of Go's text/template (lexer,
+                                 parse tree, executor, function table, and the
+                                 fmt / encoding-json / strconv helpers it
+                                 needs) with Ollama's template package on top,
+                                 behind the public OllamaTemplate and
+                                 OllamaTemplateValues
+      Templates/OllamaGo/BuiltIn/  Ollama's 20 built-in .gotmpl templates,
+                                 their 20 .json companions and index.json,
+                                 byte for byte, embedded as assembly resources
+      Parsing/                   ThinkingParser / ThinkingParserState /
+                                 ThinkingTags, ToolCallParser /
+                                 ToolCallParserState / ToolCallFormat, the
+                                 structural GoTemplateOutline used to read a
+                                 template's shape, and CompactJson
+      Grammar/                   the JSON-schema-to-GBNF converter:
+                                 JsonSchemaGrammar (public),
+                                 JsonSchemaConverter, GrammarBuiltinRule and
+                                 GrammarTrieNode
+      Engine/                    25 files, all internal: RunningModel (the
+                                 IRunningModel implementation), ModelEngine
+                                 (the bodies behind LoadAsync / ProbeAsync),
+                                 EngineWorker (the one thread every native call
+                                 for a model runs on), EngineAbortFlag,
+                                 ParameterMapper, ModelDetailsBuilder,
+                                 EngineSamplerChain, EngineGrammar, EngineLog,
+                                 PrefixCache, StopSequenceDetector,
+                                 Utf8Assembler, EngineRequestScope and the chat
+                                 layer (ChatPipeline, ChatTemplateStrategy,
+                                 ChatTemplateRenderer, ChatJinjaVariables,
+                                 ChatOllamaValues, ChatBosRule,
+                                 ChatToolCallReader, ChatFunctionCallParser)
       runtimes/<rid>/native/     the COMMITTED native libraries, each beside a
                                  copy of llama.cpp's LICENSE as
                                  LICENSE-LlamaCpp.txt. Today that is all
@@ -108,14 +175,28 @@ REPOSITORY LAYOUT
       InternalsVisibleTo.cs      grants CodeBrix.Ollama.ModelRunner.Tests
 
     tests/CodeBrix.Ollama.ModelManager.Tests/   the xunit.v3 suite, offline
-      Gguf/ Modelfile/ Names/ Registry/ Store/  26 test classes in all
+      Gguf/ Modelfile/ Names/ Registry/ Store/  27 test classes in all
       Infrastructure/            EnvGatedFactAttribute, FakeRegistryHandler,
                                  GgufTestFileBuilder, FakeModelBuilder,
                                  TempStoreDirectory
       xunit.runner.json          copied to output by an explicit csproj item
 
-    tests/CodeBrix.Ollama.ModelRunner.Tests/    csproj and xunit.runner.json
-                                 only; links the conformance vectors
+    tests/CodeBrix.Ollama.ModelRunner.Tests/    the xunit.v3 suite, offline
+      Native/ Templates/Jinja/ Templates/OllamaGo/ Parsing/ Grammar/ Engine/
+                                 44 test classes in all
+      Infrastructure/            EnvGatedFactAttribute, TestGates, TestVectors,
+                                 ModelDownloader, EngineExpectedLogits and
+                                 EngineExpectedLogitRow
+      Fixtures/                  real chat templates and expected renderings,
+                                 copied beside the test assembly: Jinja/ (61
+                                 files, ten public models' templates with their
+                                 inputs and expected output, and SOURCES.txt),
+                                 OllamaGo/ (61 files, Ollama's template/testdata
+                                 verbatim), Grammar/ (148 files, llama.cpp's
+                                 schema-to-grammar cases) and Parsing/ (2)
+      xunit.runner.json          copied to output by an explicit csproj item
+      test-vectors/              the conformance model and EXPECTED.txt, LINKED
+                                 from llama-native-tools rather than copied
 
     llama-native-tools/          everything needed to build the native
                                  libraries. Nothing here is compiled by a
@@ -130,15 +211,15 @@ REPOSITORY LAYOUT
                                  Tests folder carries both test projects; the
                                  two packable projects sit at the top level
 
-There is no samples/ folder yet.
-
 THE FLAT-NAMESPACE RULE - DO NOT "FIX" IT
 ------------------------------------------
 Every public and internal type in ModelManager declares `namespace
 CodeBrix.Ollama.ModelManager;`, and every file in its test project declares
-`namespace CodeBrix.Ollama.ModelManager.Tests;`. ModelRunner's RootNamespace is
-CodeBrix.Ollama.ModelRunner and its library will follow the same rule. The
-folders above are FILE ORGANIZATION ONLY.
+`namespace CodeBrix.Ollama.ModelManager.Tests;`. ModelRunner does exactly the
+same with `namespace CodeBrix.Ollama.ModelRunner;` and `namespace
+CodeBrix.Ollama.ModelRunner.Tests;` - all 240 library files and all 55 test
+files, nine folders deep though the library is. The folders above are FILE
+ORGANIZATION ONLY.
 
 This is deliberate and load-bearing: the public API is a single using directive
 for a consumer, which is what the AGENT-READMEs promise. Do not add
@@ -154,8 +235,11 @@ Standard SDK build from the repository root:
     dotnet build   CodeBrix.Ollama.slnx -c Release
 
 Target framework: net10.0 only, LangVersion latest, on all four projects.
-ModelRunner additionally sets AllowUnsafeBlocks, load-bearing for the coming
-P/Invoke layer, and ModelRunner.Tests matches it.
+ModelRunner additionally sets AllowUnsafeBlocks - load-bearing for the P/Invoke
+layer, where 36 of Native/'s 68 files and 7 of Engine/'s 25 use pointers - and
+ModelRunner.Tests matches it. ModelRunner also carries an EmbeddedResource item
+over Templates\OllamaGo\BuiltIn\**, which is how Ollama's 41 built-in template
+files come to travel inside the assembly.
 
 BOTH LIBRARIES HAVE ZERO PackageReference ENTRIES. Verify that after any change.
 It is a contract with consumers, not a preference (see CODING CONVENTIONS), and
@@ -177,17 +261,25 @@ downloaded at build time.
 TESTING
 =======
     tests/CodeBrix.Ollama.ModelManager.Tests -- xunit.v3 4.0.1,
-    Microsoft.NET.Test.Sdk 18.10.0, xunit.runner.visualstudio 4.0.0 and
-    SilverAssertions.ApacheLicenseForever 1.0.248.1071. 26 test classes,
+    Microsoft.NET.Test.Sdk 18.10.1, xunit.runner.visualstudio 4.0.0 and
+    SilverAssertions.ApacheLicenseForever 1.0.248.1071. 27 test classes,
     332 test members, 789 test cases (the [Theory] members contribute 511
     [InlineData] rows between them).
 
     tests/CodeBrix.Ollama.ModelRunner.Tests -- the same four packages at the
-    same versions, no test files yet, reports zero tests.
+    same versions. 44 test classes, 481 test members, 1,258 test cases: 391
+    [Fact] or [EnvGatedFact] members, 87 [Theory] members carrying 752
+    [InlineData] rows between them, and 3 more [Theory] members whose
+    [MemberData] enumerates a fixture folder and contributes 115 rows. 30 of
+    the members are [EnvGatedFact] and are skipped unless their variable is
+    set.
 
-THIS IS AN OFFLINE UNIT SUITE. It needs no daemon, no server and no network: the
-whole of it runs in about two seconds on a warm machine. Exactly one test is an
-exception, and it is gated - see THE ENVIRONMENT GATE below.
+BOTH SUITES ARE OFFLINE BY DEFAULT. Neither needs a daemon, a server, a model
+file or a network: ModelManager's runs in under two seconds on a warm machine
+and ModelRunner's in under three, and ModelRunner's three seconds include
+loading the tiny conformance model through the real native library and checking
+the logits it produces. The tests that are exceptions are gated - see THE
+ENVIRONMENT GATE below.
 
 HOW TO RUN IT
 -------------
@@ -206,6 +298,18 @@ CodeBrix.Ollama.ModelManager.Tests
 CodeBrix.Ollama.ModelManager.Tests \
         -class CodeBrix.Ollama.ModelManager.Tests.ModelNameTests
 
+and the same for the other suite:
+
+    dotnet build tests/CodeBrix.Ollama.ModelRunner.Tests -c Release
+    tests/CodeBrix.Ollama.ModelRunner.Tests/bin/Release/net10.0/\
+CodeBrix.Ollama.ModelRunner.Tests
+    tests/CodeBrix.Ollama.ModelRunner.Tests/bin/Release/net10.0/\
+CodeBrix.Ollama.ModelRunner.Tests \
+        -class CodeBrix.Ollama.ModelRunner.Tests.JinjaFixtureTests
+
+`-list classes` on either executable prints the class names, which is the
+quickest way to check a count in this file against the tree.
+
 global.json at the repository root sets "test": { "runner":
 "Microsoft.Testing.Platform" } and nothing else - no SDK pin. MSBuild finds
 it by walking up.
@@ -223,14 +327,31 @@ maxParallelThreads 1, because tests may share on-disk state. Keep it serial.
 
 THE ENVIRONMENT GATE
 --------------------
-    CODEBRIX_OLLAMA_RUN_LIVE_TESTS=1
+THREE VARIABLES, read by each test project's own
+Infrastructure/EnvGatedFactAttribute.cs - a FactAttribute subclass that sets
+Skip unless the variables it names hold the expected value - and, in
+ModelRunner.Tests, named as consts in Infrastructure/TestGates.cs:
 
-gates EXACTLY ONE test -
+    CODEBRIX_OLLAMA_RUN_LIVE_TESTS=1    the live tests in BOTH suites
+    CODEBRIX_OLLAMA_RUN_QWEN35_TESTS=1  the Qwen 3.5 class, on top of that
+    CODEBRIX_OLLAMA_TEST_MODEL_DIR      where ModelRunner's live tests cache
+                                        the model files they download
+
+The first two are gates and take the value "1". The third is not a gate: it
+only moves the cache. Unset, the cache is
+
+    <LocalApplicationData>/CodeBrix.Ollama/test-models
+
+which is ~/.local/share/CodeBrix.Ollama/test-models on macOS and Linux alike -
+.NET maps LocalApplicationData to the XDG path on every Unix, macOS included,
+NOT to ~/Library/Application Support - and
+%LOCALAPPDATA%\CodeBrix.Ollama\test-models on Windows.
+
+IN ModelManager.Tests the first variable gates EXACTLY ONE test -
 ModelStoreLiveTests.PullAsync_FromTheRealRegistry_DownloadsResolvesListsAnd
-DeletesTheModel - through Infrastructure/EnvGatedFactAttribute.cs, a
-FactAttribute subclass that sets Skip unless the named variable equals the
-expected value. Nothing else in the suite is gated. The default run is therefore
-789 total / 788 passed / 1 skipped; with the gate open it is 789 / 789 / 0.
+DeletesTheModel. Nothing else in that suite is gated. The default run is
+therefore 789 total / 788 passed / 1 skipped; with the gate open it is
+789 / 789 / 0.
 
 THAT TEST REALLY DOWNLOADS. It pulls smollm:135m - about 92 MB - from
 registry.ollama.ai into a fresh TempStoreDirectory, asserts the progress stream
@@ -239,18 +360,67 @@ its GGUF metadata back, checks the resolved file's length against the manifest
 layer's size, lists it, deletes it and confirms the blobs directory is empty
 again.
 
-THE DEFAULT SUITE DOWNLOADS NOTHING. The family's "nothing downloaded at test
-time" rule therefore applies TO THE DEFAULT SUITE ONLY, and this is the
-deliberate deviation: downloading models is what ModelManager is for, so a
-library that is never once exercised against a real registry is a library whose
-central promise is untested.
+IN ModelRunner.Tests 30 members are gated, in three classes:
 
-TREAT THE GATED RUN AS PART OF A RELEASE CHECK, NOT AN OPTIONAL EXTRA.
+    SmolLmLiveTests        14   probe, load, tokenize round trip, completion,
+                                streaming, stop sequences, grammars, the
+                                prefix cache, embeddings, cancellation
+    SmolLmChatLiveTests     7   the chat layer: both dialects, streaming,
+                                thinking, tools, JSON response format, cache
+                                reuse on a second turn
+    Qwen35LiveTests         9   the 35B hybrid MoE: probe, a one-word answer,
+                                reasoning, tool calling, a tool result handed
+                                back, and the UseExtraBufferTypes comparison
+
+The first two classes need only CODEBRIX_OLLAMA_RUN_LIVE_TESTS; Qwen35LiveTests
+needs BOTH gates. So the three runs are:
+
+    no variables set     1258 total / 1228 passed / 30 skipped   (~2.6 s)
+    LIVE only            1258 total / 1249 passed /  9 skipped
+    LIVE and QWEN35      1258 total / 1258 passed /  0 skipped
+
+WHAT THE LIVE TESTS DOWNLOAD, through Infrastructure/ModelDownloader.cs, into
+the cache directory above:
+
+    smollm-360m-instruct-add-basics-q8_0.gguf     386,405,440 bytes (368 MiB)
+        https://huggingface.co/HuggingFaceTB/smollm-360M-instruct-v0.2-Q8_0-GGUF
+        /resolve/main/smollm-360m-instruct-add-basics-q8_0.gguf
+        sha256 b5a2e94a0be8c047bccc3f52bc2f27b79b0dbc688ef3102de54fa6a33b20198c
+
+    Qwen3.5-35B-A3B-Q4_K_M.gguf                22,016,023,168 bytes (20.5 GiB)
+        https://huggingface.co/unsloth/Qwen3.5-35B-A3B-GGUF/resolve/main/
+        Qwen3.5-35B-A3B-Q4_K_M.gguf
+        sha256 3b46d1066bc91cc2d613e3bc22ce691dd77e6f0d33c9060690d24ce6de494375
+
+The downloader is resumable: bytes go into a <name>.partial file beside the
+target and a restart asks for a byte range starting where that file ends, so an
+interrupted 20 GB transfer is not repeated. A file ALREADY in the cache is
+checked BY SIZE ONLY - hashing twenty gigabytes takes minutes and would
+dominate every run - and the sha256 above is verified exactly once, right after
+a fresh download, which is when a truncated transfer would show. A cached file
+of the wrong size is an error telling you to delete it, never a silent
+re-download.
+
+TIMINGS ON THE INTEL MAC MINI (six cores, 32 GiB, CPU only). The two SmolLM
+classes add a few seconds once the file is cached. Qwen35LiveTests loads the
+20 GB file ONCE for the whole class through Engine/Qwen35ModelFixture.cs and
+takes about 150 seconds with the file warm in the page cache - about 31 to 44
+seconds of that is the load itself, and about 86 seconds if the file is cold.
+Do not put a test timeout on that class.
+
+THE DEFAULT SUITES DOWNLOAD NOTHING. The family's "nothing downloaded at test
+time" rule therefore applies TO THE DEFAULT SUITES ONLY, and this is the
+deliberate deviation: downloading models is what ModelManager is for and
+running them is what ModelRunner is for, so libraries never once exercised
+against a real registry and a real model are libraries whose central promise is
+untested.
+
+TREAT THE GATED RUNS AS PART OF A RELEASE CHECK, NOT AN OPTIONAL EXTRA.
 
 THE TEST INFRASTRUCTURE
 -----------------------
-Five pieces under Infrastructure/, and each exists so that a whole tier can be
-tested without a network or a real model:
+ModelManager.Tests has FIVE pieces under Infrastructure/, and each exists so
+that a whole tier can be tested without a network or a real model:
 
   EnvGatedFactAttribute.cs   the gate above. It takes the variable name and the
                              expected value (default "1") and forwards the
@@ -291,6 +461,74 @@ tested without a network or a real model:
                              IOException and UnauthorizedAccessException: a
                              leftover directory must never fail a test.
 
+ModelRunner.Tests has SIX, and the rule they follow is the same one: the
+offline suite must be able to exercise every tier without a network and without
+a real model, and the live tests must not pay for anything twice.
+
+  EnvGatedFactAttribute.cs   the same idea as ModelManager's, in ModelRunner's
+                             own namespace, and it takes ONE OR MORE variable
+                             names and skips unless every one of them is "1" -
+                             which is how the Qwen class asks for both gates at
+                             once. It is duplicated rather than shared because
+                             the two test projects do not reference each other
+                             and neither library may grow a dependency to let
+                             them.
+
+  TestGates.cs               the three environment variable NAMES as consts,
+                             so a gate is never spelled out in a test file.
+
+  TestVectors.cs             the paths of the linked conformance assets beside
+                             the test assembly - test-vectors/
+                             codebrix-conformance-tiny.gguf and EXPECTED.txt.
+
+  ModelDownloader.cs         the resumable ranged downloader and the model
+                             cache described under THE ENVIRONMENT GATE.
+                             Nothing outside the gated tests calls it.
+
+  EngineExpectedLogits.cs    the parser for EXPECTED.txt and one row of it.
+  EngineExpectedLogitRow.cs  Both the raw-native conformance test and the
+                             one that goes through the whole managed engine
+                             compare against the same parsed rows.
+
+Beside them, Fixtures/ holds the data the offline suite runs on, copied to the
+output folder by one csproj Content glob:
+
+  Fixtures/Jinja/       ten public models' chat templates, each with one or
+                        more <name>.<case>.input.json / .expected.txt pairs -
+                        60 files - plus SOURCES.txt. THAT FILE IS THE PROVENANCE
+                        RECORD FOR ALL OF THEM: for every template it names the
+                        Hugging Face repository, the file fetched
+                        (chat_template.jinja first, tokenizer_config.json's
+                        "chat_template" member second), the commit the resolve
+                        URL redirected to, and the repository's licence. It
+                        also lists what was fetched and NOT kept and why - a
+                        gated repository, a licence that is neither Apache-2.0
+                        nor MIT - and what each template exercises. Entries 8
+                        to 14 of THIRD-PARTY-NOTICES.txt are compiled from it;
+                        if a template is ever added here, that file gains an
+                        entry in the same commit.
+  Fixtures/OllamaGo/    Ollama's template/testdata, verbatim: 20 <name>.gotmpl
+                        FOLDERS of three expected renderings each, plus
+                        templates.jsonl - 61 files.
+  Fixtures/Grammar/     llama.cpp's schema-to-grammar cases written out as
+                        files: 73 .schema.json / .expected.gbnf pairs and two
+                        schemas that must be refused - 148 files.
+  Fixtures/Parsing/     the two templates the thinking and tool-call parsers
+                        are pinned against, qwen3.gotmpl and qwen3-tools.jinja.
+
+Two helpers read those folders: Templates/Jinja/JinjaFixtureLoader.cs (which
+also turns a case's JSON into the Jinja engine's own value model, so that
+| tojson reproduces the file's key order) and Templates/OllamaGo/
+OllamaTemplateFixtures.cs. The Jinja cases are named one by one in
+[InlineData] rows; the three OllamaGo [MemberData] members enumerate their
+folder instead, so adding a fixture there adds test cases with no code change.
+
+Engine/SmolLmModelFixture.cs and Engine/Qwen35ModelFixture.cs are the live
+suites' one-load fixtures. Neither does anything in its constructor: a gated
+class that never runs downloads nothing and loads nothing. The Qwen fixture
+also installs a log handler around the load so the class can report the buffer
+sizes the engine settled on, and removes it afterwards.
+
 THE LINKED CONFORMANCE MODEL
 ----------------------------
 ModelManager.Tests LINKS, rather than copies, llama-native-tools/test-vectors/
@@ -298,8 +536,17 @@ codebrix-conformance-tiny.gguf into its output as test-vectors/. It is the SAME
 FILE that every native build regenerates and checks byte for byte, and the same
 file CodeBrix.Ollama.ModelRunner.Tests links (with EXPECTED.txt) to run its
 logits against. One asset, three consumers, so the managed GGUF reader, the
-native gate and the eventual managed binding can never drift on to different
-files. Do not copy it into either test project.
+native gate and the managed binding can never drift on to different files. Do
+not copy it into either test project.
+
+ModelRunner.Tests uses it TWICE, which is the point of having it: NativeConfor-
+manceTests drives the raw P/Invoke layer with it, and RunningModelConformance-
+Tests drives the whole engine - load, decode, logits - through
+ModelRunner.LoadAsync with it. Both compare against EXPECTED.txt within the
+same tolerance the native gate uses. A model with 64 vocabulary entries, 32
+embedding dimensions and 2 layers cannot tokenize anything, so the managed test
+feeds the 12 conformance token ids straight in; that is what
+RunningModel.GenerateFromTokensAsync exists for, and it is internal.
 
 
 PACKAGING AND PUBLISHING
@@ -384,9 +631,12 @@ AFTER ANY CHANGE TO THAT BLOCK, UNZIP THE PACKAGE AND LOOK (`unzip -l <nupkg> |
 grep runtimes`). What you want to see is runtimes/<rid>/native/ with no doubled
 path - today, exactly two entries under each of the seven RIDs'
 runtimes/<rid>/native/: the library (libcodebrix_llama.dylib, .so or
-codebrix_llama.dll) and LICENSE-LlamaCpp.txt. Last checked 2026-09-15 on
-Windows after adopting win-x64 and win-arm64: fourteen entries, no doubled
-path.
+codebrix_llama.dll) and LICENSE-LlamaCpp.txt. Checked 2026-09-15 on Windows
+after adopting win-x64 and win-arm64, and again on 2026-09-16 on the Intel Mac
+mini after the ModelRunner build-out: fourteen entries both times, no doubled
+path, lib/net10.0 carrying the assembly and its XML documentation, the five
+packed root files present, and the nuspec's net10.0 dependency group still
+empty.
 
 
 THE NATIVE LIBRARIES
@@ -525,21 +775,108 @@ THIRD-PARTY-NOTICES.txt at the repository root holds the full attribution: the
 upstream-file-to-our-file scope list from which the marker list above was
 compiled, the modifications made during the port, and Ollama's MIT licence
 verbatim. It also covers llama.cpp and the licences that appear in the vendored
-snapshot. Extend it whenever you port anything further; if you rewrite a file
-until nothing of the original remains, remove the marker rather than leave a
-false attribution.
+snapshot, and everything ModelRunner ported. As of 2026-09-16 it carries
+FOURTEEN numbered entries: 1 llama.cpp and ggml, 2 Intel's SYCL and OpenVINO
+backends, 3 Ollama, 4 LLamaSharp (read, not copied), 5 the Go standard library,
+6 agnivade/levenshtein, 7 the Jinja project (read, not copied), and 8 to 14 the
+chat-template fixtures by licensor - Alibaba/Qwen, HuggingFaceTB, Mistral AI,
+Microsoft, DeepSeek, IBM and the Allen Institute for AI. Extend it whenever you
+port anything further; if you rewrite a file until nothing of the original
+remains, remove the marker rather than leave a false attribution.
 
 THE REFERENCE CLONE lives at ~/GitHome/ollama, at that same commit. It is a
 REFERENCE ONLY - not vendored, not a submodule, and there is deliberately no
 NuGet reference to anything Ollama. Read it beside the C#; do not copy it into
 the tree.
 
+WHAT ModelRunner PORTED, AND FROM WHOM
+--------------------------------------
+ModelRunner takes code from four upstreams and reads three more without taking
+anything. 129 of its 240 files carry the marker; the marker names the upstream
+project first, so a grep over src/CodeBrix.Ollama.ModelRunner is the index:
+
+    grep -rh 'was previously:' src/CodeBrix.Ollama.ModelRunner | sort | uniq -c
+
+  llama.cpp (MIT, ggml-org/llama.cpp, commit 815a2a5915f22ce6a760c676389c5dfe
+  8535c08f - the same commit the vendored snapshot is at). Native/ transcribes
+  include/llama.h and ggml/include/{ggml.h, ggml-backend.h, ggml-cpu.h,
+  ggml-opt.h, gguf.h} into C# structs, enums and LibraryImport declarations -
+  declarations only, no algorithm. Grammar/ is a real port of
+  common/json-schema-to-grammar.cpp, rule for rule, so the GBNF this library
+  writes for a schema is the GBNF llama.cpp writes; grammars/json.gbnf is the
+  verbatim JsonSchemaGrammar.JsonGrammar literal; and tests/test-json-schema-
+  to-grammar.cpp supplied Fixtures/Grammar. Engine/EngineSamplerChain.cs takes
+  the ORDER of the sampler chain from common/sampling.cpp and nothing else.
+  Everything except the headers was read in a separate clone, because common/,
+  grammars/ and tests/ are not in the vendored subset.
+
+  The Go standard library (BSD-3-Clause, Copyright (c) 2009 The Go Authors,
+  tag go1.25.0). Templates/OllamaGo/ is a faithful port of text/template:
+  text/template/parse/{lex,node,parse}.go, text/template/{exec,funcs,template,
+  option}.go, and the helpers those need - fmt/{print,format}.go as
+  GoFormat.cs, encoding/json/encode.go as GoJson.cs, strconv/quote.go as
+  GoQuote.cs. It exists because Ollama's templates are Go templates and
+  nothing in .NET runs them.
+
+  Ollama (MIT, Copyright (c) Ollama, commit a43fad18, the same commit
+  ModelManager ports). template/template.go and the tool and message shapes of
+  api/types.go became OllamaTemplate, OllamaNamedTemplate, OllamaTemplateValues,
+  OllamaTemplateBuiltIns, OllamaTemplateBinder and OllamaTemplateFuncs;
+  thinking/parser.go and
+  thinking/template.go became Parsing/ThinkingParser, ThinkingParserState and
+  ThinkingTags; tools/tools.go and tools/template.go became
+  Parsing/ToolCallParser, ToolCallParserState and ToolCallFormat. Ollama's 20
+  built-in .gotmpl templates, their 20 .json companions and index.json are
+  COPIED BYTE FOR BYTE into Templates/OllamaGo/BuiltIn/ and embedded as
+  assembly resources, so they ship inside the package; template/testdata (61
+  files) and the Qwen 3 template written out inside thinking/template_test.go
+  are copied into the test project only.
+
+  agnivade/levenshtein (MIT) - one function, Templates/OllamaGo/
+  GoLevenshtein.cs, because Ollama's template.Named matches a model's embedded
+  template to a built-in by edit distance and the threshold is part of the
+  behaviour.
+
+  LLamaSharp (MIT, Copyright (c) 2025 SciSharp STACK, commit 59dc9752) was
+  READ AND NOT COPIED. Six of its files - NativeLogConfig.cs,
+  SafeLlamaModelHandle.cs, SafeLLamaContextHandle.cs, SafeLLamaSamplerHandle.cs,
+  LoraAdapter.cs, LLamaBatch.cs - were consulted as a second opinion on struct
+  field order, the SafeHandle shape, the negative-return resize protocol and
+  the newline-buffering of the log callback. Every file that consulted them
+  says so with a "(reference only)" marker. No line of its code is here, and
+  there is no LLamaSharp package reference anywhere.
+
+  The Jinja project (Pallets, BSD-3-Clause) was READ AND NOT COPIED.
+  Templates/Jinja/ is an ORIGINAL implementation of the Jinja template
+  language, written against Jinja's published documentation and against the
+  fixture templates it has to render, plus CPython's documented str / list /
+  dict behaviour for the methods those templates call. Its 50 files carry NO
+  marker, and that is correct - do not add one.
+
+  nlohmann/json was consulted for the exact escaping its dump() performs, so
+  that Parsing/CompactJson.cs writes what llama.cpp's grammar converter writes.
+  Reference only, marked as such.
+
+  TWO MARKERS NAME THIS FAMILY'S OWN CODE and are not third-party attribution:
+  Native/NativeLibraryLoader.cs names CodeBrix.VideoPlayback.Dav1d's
+  Interop/Dav1dLibrary.cs, whose loader structure it copies, and
+  Native/NativeMethods.CodeBrix.cs names this repository's own
+  llama-native-tools/wrapper/codebrix_llama.c. Both are deliberately absent
+  from THIRD-PARTY-NOTICES.txt, for the same reason the conformance model is.
+
+NO ModelRunner TEST FILE CARRIES A MARKER, though four of them are ports of
+Ollama's thinking and tools test tables. That is a known gap that was closed in
+prose instead: the paragraph in THIRD-PARTY-NOTICES.txt entry 3 naming
+ThinkingParserTests, ThinkingTagsTests, ToolCallParserTests and
+ToolCallFormatTests IS the record for them. If you add markers to those four
+later, that paragraph can go.
+
 THE DELIBERATE DEVIATIONS FROM OLLAMA
 -------------------------------------
 All of them are recorded in THIRD-PARTY-NOTICES.txt under MODIFICATIONS MADE
-DURING THE PORT, and most of them again in the XML <remarks> at the place they
-happen. They are decisions, not omissions, and they are the ones most likely to
-be "fixed" by mistake.
+DURING THE ModelManager PORT, and most of them again in the XML <remarks> at
+the place they happen. They are decisions, not omissions, and they are the
+ones most likely to be "fixed" by mistake.
 
   - OUR OWN DOWNLOAD SIDECARS. A blob being downloaded is written to
     <blob>.codebrix-partial with one JSON document at <blob>.codebrix-parts.json
@@ -605,6 +942,116 @@ in place; GGUF reading is one eager forward pass producing an immutable snapshot
 rather than the lazy iterator machinery; and LoRA ADAPTER files ARE accepted,
 which is older Ollama behaviour - the upstream commit rejects them.
 
+THE DELIBERATE DEVIATIONS IN ModelRunner
+----------------------------------------
+Same rule: decisions, not omissions, and the ones most likely to be "fixed" by
+mistake. They are recorded in THIRD-PARTY-NOTICES.txt under each entry's
+MODIFICATIONS heading, and again in the XML <remarks> where they happen.
+
+THE BINDING (Native/)
+  - Opaque upstream pointers are bound as IntPtr, and const char* RETURNS are
+    bound as byte* because the memory belongs to the engine.
+  - The 36 functions llama.h marks DEPRECATED are not bound at all, and
+    llama_opt_params' optimizer callback is a void* because ggml-opt.h is not
+    bound either.
+  - LlamaBatchBuffer.Add writes ALL FIVE fields of the batch row. This is not
+    redundancy: llama_batch_init leaves them uninitialized, and a row that is
+    only partly written is a source of results that look plausible.
+  - The log callback is installed when the library loads and DISCARDS by
+    default, so a consumer who never calls SetLogHandler gets a silent
+    library; llama.cpp writes to stderr by default.
+  - THE SAFEHANDLES ARE NEVER PASSED TO AN IMPORT. Every LibraryImport takes
+    IntPtr, and the owner (RunningModel) is what keeps the handle reachable
+    for the duration of a call. That was reviewed and deliberately left
+    alone; the rule is written on SafeLlamaModelHandle. If you ever change an
+    import to take a SafeHandle, change all of them, or the mixture is worse
+    than either.
+
+THE GO TEMPLATE ENGINE (Templates/OllamaGo/)
+  - `call` is not registered as a builtin, complex constants are rejected and
+    hexadecimal float literals are not parsed. Nothing in a chat template uses
+    them.
+  - break and continue are return signals through the executor rather than
+    panics, and printf implements the verbs v s q t d b o x X c U f F e E g G
+    with the flags - + # 0 and space, plus width and precision, but NOT `*`
+    width.
+  - A missing map key yields Go's invalid value ("<no value>"), matching Go,
+    and a tool-properties map that is missing yields a zero ToolProperty.
+  - OllamaTemplateValues carries a System property that Ollama's Values struct
+    does not, rendered as a system message prepended to the collated messages,
+    and collating COPIES the message list instead of mutating the caller's.
+  - The legacy tail (Ollama's pre-messages rendering path) is rendered with
+    the full function table rather than a reduced one.
+
+THE PARSERS (Parsing/)
+  - ThinkingParser.Flush RETURNS the text it is still holding, as content;
+    Ollama's parser drops it at end of stream. The same applies to
+    ToolCallParser: text after a tag that never became a call is emitted as
+    content rather than vanishing.
+  - ToolCallParser searches a document for a call's arguments IN DOCUMENT
+    ORDER, where Go iterates a map, so the result is deterministic; it
+    preserves property order in ArgumentsJson; and ToolCall.Id is null from
+    the parser, because an id is the chat layer's to assign.
+  - Both parsers CAP what they will hold (about 1 MiB for a tool call, 4 KiB
+    of whitespace for thinking) and emit the excess as content. A model that
+    opens a tag and never closes it must not grow a buffer without limit.
+  - ToolCallFormat.FromRenderedToolCall may differ from FromGoTemplateText for
+    DeepSeek-style templates that write the call across two literals.
+
+THE GRAMMAR CONVERTER (Grammar/)
+  - A REMOTE $ref - one pointing at another document over http - is refused
+    with GrammarException rather than fetched. Converting a schema does no
+    I/O.
+  - Every JSON value kind is guarded and a wrong kind raises GrammarException
+    instead of silently widening the grammar; empty enum and empty anyOf are
+    errors; const and enum NUMBERS keep the schema's own spelling.
+  - What could not be expressed is reported as WARNINGS through the
+    FromSchema overloads that take an out list, rather than being dropped.
+
+THE JINJA ENGINE (Templates/Jinja/)
+  - `x in undefined` is FALSE rather than an error. The Granite 3.3 template
+    needs it and Jinja itself raises.
+  - Tuples are modelled as lists, so items() prints [['k', v]] where Jinja
+    prints [('k', v)]. No chat template depends on the difference.
+  - `set` inside a loop is scoped to the iteration, which is Jinja's own
+    documented behaviour; namespace() is what carries a value out.
+
+THE ENGINE (Engine/)
+  - PROBING USES no_alloc WITHOUT MEMORY MAPPING. The combination of mmap and
+    no_alloc aborts the process inside llama-model.cpp, so ProbeAsync sets the
+    load mode to none. Do not "restore" mmap there.
+  - PENALTY SAMPLERS SEE ONLY THE TOKENS THIS REQUEST GENERATED, not the
+    prompt, and they run over the full vocabulary before truncation as
+    llama.h's own comment advises. Both differ from llama.cpp's main program.
+  - Statistics come from a Stopwatch, not from llama_perf_context.
+  - Token text is rendered with special=true so the parsers see the template's
+    own markers; the end-of-generation token is caught BEFORE rendering; and
+    the last generated token is emitted but not decoded, because nothing will
+    sample after it.
+  - An update is emitted only when a token produced visible text. Token ids
+    that produced none accumulate onto the next update's Tokens, so no id is
+    lost.
+  - Embeddings are RAW: no L2 normalisation. Width is llama_model_n_embd_out,
+    which is not always n_embd. An input longer than the embedding context's
+    n_ubatch is an InferenceException naming the limit, because a non-causal
+    model would otherwise abort the process inside ggml.
+  - THE CHAT LAYER OWNS THE BOS RULE (Engine/ChatBosRule.cs), call ids are
+    assigned call_1..n by this library, tool calls are delivered on the FINAL
+    update only, an unknown tool name is returned as content rather than as a
+    call, and the Native dialect refuses tools outright.
+  - The reasoning stage is skipped when Think is false UNLESS the template has
+    think tags and no enable_thinking switch, or the prompt ends with the
+    opening tag.
+  - Qwen 3.5 does not write JSON tool calls; Engine/ChatFunctionCallParser.cs
+    reads the <function=NAME><parameter=P>...</parameter></function> form, and
+    the engine chooses between it and Parsing/ToolCallParser from the template
+    text. Duplicate tool names keep the first and ignore the rest.
+  - RE-ENTRANCY IS AN EXCEPTION, NOT A DEADLOCK. Calling another member of the
+    same IRunningModel from inside an await foreach over GenerateAsync or
+    ChatAsync on the same call chain throws InvalidOperationException. The
+    request gate is held across the yield, so without the AsyncLocal marker in
+    EngineRequestScope it would simply hang.
+
 
 CODING CONVENTIONS
 ==================
@@ -633,16 +1080,47 @@ test projects alike.
     Pure parsing that touches no I/O - Modelfile.Parse, ModelName.Parse - stays
     synchronous.
 
-  - ZERO NUGET DEPENDENCIES IN BOTH LIBRARY PROJECTS. All JSON goes through the
-    in-box System.Text.Json via Common/ModelManagerJson.cs; HTTP goes through
-    HttpClient and SocketsHttpHandler; hashing through
-    System.Security.Cryptography. This is not a preference: it is verifiable in
-    the packed nuspec, and it is why there is no Microsoft.Extensions.AI
-    adapter, no OllamaSharp reference and no LLamaSharp reference anywhere.
+  - ZERO NUGET DEPENDENCIES IN BOTH LIBRARY PROJECTS. In ModelManager all JSON
+    goes through the in-box System.Text.Json via Common/ModelManagerJson.cs,
+    HTTP through HttpClient and SocketsHttpHandler, and hashing through
+    System.Security.Cryptography; in ModelRunner, System.Text.Json again, plus
+    Parsing/CompactJson.cs where the exact byte-for-byte shape of what is
+    written matters. This is not a preference: it is verifiable in the packed
+    nuspec, and it is why there is no Microsoft.Extensions.AI adapter, no
+    OllamaSharp reference and no LLamaSharp reference anywhere.
 
   - NO NEW THIRD-PARTY NUGETS ANYWHERE, per the family rule: CodeBrix.* and
     Microsoft packages are fine; xUnit and SilverAssertions in the .Tests
     projects are the standing exception.
+
+  - THE P/INVOKE RULES, which apply to ModelRunner's Native/ folder and
+    nowhere else in this repository:
+
+      * [LibraryImport], NEVER [DllImport]. All 302 imports are
+        source-generated, so the marshalling is visible in generated code
+        rather than inferred at run time. The only DllImport-shaped thing in
+        the tree is NativeLibrary.SetDllImportResolver in
+        NativeLibraryLoader.cs, which is what finds runtimes/<rid>/native/ in
+        the first place.
+      * ONE LIBRARY NAME, and it is the const NativeLibraryLoader.LibraryName
+        ("codebrix_llama") in every single import - the resolver does the rest.
+        Never hard-code a file name, an extension or a path in an import.
+      * THE HEADERS ARE THE ONLY SOURCE OF TRUTH for a signature or a struct
+        layout: llama-native-tools/llama.cpp/include/llama.h and
+        .../ggml/include/*.h at the vendored commit. Not a blog post, not
+        another binding, not a memory of what the function used to take.
+      * A STRUCT BOUND FROM A HEADER IS SIZE-CHECKED BY A TEST.
+        tests/.../Native/NativeDefaultsTests.cs pins the sizes and the default
+        values the engine hands back. Add the check in the same commit as the
+        struct; a layout that is wrong by four bytes fails nowhere obvious.
+      * unsafe IS ALLOWED HERE, and only here and in the seven Engine/ files
+        that walk a logits array or a batch. It is not a licence to use it in
+        a parser or a template engine.
+      * ONE TYPE PER FILE STILL APPLIES to every enum and every struct, which
+        is why Native/ is 68 files. The exception the folder does make is
+        NativeMethods, which is ONE partial class split by subject
+        (NativeMethods.Model.cs, .Context.cs, .Sampler.cs and so on) - that is
+        one type, spread over fourteen files, not fourteen types.
 
   - XML DOC COMMENTS ON EVERY PUBLIC AND PROTECTED MEMBER.
     GenerateDocumentationFile is on for both libraries; fix CS1591 at the source
@@ -692,13 +1170,30 @@ path, and the ModelManager executable ran 789/788/1 - but see the
 `dotnet test` note under WHAT HAS NOT BEEN VALIDATED.)
 
   * `dotnet build CodeBrix.Ollama.slnx -c Release` - 0 warnings, 0 errors.
+    Re-checked for ModelRunner alone on 2026-09-16 with --no-incremental after
+    the build-out: 0 warnings, 0 errors over all 240 files, with
+    GenerateDocumentationFile on and no <NoWarn> anywhere.
   * The ModelManager suite - 789 total, 788 passed, 1 skipped, about two
     seconds, with no network. Run both ways: through `dotnet test` and by
     running the built executable directly.
+  * The ModelRunner suite, 2026-09-16, as the built executable - 1258 total,
+    1228 passed, 0 failed, 30 skipped, 2.6 seconds, with no network. Opening
+    CODEBRIX_OLLAMA_RUN_LIVE_TESTS leaves 9 skipped (the Qwen class); opening
+    CODEBRIX_OLLAMA_RUN_QWEN35_TESTS as well leaves none, and both gated runs
+    passed during the build-out against the two cached model files.
+  * THE WHOLE STACK, END TO END, ON osx-x64. The managed binding really loads
+    the committed libcodebrix_llama.dylib out of runtimes/osx-x64/native/,
+    really decodes, and the logits it produces from the conformance model match
+    EXPECTED.txt - which is the thing that could not be said before this
+    build-out. Two real models ran on it: SmolLM 360M at 69 to 74 tokens a
+    second, and Qwen 3.5 35B-A3B Q4_K_M - 20.5 GiB, hybrid MoE, 248,320-entry
+    vocabulary - at 8.8 to 9.3 tokens a second on six CPU cores, loading in 31
+    to 44 seconds warm and about 86 cold, with a peak resident size of about
+    23.5 GB on a 32 GiB machine.
   * Both packages packed and unzipped. Each carries the five packed root files
     and lib/net10.0, each nuspec carries an EMPTY net10.0 dependency group, and
-    the ModelRunner package carries runtimes/osx-x64/native/ and
-    runtimes/osx-arm64/native/ with no doubled path.
+    the ModelRunner package carries all seven runtimes/<rid>/native/ folders -
+    fourteen entries - with no doubled path (2026-09-16).
   * The osx-x64 native: built, full gate passed (architecture, 248/248 required
     exports, exact export surface, install name, system-only dependencies,
     minos 13.3, signature, smoke test, byte-identical model regeneration, and
@@ -727,10 +1222,12 @@ WHAT HAS NOT BEEN VALIDATED
     a Debian-family x64 workstation with the same SDK, as the built
     executable.)
 
-  * THE LIVE PULL TEST HAS NOT YET BEEN RUN IN THIS REPOSITORY. Say that plainly
-    rather than assuming it works: CODEBRIX_OLLAMA_RUN_LIVE_TESTS=1 has never
-    been set here, so the one test that reaches registry.ollama.ai has only ever
-    been skipped. Running it is the first thing to do before any release.
+  * ModelManager'S LIVE PULL TEST HAS STILL NEVER BEEN RUN. Say that plainly
+    rather than assuming it works. CODEBRIX_OLLAMA_RUN_LIVE_TESTS=1 HAS now
+    been set in this repository - that is how ModelRunner's live tests ran on
+    2026-09-16 - but only against ModelRunner's executable. The one test that
+    reaches registry.ollama.ai has only ever been skipped. Running it is the
+    first thing to do before any release.
 
   * THE WIN-ARM64 NATIVE SLICE HAS NEVER BEEN EXECUTED: cross-built and
     statically checked on x64, adopted by decision, as described under THE
@@ -739,12 +1236,28 @@ WHAT HAS NOT BEEN VALIDATED
     riscv64 under qemu-user emulation) but have not yet run on real arm64 or
     riscv64 hardware. win-x64 is fully gated and adopted.
 
-  * ModelRunner IS NOT WRITTEN. There is no managed binding, so the committed
-    macOS libraries have been verified only by llama-native-tools' own gate - by
-    C programs, never yet from .NET. The first thing the binding will prove or
-    disprove is that the runtimes/<rid>/native/ probing finds the file the
-    packing block puts there, which is exactly why that block also stages the
-    natives into the test output.
+  * SIX OF THE SEVEN NATIVES HAVE NEVER BEEN LOADED FROM .NET. ModelRunner is
+    written and its whole suite passes, but every run of it has been on ONE
+    machine and ONE runtime identifier: osx-x64, the Intel Mac mini, CPU only,
+    no Metal. osx-arm64, linux-x64, linux-arm64, linux-riscv64, win-x64 and
+    win-arm64 have been verified only by llama-native-tools' own gate - by C
+    programs - and win-arm64 not even by that. The first thing to run
+    elsewhere is the OFFLINE ModelRunner suite: it loads the conformance model
+    through the real native library, so it proves both that the
+    runtimes/<rid>/native/ probing finds what the packing block puts there and
+    that the struct layouts in Native/ are right for that platform's compiler.
+    Expect the size checks in NativeDefaultsTests to be the first thing that
+    fails if anything is wrong.
+
+  * NO GPU PATH HAS EVER BEEN EXERCISED THROUGH THE BINDING. Every managed run
+    so far set GpuLayers = 0. The osx-arm64 native carries Metal and its
+    conformance was checked by the native gate on the Apple Silicon mini, but
+    no managed test has offloaded a single layer.
+
+  * ModelRunner'S LIVE TESTS HAVE RUN ON THIS MACHINE ONLY, and they are the
+    only tests that download. Their two files were already cached here when
+    they ran; a first run elsewhere fetches 368 MiB, or 20.5 GiB with the Qwen
+    gate open.
 
 TWO DESIGN CHOICES, SO THEY ARE NOT MISTAKEN FOR OVERSIGHTS
 ----------------------------------------------------------

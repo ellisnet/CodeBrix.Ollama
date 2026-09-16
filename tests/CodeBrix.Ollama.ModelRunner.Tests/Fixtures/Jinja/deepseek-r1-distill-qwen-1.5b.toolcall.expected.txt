@@ -1,0 +1,9 @@
+<｜begin▁of▁sentence｜><｜User｜>Weather in Paris and Berlin?<｜Assistant｜><｜tool▁calls▁begin｜><｜tool▁call▁begin｜>function<｜tool▁sep｜>get_weather
+```json
+{"city": "Paris"}
+```<｜tool▁call▁end｜>
+<｜tool▁call▁begin｜>function<｜tool▁sep｜>get_weather
+```json
+{"city": "Berlin"}
+```<｜tool▁call▁end｜><｜tool▁calls▁end｜><｜end▁of▁sentence｜><｜tool▁outputs▁begin｜><｜tool▁output▁begin｜>{"temperature": 18}<｜tool▁output▁end｜>
+<｜tool▁output▁begin｜>{"temperature": 14}<｜tool▁output▁end｜><｜tool▁outputs▁end｜>

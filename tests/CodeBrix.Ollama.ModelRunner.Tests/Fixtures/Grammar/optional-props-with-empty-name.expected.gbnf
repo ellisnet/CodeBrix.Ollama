@@ -1,0 +1,12 @@
+-kv ::= "\"\"" space ":" space root
+-rest ::= ( "," space a-kv )? a-rest
+a-kv ::= "\"a\"" space ":" space integer
+a-rest ::= ( "," space additional-kv )*
+additional-k ::= ["] ( [a] char+ | [^"a] char* ) ["]
+additional-kv ::= additional-k ":" space integer
+char ::= [^"\\\x7F\x00-\x1F] | [\\] (["\\bfnrt] | "u" [0-9a-fA-F]{4})
+integer ::= ("-"? integral-part)
+integral-part ::= [0] | [1-9] [0-9]{0,15}
+root ::= ("-"? integral-part)
+root0 ::= "{" space  (-kv -rest | a-kv a-rest | additional-kv ( "," space additional-kv )* )? space "}"
+space ::= | " " | "\n"{1,2} [ \t]{0,20}

@@ -1,0 +1,7 @@
+{
+  "messages": [
+    { "role": "user", "content": "Hi." }
+  ],
+  "add_generation_prompt": true,
+  "eos_token": "<|im_end|>"
+}

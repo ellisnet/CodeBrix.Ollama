@@ -1,0 +1,24 @@
+{
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are Qwen."
+    },
+    {
+      "role": "user",
+      "content": "Hi."
+    },
+    {
+      "role": "assistant",
+      "content": "Hello!"
+    },
+    {
+      "role": "user",
+      "content": "Bye."
+    }
+  ],
+  "add_generation_prompt": true,
+  "bos_token": "",
+  "eos_token": "<|im_end|>",
+  "enable_thinking": false
+}

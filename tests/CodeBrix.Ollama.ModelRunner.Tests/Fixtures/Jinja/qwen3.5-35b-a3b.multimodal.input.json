@@ -1,0 +1,15 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        { "type": "image" },
+        { "type": "text", "text": "What is in this picture?" }
+      ]
+    }
+  ],
+  "add_vision_id": true,
+  "add_generation_prompt": true,
+  "bos_token": "",
+  "eos_token": "<|im_end|>"
+}

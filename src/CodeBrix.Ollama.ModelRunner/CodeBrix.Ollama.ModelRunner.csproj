@@ -131,4 +131,13 @@
     </ItemGroup>
   </Target>
 
+  <!--
+    Ollama's built-in chat templates (the .gotmpl files and their index) ship inside the assembly as embedded
+    resources, so the Ollama-dialect renderer can match a model's embedded template to the built-in Ollama
+    uses for it, exactly as Ollama does.
+  -->
+  <ItemGroup>
+    <EmbeddedResource Include="Templates\OllamaGo\BuiltIn\**\*" />
+  </ItemGroup>
+
 </Project>

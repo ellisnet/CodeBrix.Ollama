@@ -1,0 +1,10 @@
+{
+  "messages": [
+    { "role": "system", "content": "You are helpful." },
+    { "role": "user", "content": "Hi." },
+    { "role": "assistant", "content": "Hello!" }
+  ],
+  "add_generation_prompt": false,
+  "bos_token": "<|endoftext|>",
+  "eos_token": "<|endoftext|>"
+}

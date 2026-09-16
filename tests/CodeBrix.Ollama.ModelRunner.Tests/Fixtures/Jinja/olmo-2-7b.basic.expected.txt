@@ -1,0 +1,9 @@
+<|endoftext|><|system|>
+You are OLMo.
+<|user|>
+Hi.
+<|assistant|>
+Hello!<|endoftext|>
+<|user|>
+Bye.
+<|assistant|>

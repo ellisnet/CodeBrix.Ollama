@@ -1,0 +1,10 @@
+a-kv ::= "\"a\"" space ":" space number
+b-kv ::= "\"b\"" space ":" space number
+c-kv ::= "\"c\"" space ":" space number
+d-kv ::= "\"d\"" space ":" space number
+d-rest ::= ( "," space c-kv )?
+decimal-part ::= [0-9]{1,16}
+integral-part ::= [0] | [1-9] [0-9]{0,15}
+number ::= ("-"? integral-part) ("." decimal-part)? ([eE] [-+]? integral-part)?
+root ::= "{" space a-kv "," space b-kv ( "," space ( d-kv d-rest | c-kv ) )? space "}"
+space ::= | " " | "\n"{1,2} [ \t]{0,20}

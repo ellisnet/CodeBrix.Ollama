@@ -1,0 +1,27 @@
+<|start_of_role|>system<|end_of_role|>You are Granite, developed by IBM.<|end_of_text|>
+<|start_of_role|>available_tools<|end_of_role|>[
+    {
+        "type": "function",
+        "function": {
+            "name": "get_capital",
+            "description": "Get the capital of a country.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "country": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "country"
+                ]
+            }
+        }
+    }
+]<|end_of_text|>
+<|start_of_role|>document {"document_id": "1"}<|end_of_role|>
+Paris is the capital of France.<|end_of_text|>
+<|start_of_role|>document {"document_id": "2"}<|end_of_role|>
+Berlin is the capital of Germany.<|end_of_text|>
+<|start_of_role|>user<|end_of_role|>What is the capital?<|end_of_text|>
+<|start_of_role|>assistant ["citations"]<|end_of_role|>

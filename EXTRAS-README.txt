@@ -10,4 +10,4 @@ Samples, tools and other non-package content in this repository
       vectors, and the build provenance record. Nothing in this folder is
       compiled by a `dotnet build`; see its README.txt.
 
-There are no samples yet.
+  samples/ModelQueryTool - a sample application, work in progress.

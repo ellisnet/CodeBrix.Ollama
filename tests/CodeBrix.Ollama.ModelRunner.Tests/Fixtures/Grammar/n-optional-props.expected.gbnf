@@ -1,0 +1,9 @@
+a-kv ::= "\"a\"" space ":" space string
+a-rest ::= ( "," space b-kv )? b-rest
+b-kv ::= "\"b\"" space ":" space string
+b-rest ::= ( "," space c-kv )?
+c-kv ::= "\"c\"" space ":" space string
+char ::= [^"\\\x7F\x00-\x1F] | [\\] (["\\bfnrt] | "u" [0-9a-fA-F]{4})
+root ::= "{" space  (a-kv a-rest | b-kv b-rest | c-kv )? space "}"
+space ::= | " " | "\n"{1,2} [ \t]{0,20}
+string ::= "\"" char* "\""

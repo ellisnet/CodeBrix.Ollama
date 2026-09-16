@@ -1,0 +1,1 @@
+<|system|>You are helpful.<|tool|>[{"name": "get_weather"}]<|/tool|><|end|><|user|>Weather in Paris?<|end|><|assistant|>

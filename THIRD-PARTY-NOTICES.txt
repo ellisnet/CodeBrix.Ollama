@@ -2,15 +2,25 @@ THIRD-PARTY SOFTWARE NOTICES AND INFORMATION
 
 CodeBrix.Ollama is a pair of .NET libraries for downloading, managing and
 running large language models in-process: CodeBrix.Ollama.ModelManager (a model
-store and registry client, written) and CodeBrix.Ollama.ModelRunner (a managed
-binding over a self-built native inference library, not yet written). As of
-2026-09-15 the repository holds the native build tooling, the first native
-library, and the ModelManager library, which is a partial port of the Ollama
-server's Go code (entry 3). Entries for the code ModelRunner ports (LLamaSharp
-and possibly OllamaSharp, both MIT) will be added when it is written.
+store and registry client) and CodeBrix.Ollama.ModelRunner (a managed binding
+over a self-built native inference library, with its own chat-template,
+tool-call and grammar machinery). As of 2026-09-16 both libraries are written,
+and the repository holds the native build tooling and a native library for all
+seven runtime identifiers. ModelManager is a partial port of the Ollama
+server's Go code (entry 3). ModelRunner transcribes llama.cpp's public C
+headers and ports four further bodies of code: llama.cpp's JSON-schema-to-
+grammar converter (entry 1), Ollama's template, thinking and tools packages
+(entry 3), the Go standard library's text/template and the helpers it needs
+(entry 5), and one small Go module (entry 6). LLamaSharp (entry 4) and the
+Jinja project (entry 7) were read but never copied; both are listed anyway, so
+that the record is complete rather than merely obligatory. Entries 8 to 14
+cover the public models' chat templates the ModelRunner test suite carries as
+fixtures.
 
-Three distinct things in this repository come from other people today, and all
-three are covered below:
+Four distinct things in this repository come from other people today, and all
+four are covered below. They are a way of grouping what is here, not the list
+of entries: the numbered entries further down are organised by copyright
+holder, and one of these four things can span several of them.
 
   1. THE VENDORED SOURCE. llama-native-tools/llama.cpp/ is an unmodified
      snapshot of the build-sufficient subset of the upstream llama.cpp source
@@ -22,18 +32,35 @@ three are covered below:
   2. THE SHIPPED BINARIES. The package's runtimes/<rid>/native/ folders under
      src/CodeBrix.Ollama.ModelRunner/ contain libcodebrix_llama.dylib /
      libcodebrix_llama.so / codebrix_llama.dll compiled from exactly that
-     source, one per runtime identifier (osx-x64 as of 2026-09-15; six more
-     to come).
+     source, one per runtime identifier - all seven of them as of 2026-09-16:
+     linux-arm64, linux-riscv64, linux-x64, osx-arm64, osx-x64, win-arm64 and
+     win-x64.
 
   3. THE PORTED MANAGED CODE. src/CodeBrix.Ollama.ModelManager/ contains C#
      code ported by hand from the Ollama server's Go source: model-name
      parsing, the GGUF metadata reader, the Modelfile parser, the registry
-     protocol and blob downloader, and the manifest/blob store layout. Every
-     ported file names its upstream source in its first line.
+     protocol and blob downloader, and the manifest/blob store layout.
+     src/CodeBrix.Ollama.ModelRunner/ contains C# transcribed from llama.cpp's
+     public C headers (Native/) and ported from llama.cpp's schema-to-grammar
+     converter (Grammar/), from the Go standard library's text/template
+     (Templates/OllamaGo/), and from Ollama's template, thinking and tools
+     packages (Templates/OllamaGo/ and Parsing/). Every ported file names its
+     upstream source in its first lines, in a trailing comment on its
+     namespace line.
 
-Both are governed by the licences reproduced in full below. Every one of them -
-MIT, and the Apache License 2.0 (with and without the LLVM exception) - is
-permissive and compatible with this repository's own MIT licence.
+  4. THE COPIED DATA FILES. src/CodeBrix.Ollama.ModelRunner/Templates/
+     OllamaGo/BuiltIn/ holds Ollama's twenty built-in chat templates, their
+     twenty .json companions and index.json, byte for byte, embedded into the
+     ModelRunner assembly as resources and so shipped inside the package
+     (entry 3). Three further sets of copied files live in the test project
+     only and are in no package: Ollama's template/testdata (entry 3),
+     llama.cpp's schema-to-grammar test cases (entry 1) and ten public models'
+     chat templates (entries 8 to 14).
+
+All four are governed by the licences reproduced in full below. Every one of
+them - MIT, BSD-3-Clause, and the Apache License 2.0 (with and without the LLVM
+exception) - is permissive and compatible with this repository's own MIT
+licence.
 
 HOW THE MIT LICENCE'S NOTICE REQUIREMENT IS SATISFIED
     The MIT licence requires that "the above copyright notice and this
@@ -43,6 +70,15 @@ HOW THE MIT LICENCE'S NOTICE REQUIREMENT IS SATISFIED
     and the adoption step copies it into runtimes/<rid>/native/ beside the
     binary. So the licence text physically travels inside the NuGet package,
     next to every native library, on every platform - in addition to this file.
+
+HOW THE BSD-3-CLAUSE NOTICE REQUIREMENT IS SATISFIED
+    BSD-3-Clause (entries 5 and 7) asks that a redistribution in binary form
+    reproduce the copyright notice, the list of conditions and the disclaimer
+    "in the documentation and/or other materials provided with the
+    distribution". This file is one of those materials: both library projects
+    pack THIRD-PARTY-NOTICES.txt into the NuGet package beside LICENSE and
+    README.md, so the full texts in entries 5 and 7 travel with every copy of
+    the assembly that carries the ported code.
 
 WHAT WAS COPIED FROM UPSTREAM, AND WHAT WAS NOT
     Six top-level paths, complete and unmodified: CMakeLists.txt, LICENSE,
@@ -80,18 +116,21 @@ WHAT IS NOT THIRD-PARTY, AND IS DELIBERATELY ABSENT FROM THIS FILE
     it here would be a false statement about its origin.
 
     The models that CodeBrix.Ollama downloads AT RUN TIME on a user's machine
-    (and the SmolLM model the test suite will download when its live tests are
-    enabled) are not part of this repository or its packages and are governed
-    by their own licences.
+    - and the two the test suite downloads when its live tests are enabled,
+    HuggingFaceTB/smollm-360M-instruct-v0.2-Q8_0-GGUF and
+    unsloth/Qwen3.5-35B-A3B-GGUF at Q4_K_M - are not part of this repository
+    or its packages and are governed by their own licences. What IS in this
+    repository is ten public models' chat templates, as test fixtures, and
+    those are entries 8 to 14.
 
 NuGet package dependencies are not listed here; this file covers source code and
-binaries incorporated INTO this repository. (Both libraries are planned to have
-none.)
+binaries incorporated INTO this repository. (Neither library has any: both are
+base-class-library only.)
 
 
 ================================================================================
-1. llama.cpp and ggml  (the inference library; vendored source and every
-   shipped native library)
+1. llama.cpp and ggml  (the inference library: the vendored source, every
+   shipped native library, and the managed code ported from it)
 ================================================================================
 
 Project:    llama.cpp - LLM inference in C/C++, with the ggml tensor library
@@ -169,8 +208,66 @@ WHAT IS PRESENT IN THE SNAPSHOT BUT NOT COMPILED INTO ANY SHIPPED BINARY
       target (riscv64 is built scalar).
     * cmake/download-models.cmake - inert; nothing in the subset includes it.
 
-MODIFICATIONS
+MODIFICATIONS TO THE VENDORED SNAPSHOT
     None. See "WHAT WAS MODIFIED" above.
+
+WHAT THE MANAGED CODE TAKES FROM UPSTREAM, BEYOND THE SNAPSHOT
+    CodeBrix.Ollama.ModelRunner is a managed binding over the native library,
+    and parts of it are hand-written C# derived from upstream llama.cpp source
+    at the very same commit. Four of the five upstream paths below are NOT in
+    the vendored subset - common/, grammars/ and tests/ are not needed to
+    build the native library, so they were deliberately not copied into it -
+    and those four were read in a separate clone of the upstream repository at
+    commit 815a2a59, never in llama-native-tools/llama.cpp/. Every C# file
+    listed carries the family's provenance marker on its namespace line,
+      namespace CodeBrix.Ollama.ModelRunner; //was previously: ggml-org/llama.cpp <upstream path>;
+    which is how this list was compiled.
+
+      include/llama.h and ggml/include/ggml.h, ggml-backend.h, ggml-cpu.h,
+      ggml-opt.h, gguf.h   (vendored; the snapshot is the source of truth for
+      every signature and every struct layout in the binding)
+          -> src/CodeBrix.Ollama.ModelRunner/Native/ - 57 of its 68 files:
+             the struct layouts, the enum values and the function
+             declarations, transcribed by hand into C# structs, enums and
+             LibraryImport declarations. Declarations, not implementation: no
+             llama.cpp or ggml algorithm is re-implemented in managed code.
+      common/json-schema-to-grammar.cpp   (not vendored)
+          -> Grammar/JsonSchemaConverter.cs, GrammarBuiltinRule.cs,
+             GrammarTrieNode.cs, JsonSchemaGrammar.cs - a port of the schema
+             converter, rule for rule, so that the GBNF grammar this library
+             writes for a JSON schema is the grammar llama.cpp writes.
+      grammars/json.gbnf   (not vendored)
+          -> the JsonSchemaGrammar.JsonGrammar string literal, verbatim.
+      tests/test-json-schema-to-grammar.cpp   (not vendored)
+          -> tests/CodeBrix.Ollama.ModelRunner.Tests/Fixtures/Grammar/ - its
+             cases written out as files: 73 .schema.json / .expected.gbnf
+             pairs, plus two schemas that must be refused (invalid-type and
+             unknown-type). The expected grammars are upstream's, unedited,
+             and tests/CodeBrix.Ollama.ModelRunner.Tests/Grammar/
+             JsonSchemaGrammarTests.cs holds the port to every one of them.
+      common/sampling.cpp   (not vendored)
+          -> Engine/EngineSamplerChain.cs - the ORDER in which the sampler
+             chain is assembled, and nothing else. The chain itself is built
+             by llama_sampler_init_* calls into the native library.
+
+MODIFICATIONS MADE DURING THE MANAGED PORT
+    - The C# drops C++ idioms and nullable annotations for this repository's
+      conventions, and C++ error returns and negative status codes became this
+      library's exception types (ModelRunnerException and its subclasses).
+    - The 36 functions llama.h marks DEPRECATED are deliberately not bound,
+      and llama_opt_params' optimizer-parameter callback is bound as an opaque
+      pointer because ggml-opt.h itself is not bound.
+    - The converter refuses a remote $ref - one pointing at another document
+      over http - rather than fetching it, because converting a schema does no
+      I/O; it guards every JSON value kind and raises GrammarException instead
+      of widening a schema silently; it reports what it could not express as
+      warnings a caller can ask for; and const and enum numbers keep the
+      schema's own spelling.
+    - EngineSamplerChain deviates from common/sampling.cpp twice, on purpose:
+      the penalty samplers run over the full vocabulary before truncation, as
+      llama.h's own comment advises, and only generated tokens are fed to
+      them, so penalties see less history than llama.cpp's main program gives
+      them.
 
 ----- llama.cpp licence (MIT), reproduced verbatim from LICENSE -----
 
@@ -473,7 +570,8 @@ Software.
 
 
 ================================================================================
-3. Ollama  (the model server whose Go code CodeBrix.Ollama.ModelManager ports)
+3. Ollama  (the model server whose Go code both libraries port, and whose
+   built-in chat templates ModelRunner embeds)
 ================================================================================
 
 Project:        Ollama
@@ -485,18 +583,30 @@ Copyright:      Copyright (c) Ollama
 License:        MIT (reproduced verbatim below)
 
 WHAT WAS INCORPORATED
-    Nothing from Ollama is vendored, compiled, linked or downloaded. What was
-    taken is LOGIC: a set of Go source files was read and re-expressed by hand
-    as C# in src/CodeBrix.Ollama.ModelManager/. The result is a port, not a
-    translation - the C# is organised around this library's own public API,
-    uses the .NET base class library throughout, and drops everything about
-    Ollama's server (HTTP routes, scheduling, inference, cloud proxying,
-    safetensors conversion, template rendering, authentication key signing).
+    Two things, and no Ollama binary: nothing from Ollama is compiled, linked,
+    downloaded or run here.
+
+    The first is LOGIC. A set of Go source files was read and re-expressed by
+    hand as C# in src/CodeBrix.Ollama.ModelManager/ and, since the ModelRunner
+    build-out, in src/CodeBrix.Ollama.ModelRunner/ as well. The result is a
+    port, not a translation - the C# is organised around these libraries' own
+    public API, uses the .NET base class library throughout, and drops
+    everything about Ollama's server (HTTP routes, scheduling, cloud proxying,
+    safetensors conversion, authentication key signing, slog logging).
+
+    The second is DATA. Ollama's twenty built-in chat templates, their twenty
+    .json companions and index.json are copied byte for byte into
+    src/CodeBrix.Ollama.ModelRunner/Templates/OllamaGo/BuiltIn/ and embedded
+    into the ModelRunner assembly as resources, so they DO travel inside the
+    NuGet package. Ollama's template/testdata folder is copied into the
+    ModelRunner test project as well, and that copy is in no package.
+
     The reference clone lives at ~/GitHome/ollama at the commit above and is
     consulted, never referenced by the build.
 
-    Scope of incorporation, upstream Go file -> our C# file(s). Every C# file
-    listed carries the family's provenance marker on its namespace line,
+    Scope of incorporation in CodeBrix.Ollama.ModelManager, upstream Go file
+    -> our C# file(s). Every C# file listed carries the family's provenance
+    marker on its namespace line,
         namespace CodeBrix.Ollama.ModelManager; //was previously: ollama/ollama <upstream path>;
     naming the Go file(s) it was ported from at the commit above, which is how
     this list was compiled:
@@ -532,7 +642,7 @@ WHAT WAS INCORPORATED
     correspondingly named files under tests/CodeBrix.Ollama.ModelManager.Tests/
     and carry the same marker naming the test file they came from.
 
-    Files in the library WITHOUT the marker contain no Ollama logic: the
+    Files in ModelManager WITHOUT the marker contain no Ollama logic: the
     exception types and JSON helper under Common/, the public DTOs and options
     under Store/ (ModelStoreOptions, ModelManifest, ModelLayer, MediaTypes,
     ModelConfig, ModelParameters, ModelMessage, ModelInfo, ModelSummary,
@@ -545,7 +655,57 @@ WHAT WAS INCORPORATED
     the media type strings) is Ollama's format, kept identical on purpose so a
     store directory is interchangeable with a real Ollama install.
 
-MODIFICATIONS MADE DURING THE PORT
+    Scope of incorporation in CodeBrix.Ollama.ModelRunner, compiled the same
+    way from the same marker with the ModelRunner namespace:
+
+      template/template.go
+          -> Templates/OllamaGo/OllamaTemplate.cs, OllamaNamedTemplate.cs,
+             OllamaTemplateValues.cs, OllamaTemplateBuiltIns.cs
+      template/template.go together with api/types.go (the Tool,
+      ToolFunction, ToolFunctionParameters, ToolProperty, PropertyType,
+      Message and ToolCall shapes a template sees, and the TypeScript
+      rendering of a property type that Tool.String does)
+          -> Templates/OllamaGo/OllamaTemplateBinder.cs,
+             OllamaTemplateFuncs.cs
+      thinking/parser.go
+          -> Parsing/ThinkingParser.cs, ThinkingParserState.cs
+      thinking/template.go
+          -> Parsing/ThinkingTags.cs
+      tools/tools.go
+          -> Parsing/ToolCallParser.cs, ToolCallParserState.cs
+      tools/template.go
+          -> Parsing/ToolCallFormat.cs
+
+    Data files copied verbatim rather than ported:
+
+      template/*.gotmpl (20), template/*.json (20) and template/index.json
+          -> src/CodeBrix.Ollama.ModelRunner/Templates/OllamaGo/BuiltIn/ -
+             41 files, unedited, embedded as assembly resources by the
+             csproj's EmbeddedResource item and therefore shipped in the
+             package. They are what OllamaTemplate.BuiltInNames,
+             OllamaTemplate.BuiltIn, OllamaTemplate.BuiltInStopStrings and
+             OllamaTemplate.NamedBuiltIn work with.
+      template/testdata/ (61 files: twenty .gotmpl folders holding three
+      renderings each, plus templates.jsonl)
+          -> tests/CodeBrix.Ollama.ModelRunner.Tests/Fixtures/OllamaGo/ -
+             unedited; test data only, in no package.
+      the Qwen 3 chat template written out inside thinking/template_test.go
+          -> tests/CodeBrix.Ollama.ModelRunner.Tests/Fixtures/Parsing/
+             qwen3.gotmpl
+
+    The test tables of thinking/parser_test.go, thinking/template_test.go,
+    tools/tools_test.go and tools/template_test.go were ported into
+    tests/CodeBrix.Ollama.ModelRunner.Tests/Parsing/ThinkingParserTests.cs,
+    ThinkingTagsTests.cs, ToolCallParserTests.cs and ToolCallFormatTests.cs.
+    Unlike the ModelManager test files, those four carry no provenance marker,
+    so this paragraph - and not a grep - is the record for them.
+
+    Files under Templates/OllamaGo/ whose marker names golang/go rather than
+    ollama/ollama are the Go standard library port that Ollama's templates run
+    on. They belong to entry 5, not to this entry; GoLevenshtein.cs belongs to
+    entry 6.
+
+MODIFICATIONS MADE DURING THE ModelManager PORT
     - Go's package-level functions and global state became instance methods
       on ModelStore / RegistryClient with explicit ModelStoreOptions; the
       store directory is a parameter, not an environment lookup (the
@@ -587,6 +747,35 @@ MODIFICATIONS MADE DURING THE PORT
       string validation became char-based with identical results for the
       ASCII-only grammar.
 
+MODIFICATIONS MADE DURING THE ModelRunner PORT
+    - Go's reflection-driven value model became an explicit one - GoValue,
+      GoStruct, GoSlice, GoMap and a binder that shapes a chat request into
+      it - so the data an Ollama template sees is built by hand here rather
+      than discovered by reflection.
+    - OllamaTemplateValues carries a System property that Ollama's Values
+      struct does not have; it is rendered as a system message prepended to
+      the collated messages. Collating copies the message list rather than
+      mutating the caller's.
+    - Ollama's template.Named became OllamaTemplate.NamedBuiltIn, with the
+      same Levenshtein distance (entry 6) and the same threshold of 100.
+    - ThinkingParser.Flush returns whatever text is still held back, as
+      content; Ollama's parser drops it at end of stream.
+    - ToolCallParser clears its buffer on the early return that decides a bare
+      JSON document is content, so nothing can be emitted twice; it searches
+      for a call's arguments in document order rather than Go map order, so
+      the result is deterministic; it preserves property order in
+      ArgumentsJson; it caps how much text it will hold and emits the excess
+      as content; and it leaves ToolCall.Id unset, because assigning call ids
+      is the chat layer's business in this library, not the parser's.
+    - ToolCallFormat and ThinkingTags each gained a route Ollama has no need
+      of - inference from a Jinja template's text, and for ToolCallFormat also
+      from an already-rendered tool call - because this library renders Jinja
+      chat templates beside Go ones. For a DeepSeek-style template that spells
+      its tool call across two literals, those two routes can disagree.
+    - Ollama's server plumbing around these packages - the scheduler, the HTTP
+      handlers, slog logging and the renderer/parser registry - was not
+      ported.
+
 ----- Ollama licence (MIT), reproduced verbatim from LICENSE -----
 
 MIT License
@@ -613,11 +802,557 @@ SOFTWARE.
 
 
 ================================================================================
+4. LLamaSharp  (READ, NOT COPIED - a second opinion on the P/Invoke layer)
+================================================================================
+
+Project:        LLamaSharp - .NET bindings for llama.cpp
+Source URL:     https://github.com/SciSharp/LLamaSharp
+Version:        v0.29.0-34-g59dc9752 (git describe), commit
+                59dc97523a30ef146136fb1cfee4cfa9aa4b674a, 2026-09-12
+Authors:        SciSharp STACK and contributors
+Copyright:      Copyright (c) 2025 SciSharp STACK
+License:        MIT (reproduced verbatim below)
+
+WHAT WAS INCORPORATED
+    NOTHING. Not one line of LLamaSharp source is in this repository, no
+    LLamaSharp package is referenced by either library or by the test
+    projects, and no LLamaSharp binary has ever been downloaded or run here.
+    The entry exists because LLamaSharp was useful anyway, and saying so is
+    better than a notices file that lists only what a licence compels.
+
+WHAT WAS READ, AND WHAT WAS LEARNED FROM IT
+    Six of its files were read while src/CodeBrix.Ollama.ModelRunner/Native/
+    was being written, as a cross-check on a binding that is otherwise written
+    straight from llama.cpp's own headers:
+
+      LLama/Native/SafeLlamaModelHandle.cs, SafeLLamaContextHandle.cs,
+      SafeLLamaSamplerHandle.cs, LoraAdapter.cs
+          - the shape of a SafeHandle over an opaque llama_* pointer, and the
+            "negative return means call again with a bigger buffer" protocol
+            that llama.cpp's string-producing functions use.
+      LLama/Native/LLamaBatch.cs
+          - how a batch's parallel arrays are laid out and kept alive for the
+            duration of a decode.
+      LLama/Native/NativeLogConfig.cs
+          - the idea of buffering the native log by newline before handing it
+            to managed code, because llama.cpp emits one log line over several
+            callbacks.
+
+    What was taken is understanding, written out again in this repository's
+    own code, conventions and names. The seven C# files whose provenance
+    marker names LLamaSharp say "(reference only)" for exactly that reason:
+
+      Native/SafeLlamaModelHandle.cs      Native/SafeLlamaContextHandle.cs
+      Native/SafeLlamaSamplerHandle.cs    Native/SafeLlamaAdapterHandle.cs
+      Native/LlamaBatchBuffer.cs          Native/NativeLog.cs
+      Native/NativeText.cs
+
+    Struct layouts and function signatures in Native/ come from llama.cpp's
+    headers (entry 1), never from LLamaSharp; where the two appeared to
+    disagree, the header won.
+
+MODIFICATIONS
+    Not applicable: nothing was taken, so there is nothing to have modified.
+    The MIT text below is reproduced because this entry names the project and
+    its copyright holder, and a reader deserves the terms beside the name.
+
+----- LLamaSharp licence (MIT), reproduced verbatim from LICENSE -----
+
+MIT License
+
+Copyright (c) 2025 SciSharp STACK
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+================================================================================
+5. The Go standard library  (text/template and the packages it leans on,
+   ported to C# so that Ollama's Go chat templates render exactly)
+================================================================================
+
+Project:        The Go programming language standard library
+Source URL:     https://github.com/golang/go
+Version:        tag go1.25.0
+Authors:        The Go Authors
+Copyright:      Copyright 2009 The Go Authors.
+License:        BSD-3-Clause (upstream file: LICENSE, reproduced verbatim
+                below from https://raw.githubusercontent.com/golang/go/
+                go1.25.0/LICENSE)
+
+WHAT WAS INCORPORATED
+    Nothing from Go is vendored, compiled, linked or downloaded; Go is not
+    installed on the build machine and no Go toolchain is involved in building
+    this repository. What was taken is LOGIC. An Ollama chat template IS a Go
+    text/template, so rendering one correctly means having Go's template
+    engine. It was ported by hand into C#: the lexer, the parser, the node
+    types, the executor and the built-in function table, plus the three
+    library corners a template reaches into - fmt's printf verbs, strconv's
+    quoting and encoding/json's encoder.
+
+    Scope of incorporation, upstream Go file -> our C# file(s), all under
+    src/CodeBrix.Ollama.ModelRunner/Templates/OllamaGo/ unless said otherwise.
+    Every file listed carries the family's provenance marker on its namespace
+    line,
+      namespace CodeBrix.Ollama.ModelRunner; //was previously: golang/go <upstream path> (BSD-3-Clause);
+    which is how this list was compiled:
+
+      src/text/template/parse/node.go   (21 files)
+          -> GoNode.cs, GoNodeType.cs, GoActionNode.cs, GoBoolNode.cs,
+             GoBranchNode.cs, GoChainNode.cs, GoCommandNode.cs,
+             GoCommentNode.cs, GoDotNode.cs, GoFieldNode.cs,
+             GoIdentifierNode.cs, GoJumpNode.cs, GoListNode.cs,
+             GoMarkerNode.cs, GoNilNode.cs, GoNumberNode.cs, GoPipeNode.cs,
+             GoStringNode.cs, GoTemplateCallNode.cs, GoTextNode.cs,
+             GoVariableNode.cs
+      src/text/template/parse/lex.go
+          -> GoTemplateLexer.cs, GoTemplateItem.cs, GoTemplateItemType.cs,
+             GoTemplateKeywords.cs
+      src/text/template/parse/parse.go
+          -> GoTemplateTree.cs
+      src/text/template/exec.go
+          -> GoTemplateExecutor.cs, GoKind.cs, GoMap.cs, GoSlice.cs,
+             GoStruct.cs, GoStructField.cs, GoUndefined.cs
+      src/text/template/exec.go and funcs.go
+          -> GoValue.cs
+      src/text/template/funcs.go
+          -> GoFuncs.cs, GoFunction.cs, GoTemplateFunc.cs
+      src/text/template/template.go
+          -> GoTemplate.cs
+      src/fmt/print.go and format.go
+          -> GoFormat.cs
+      src/strconv/quote.go
+          -> GoQuote.cs
+      src/encoding/json/encode.go
+          -> GoJson.cs
+
+    Forty-one files in all. Three more, under Parsing/, name text/template/
+    parse as REFERENCE ONLY: GoTemplateOutline.cs, GoTemplateOutlineKind.cs
+    and GoTemplateOutlineNode.cs are a small structural walker written for
+    this library, which borrows the idea of a node tree and the names of a few
+    node kinds and nothing else.
+
+MODIFICATIONS MADE DURING THE PORT
+    - Go's reflection is not available, so the dynamic value model was made
+      explicit: GoValue, GoKind, GoStruct, GoSlice, GoMap and GoUndefined
+      stand in for reflect.Value and its kinds.
+    - Not ported, because a chat template does not use them: the `call`
+      built-in, complex constants, hexadecimal floating-point literals, the
+      template option machinery (option.go) and everything in html/template.
+    - break and continue are carried as return signals rather than by Go's
+      panic/recover.
+    - printf covers the verbs v s q t d b o x X c U f F e E g G and %, with
+      the flags - + # 0 and space, a width and a precision; the `*` width
+      taken from an argument is not supported.
+    - A missing map key yields Go's invalid value, which prints as
+      "<no value>", exactly as Go does; a tool-properties map that is missing
+      yields a zero ToolProperty.
+    - An unpaired UTF-16 surrogate in the template text, and nesting past a
+      depth cap, raise ChatTemplateException rather than producing a
+      replacement character or exhausting memory.
+
+----- Go licence (BSD-3-Clause), reproduced verbatim from LICENSE -----
+
+Copyright 2009 The Go Authors.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+   * Redistributions of source code must retain the above copyright
+notice, this list of conditions and the following disclaimer.
+   * Redistributions in binary form must reproduce the above
+copyright notice, this list of conditions and the following disclaimer
+in the documentation and/or other materials provided with the
+distribution.
+   * Neither the name of Google LLC nor the names of its
+contributors may be used to endorse or promote products derived from
+this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+================================================================================
+6. agnivade/levenshtein  (the edit distance Ollama matches templates with)
+================================================================================
+
+Project:        agnivade/levenshtein - Go implementation of the Levenshtein
+                distance
+Source URL:     https://github.com/agnivade/levenshtein
+Version:        v1.1.1 - the version ollama/ollama pins in its go.mod at the
+                commit in entry 3
+Authors:        Agniva De Sarker
+Copyright:      Copyright (c) 2015 Agniva De Sarker
+License:        MIT (upstream file: License.txt, reproduced verbatim below)
+
+WHAT WAS INCORPORATED
+    One function's logic. Ollama's template.Named picks the built-in template
+    closest to an arbitrary chat template by Levenshtein distance, using this
+    module; to get the same answer this library needs the same distance, so
+    levenshtein.go's ComputeDistance was ported by hand:
+
+      levenshtein.go
+          -> src/CodeBrix.Ollama.ModelRunner/Templates/OllamaGo/
+             GoLevenshtein.cs
+
+    It is called from OllamaTemplate.NamedBuiltIn and nowhere else. No Go
+    module is fetched, vendored, compiled or linked.
+
+MODIFICATIONS
+    Rewritten in C# to this repository's conventions, over UTF-16 chars rather
+    than Go runes. For the ASCII-dominated template texts it is used on the
+    result is the same number; for text outside the Basic Multilingual Plane
+    it can differ, and the only caller compares the number against a fixed
+    threshold, never reports it.
+
+----- agnivade/levenshtein licence (MIT), reproduced verbatim from
+      License.txt -----
+
+The MIT License (MIT)
+
+Copyright (c) 2015 Agniva De Sarker
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+================================================================================
+7. The Jinja project (Pallets)  (READ, NOT COPIED - the language this
+   library implements)
+================================================================================
+
+Project:        Jinja - a templating language for Python
+Source URL:     https://github.com/pallets/jinja
+Authors:        Pallets and contributors
+Copyright:      Copyright 2007 Pallets
+License:        BSD-3-Clause (upstream file: LICENSE.txt, reproduced verbatim
+                below from https://raw.githubusercontent.com/pallets/jinja/
+                main/LICENSE.txt)
+
+WHAT WAS INCORPORATED
+    NOTHING. CodeBrix.Ollama.ModelRunner contains an original implementation
+    of the Jinja template language, written against the Jinja project's
+    published documentation and against the fixture templates in entries 8 to
+    14; no Jinja source code was copied. The fifty files under
+    src/CodeBrix.Ollama.ModelRunner/Templates/Jinja/ carry no provenance
+    marker, and that absence is deliberate and correct.
+
+    Jinja is here because a model's chat_template is written in it, so a
+    library that renders chat templates must speak the language. The
+    behavioural semantics it had to match - what a filter does, how
+    whitespace control works, what a string or list or dict method returns -
+    come from Jinja's own documentation and from CPython's documented str,
+    list and dict behaviour. The Jinja project is named and its licence is
+    reproduced so that the debt is on the record, not because the licence
+    compels it.
+
+DELIBERATE DIFFERENCES FROM JINJA
+    - `x in undefined` evaluates to false rather than raising; the IBM Granite
+      chat template in entry 13 needs that.
+    - Tuples are modelled as lists, so items() prints [['k', v]] where Jinja
+      prints [('k', v)].
+    - A `set` inside a loop is scoped to the iteration, which is Jinja's own
+      documented behaviour; namespace() carries a value out of a loop, as in
+      Jinja.
+    - Runaway macro recursion, runaway nesting and an out-of-range \U escape
+      raise ChatTemplateException instead of exhausting memory or producing an
+      invalid character.
+
+----- Jinja licence (BSD-3-Clause), reproduced verbatim from LICENSE.txt -----
+
+Copyright 2007 Pallets
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+1.  Redistributions of source code must retain the above copyright
+    notice, this list of conditions and the following disclaimer.
+
+2.  Redistributions in binary form must reproduce the above copyright
+    notice, this list of conditions and the following disclaimer in the
+    documentation and/or other materials provided with the distribution.
+
+3.  Neither the name of the copyright holder nor the names of its
+    contributors may be used to endorse or promote products derived from
+    this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED
+TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+================================================================================
+ENTRIES 8 TO 14: THE CHAT-TEMPLATE FIXTURES
+================================================================================
+
+The ModelRunner test suite renders ten real models' chat templates and checks
+the output, because a Jinja engine that passes only its own tests is worth
+little. Those ten templates are committed under
+tests/CodeBrix.Ollama.ModelRunner.Tests/Fixtures/Jinja/, one .jinja file each,
+unmodified. Nothing else of any model is here: no weights, no vocabulary, no
+tokenizer, no configuration.
+
+They are TEST FIXTURES ONLY. They are not embedded in either library, not
+copied to any package, and not shipped to anyone who installs
+CodeBrix.Ollama.ModelRunner; they exist so the test suite can prove the
+renderer right.
+
+Each one was fetched anonymously on 2026-09-16 from the model's public
+repository on huggingface.co, taking chat_template.jinja where the repository
+has one and the "chat_template" member of tokenizer_config.json where it does
+not. Only repositories whose declared licence is Apache-2.0 or MIT were used;
+everything under any other licence was deliberately skipped. The per-file
+record - repository URL, file, commit sha and licence, and what each template
+exercises - is in that folder's own SOURCES.txt, which is the authority; the
+entries below group the same facts by copyright holder.
+
+The Apache License 2.0 is reproduced in full in entry 2 of this file; entries
+8, 9, 10, 13 and 14 refer to that text rather than repeating it five times.
+The Qwen repositories carry the stock Apache-2.0 text with no copyright line
+of their own and no NOTICE file; the other Apache-2.0 repositories declare
+apache-2.0 in the repository's licence metadata and carry no LICENSE file.
+
+
+================================================================================
+8. Alibaba Cloud / the Qwen team  (three Qwen chat templates, Apache-2.0)
+================================================================================
+
+Repositories:   https://huggingface.co/Qwen/Qwen3.5-35B-A3B
+                    commit 59d61f3ce65a6d9863b86d2e96597125219dc754
+                    file chat_template.jinja
+                    -> Fixtures/Jinja/qwen3.5-35b-a3b.jinja
+                https://huggingface.co/Qwen/Qwen3-0.6B
+                    commit c1899de289a04d12100db370d81485cdf75e47ca
+                    file tokenizer_config.json ("chat_template")
+                    -> Fixtures/Jinja/qwen3-0.6b.jinja
+                https://huggingface.co/Qwen/Qwen2.5-7B-Instruct
+                    commit a09a35458c702b33eeacc393d103063234e8bc28
+                    file tokenizer_config.json ("chat_template")
+                    -> Fixtures/Jinja/qwen2.5-7b.jinja
+License:        Apache-2.0 (see entry 2 for the full text)
+
+ALSO DERIVED FROM THESE
+    tests/CodeBrix.Ollama.ModelRunner.Tests/Fixtures/Parsing/qwen3-tools.jinja
+    is a short Qwen-style template used by two parser tests. It is not a
+    model's template as published: it is an abridged one, whose tool-prompt
+    and tool-call blocks are the same literal text as the Qwen templates
+    above. It is listed here, under the same licence, because that is where
+    its text came from.
+
+MODIFICATIONS
+    None to the three .jinja files. qwen3-tools.jinja is abridged, as above.
+
+
+================================================================================
+9. Hugging Face (HuggingFaceTB)  (the SmolLM2 chat template, Apache-2.0)
+================================================================================
+
+Repository:     https://huggingface.co/HuggingFaceTB/SmolLM2-360M-Instruct
+                    commit a10cc1512eabd3dde888204e902eca88bddb4951
+                    file tokenizer_config.json ("chat_template")
+                    -> Fixtures/Jinja/smollm2-360m.jinja
+License:        Apache-2.0 (see entry 2 for the full text)
+
+MODIFICATIONS
+    None.
+
+
+================================================================================
+10. Mistral AI  (the Mistral 7B Instruct chat template, Apache-2.0)
+================================================================================
+
+Repository:     https://huggingface.co/mistralai/Mistral-7B-Instruct-v0.3
+                    commit c170c708c41dac9275d15a8fff4eca08d52bab71
+                    file tokenizer_config.json ("chat_template")
+                    -> Fixtures/Jinja/mistral-7b-v0.3.jinja
+License:        Apache-2.0 (see entry 2 for the full text)
+
+MODIFICATIONS
+    None.
+
+
+================================================================================
+11. Microsoft Corporation  (two Phi chat templates, MIT)
+================================================================================
+
+Repositories:   https://huggingface.co/microsoft/Phi-4-mini-instruct
+                    commit cfbefacb99257ffa30c83adab238a50856ac3083
+                    file tokenizer_config.json ("chat_template")
+                    -> Fixtures/Jinja/phi-4-mini.jinja
+                https://huggingface.co/microsoft/Phi-3.5-mini-instruct
+                    commit 2fe192450127e6a83f7441aef6e3ca586c338b77
+                    file tokenizer_config.json ("chat_template")
+                    -> Fixtures/Jinja/phi-3.5-mini.jinja
+Copyright:      Copyright (c) Microsoft Corporation.
+License:        MIT (both repositories carry the identical LICENSE file
+                reproduced verbatim below)
+
+MODIFICATIONS
+    None.
+
+----- Phi licence (MIT), reproduced verbatim from LICENSE -----
+
+Microsoft.
+Copyright (c) Microsoft Corporation.
+
+MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED *AS IS*, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+================================================================================
+12. DeepSeek  (the DeepSeek-R1-Distill chat template, MIT)
+================================================================================
+
+Repository:     https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B
+                    commit ad9f0ae0864d7fbcd1cd905e3c6c5b069cc8b562
+                    file tokenizer_config.json ("chat_template")
+                    -> Fixtures/Jinja/deepseek-r1-distill-qwen-1.5b.jinja
+Copyright:      Copyright (c) 2023 DeepSeek
+License:        MIT (upstream file: LICENSE, reproduced verbatim below)
+
+MODIFICATIONS
+    None.
+
+----- DeepSeek licence (MIT), reproduced verbatim from LICENSE -----
+
+MIT License
+
+Copyright (c) 2023 DeepSeek
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+================================================================================
+13. IBM  (the Granite 3.3 chat template, Apache-2.0)
+================================================================================
+
+Repository:     https://huggingface.co/ibm-granite/granite-3.3-2b-instruct
+                    commit 707f574c62054322f6b5b04b6d075f0a8f05e0f0
+                    file tokenizer_config.json ("chat_template")
+                    -> Fixtures/Jinja/granite-3.3-2b.jinja
+License:        Apache-2.0 (see entry 2 for the full text)
+
+MODIFICATIONS
+    None.
+
+
+================================================================================
+14. The Allen Institute for AI  (the OLMo 2 chat template, Apache-2.0)
+================================================================================
+
+Repository:     https://huggingface.co/allenai/OLMo-2-1124-7B-Instruct
+                    commit 470b1fba1ae01581f270116362ee4aa1b97f4c84
+                    file tokenizer_config.json ("chat_template")
+                    -> Fixtures/Jinja/olmo-2-7b.jinja
+License:        Apache-2.0 (see entry 2 for the full text)
+
+MODIFICATIONS
+    None.
+
+
+================================================================================
 INVENTORY: HOW THIS FILE WAS COMPILED, AND HOW TO RE-CHECK IT
 ================================================================================
-(This section covers entries 1 and 2, the vendored llama.cpp snapshot. Entry 3
-is checked differently: `grep -rl "was previously: ollama/ollama" src/` lists
-every ported C# file, and that list must match the scope table in entry 3.)
+(This section covers entries 1 and 2, the vendored llama.cpp snapshot. The
+other entries are checked differently, and each is a one-line grep from the
+repository root:
+
+  entry 1  grep -rl "was previously: ggml-org/llama.cpp" src/
+  entry 3  grep -rl "was previously: ollama/ollama" src/
+  entry 4  grep -rl "was previously: LLamaSharp" src/
+  entry 5  grep -rl "was previously: golang/go" src/
+  entry 6  grep -rl "was previously: agnivade/levenshtein" src/
+
+Each list must match that entry's scope table exactly, in both directions:
+a marked file missing from a table, or a table naming a file that no longer
+carries the marker, means this file is wrong. Entry 7 is the opposite check -
+`grep -rl "was previously" src/CodeBrix.Ollama.ModelRunner/Templates/Jinja/`
+must find NOTHING, because that engine is original. Entries 8 to 14 are
+checked against tests/CodeBrix.Ollama.ModelRunner.Tests/Fixtures/Jinja/
+SOURCES.txt, which records the repository, file, commit and licence of every
+fixture beside it.)
 
 On 2026-09-15 the vendored snapshot was inventoried mechanically, not by
 reading around in it. The snapshot holds 1,468 files (1,467 from upstream plus

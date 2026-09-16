@@ -1,0 +1,11 @@
+{
+  "messages": [
+    { "role": "user", "content": "First question." },
+    { "role": "assistant", "reasoning_content": "Thinking about one.", "content": "Answer one." },
+    { "role": "user", "content": "Second question." },
+    { "role": "assistant", "reasoning_content": "Thinking about two.", "content": "Answer two." }
+  ],
+  "add_generation_prompt": false,
+  "bos_token": "",
+  "eos_token": "<|im_end|>"
+}

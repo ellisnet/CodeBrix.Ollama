@@ -1,0 +1,28 @@
+{
+  "messages": [
+    { "role": "system", "content": "You are Granite, developed by IBM." },
+    { "role": "user", "content": "What is the capital?" }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "get_capital",
+        "description": "Get the capital of a country.",
+        "parameters": {
+          "type": "object",
+          "properties": { "country": { "type": "string" } },
+          "required": ["country"]
+        }
+      }
+    }
+  ],
+  "documents": [
+    { "doc_id": 1, "text": "Paris is the capital of France." },
+    { "doc_id": 2, "text": "Berlin is the capital of Germany." }
+  ],
+  "controls": ["citations"],
+  "add_generation_prompt": true,
+  "bos_token": "<|end_of_text|>",
+  "eos_token": "<|end_of_text|>"
+}

@@ -1,0 +1,11 @@
+alternative-0 ::= ref-definitions-foo
+alternative-1 ::= ref-definitions-bar
+decimal-part ::= [0-9]{1,16}
+integral-part ::= [0] | [1-9] [0-9]{0,15}
+number ::= ("-"? integral-part) ("." decimal-part)? ([eE] [-+]? integral-part)?
+ref-definitions-bar ::= "{" space  (ref-definitions-bar-b-kv )? space "}"
+ref-definitions-bar-b-kv ::= "\"b\"" space ":" space number
+ref-definitions-foo ::= "{" space  (ref-definitions-foo-a-kv )? space "}"
+ref-definitions-foo-a-kv ::= "\"a\"" space ":" space number
+root ::= alternative-0 | alternative-1
+space ::= | " " | "\n"{1,2} [ \t]{0,20}

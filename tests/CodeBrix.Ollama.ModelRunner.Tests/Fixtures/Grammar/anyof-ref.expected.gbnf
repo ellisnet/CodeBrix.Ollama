@@ -1,0 +1,14 @@
+a ::= string | number
+a-kv ::= "\"a\"" space ":" space a
+a-rest ::= ( "," space b-kv )?
+b ::= b-0 | boolean
+b-0 ::= string
+b-kv ::= "\"b\"" space ":" space b
+boolean ::= ("true" | "false")
+char ::= [^"\\\x7F\x00-\x1F] | [\\] (["\\bfnrt] | "u" [0-9a-fA-F]{4})
+decimal-part ::= [0-9]{1,16}
+integral-part ::= [0] | [1-9] [0-9]{0,15}
+number ::= ("-"? integral-part) ("." decimal-part)? ([eE] [-+]? integral-part)?
+root ::= "{" space  (a-kv a-rest | b-kv )? space "}"
+space ::= | " " | "\n"{1,2} [ \t]{0,20}
+string ::= "\"" char* "\""

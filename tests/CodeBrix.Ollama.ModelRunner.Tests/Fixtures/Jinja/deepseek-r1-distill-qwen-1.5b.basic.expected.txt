@@ -1,0 +1,1 @@
+<｜begin▁of▁sentence｜>You are DeepSeek.<｜User｜>Hi.<｜Assistant｜>Hello!<｜end▁of▁sentence｜><｜User｜>Bye.<｜Assistant｜><think>

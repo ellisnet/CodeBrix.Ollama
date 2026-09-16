@@ -1,0 +1,34 @@
+{
+  "messages": [
+    { "role": "user", "content": "What is the weather in Paris?" },
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "type": "function",
+          "id": "abc123def",
+          "function": { "name": "get_weather", "arguments": { "city": "Paris" } }
+        }
+      ]
+    },
+    { "role": "tool", "content": "{\"temperature\": 18}", "tool_call_id": "abc123def" },
+    { "role": "assistant", "content": "It is 18 degrees." }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "get_weather",
+        "description": "Get the current weather for a city.",
+        "parameters": {
+          "type": "object",
+          "properties": { "city": { "type": "string" } },
+          "required": ["city"]
+        }
+      }
+    }
+  ],
+  "bos_token": "<s>",
+  "eos_token": "</s>"
+}

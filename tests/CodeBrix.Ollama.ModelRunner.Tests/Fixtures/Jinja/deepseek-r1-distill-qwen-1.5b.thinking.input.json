@@ -1,0 +1,10 @@
+{
+  "messages": [
+    { "role": "user", "content": "What is 2+2?" },
+    { "role": "assistant", "content": "<think>\nAdd them.\n</think>\n\nIt is 4." },
+    { "role": "user", "content": "And 3+3?" }
+  ],
+  "add_generation_prompt": true,
+  "bos_token": "<｜begin▁of▁sentence｜>",
+  "eos_token": "<｜end▁of▁sentence｜>"
+}

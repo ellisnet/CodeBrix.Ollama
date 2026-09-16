@@ -41,4 +41,14 @@
     </Content>
   </ItemGroup>
 
+  <!--
+    Test fixtures (real chat templates, expected renderings, parser inputs) live under Fixtures/<Area>/ and are
+    copied beside the test assembly.
+  -->
+  <ItemGroup>
+    <Content Include="Fixtures\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
 </Project>

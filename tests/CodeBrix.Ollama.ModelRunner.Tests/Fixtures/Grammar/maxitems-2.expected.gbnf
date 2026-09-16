@@ -1,0 +1,3 @@
+boolean ::= ("true" | "false")
+root ::= "[" space (boolean ("," space boolean)?)? space "]"
+space ::= | " " | "\n"{1,2} [ \t]{0,20}

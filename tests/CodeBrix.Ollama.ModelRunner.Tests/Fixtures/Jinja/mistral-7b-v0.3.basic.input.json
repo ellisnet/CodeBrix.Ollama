@@ -1,0 +1,8 @@
+{
+  "messages": [
+    { "role": "system", "content": "You are helpful." },
+    { "role": "user", "content": "Hi." }
+  ],
+  "bos_token": "<s>",
+  "eos_token": "</s>"
+}

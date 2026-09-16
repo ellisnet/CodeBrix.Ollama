@@ -1,0 +1,4 @@
+decimal-part ::= [0-9]{1,16}
+integral-part ::= [0] | [1-9] [0-9]{0,15}
+root ::= ("-"? integral-part) ("." decimal-part)? ([eE] [-+]? integral-part)?
+space ::= | " " | "\n"{1,2} [ \t]{0,20}

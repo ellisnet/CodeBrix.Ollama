@@ -1,0 +1,9 @@
+<|system|>
+You are helpful.<|end|>
+<|user|>
+Hi.<|end|>
+<|assistant|>
+Hello!<|end|>
+<|user|>
+Bye.<|end|>
+<|assistant|>
