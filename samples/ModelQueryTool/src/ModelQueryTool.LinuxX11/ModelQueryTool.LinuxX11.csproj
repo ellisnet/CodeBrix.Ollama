@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <!-- Tell MSBuild to treat .xaml files as CodeBrix.Platform XAML pages -->
+  <ItemGroup>
+    <Page Include="**\*.xaml" Exclude="bin\**\*.xaml;obj\**\*.xaml" />
+    <None Remove="**\*.xaml" />
+  </ItemGroup>
+
+  <!-- Shared UI files (App.xaml + Views) -->
+  <Import Project="..\ModelQueryTool.UI\ModelQueryTool.UI.projitems" Label="Shared" />
+  <ItemGroup>
+    <ProjectReference Include="..\ModelQueryTool.Core\ModelQueryTool.Core.csproj" />
+  </ItemGroup>
+
+  <!-- EXACTLY ONE platform head package; all other packages come from ModelQueryTool.Core -->
+  <ItemGroup>
+    <PackageReference Include="CodeBrix.Platform.Runtime.Skia.X11.ApacheLicenseForever" Version="1.0.254.167" />
+  </ItemGroup>
+</Project>

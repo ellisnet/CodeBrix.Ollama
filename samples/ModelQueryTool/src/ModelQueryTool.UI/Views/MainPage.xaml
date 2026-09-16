@@ -1,0 +1,21 @@
+<Page
+    x:Class="ModelQueryTool.Views.MainPage"
+    xmlns="clr-namespace:Microsoft.UI.Xaml.Controls;assembly=CodeBrix.Platform.UI"
+    xmlns:d="clr-namespace:Microsoft.UI.Xaml.Data;assembly=CodeBrix.Platform.UI"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:vm="clr-namespace:ModelQueryTool.ViewModels;assembly=ModelQueryTool.Core"
+    xmlns:local="using:ModelQueryTool.Views"
+    FontFamily="{StaticResource RobotoFont}"
+    Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+
+    <Page.DataContext>
+        <vm:MainViewModel />
+    </Page.DataContext>
+
+    <Grid>
+        <TextBlock Text="{d:Binding Greeting}"
+                   FontSize="24"
+                   HorizontalAlignment="Center"
+                   VerticalAlignment="Center" />
+    </Grid>
+</Page>
