@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    A console host that exists so the tests can observe what a WHOLE PROCESS does, which is the one thing
+    an in-process test cannot see: whether the CodeBrix.Python assembly is loaded at all after a full
+    import / list / resolve / materialize cycle, and whether a process that started an interpreter still
+    ends by itself. Both are process-wide and order-dependent, so they cannot share a process with the
+    rest of a test run. Not a test project - no test framework, no runner - and never packed.
+  -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>CodeBrix.Ollama.ModelManager.Probe</AssemblyName>
+    <RootNamespace>CodeBrix.Ollama.ModelManager.Probe</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\CodeBrix.Ollama.ModelManager\CodeBrix.Ollama.ModelManager.csproj" />
+  </ItemGroup>
+
+</Project>

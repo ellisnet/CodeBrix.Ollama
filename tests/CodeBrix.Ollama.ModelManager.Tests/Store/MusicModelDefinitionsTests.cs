@@ -16,7 +16,7 @@ public sealed class MusicModelDefinitionsTests
     private const string SkyTntLogPath =
         "logs/version_0/events.out.tfevents.1727438892.autodl-container-14ba49b3e1-5960be9d.1410.0";
 
-    private const long OneAndAFifthGibibytes = 1288490188L;
+    private const long TwoGibibytes = 2147483648L;
 
     /// <summary>
     /// The name of every definition. The theories take a name rather than a definition because a name
@@ -37,8 +37,8 @@ public sealed class MusicModelDefinitionsTests
     }
 
     [Fact]
-    public void All_holds_twelve_definitions() =>
-        MusicModelDefinitions.All.Should().HaveCount(12);
+    public void All_holds_thirteen_definitions() =>
+        MusicModelDefinitions.All.Should().HaveCount(13);
 
     [Fact]
     public void All_names_every_definition_once() =>
@@ -53,8 +53,13 @@ public sealed class MusicModelDefinitionsTests
         MusicModelDefinitions.LargeMusicTestsGate.Should().Be("CODEBRIX_OLLAMA_RUN_LARGE_MUSIC_TESTS");
     }
 
+    /// <remarks>
+    /// Three of the four are pulled by <see cref="MusicModelLiveTests"/> and cost about 1.05 GiB
+    /// together; the fourth, the ONNX pair, is pulled by the export tests in the Python test project,
+    /// which need the live gate and the Python gate at once.
+    /// </remarks>
     [Fact]
-    public void The_live_gate_opens_three_definitions_that_download_under_one_and_a_fifth_gibibytes()
+    public void The_live_gate_opens_four_definitions_that_download_under_two_gibibytes()
     {
         //Arrange
         IReadOnlyList<MusicModel> gated = MusicModelDefinitions.All
@@ -65,8 +70,8 @@ public sealed class MusicModelDefinitionsTests
         long total = gated.Sum(model => model.ExpectedBytes);
 
         //Assert
-        gated.Should().HaveCount(3);
-        total.Should().BeLessThan(OneAndAFifthGibibytes);
+        gated.Should().HaveCount(4);
+        total.Should().BeLessThan(TwoGibibytes);
     }
 
     [Theory]

@@ -92,6 +92,13 @@ public sealed class ModelStoreOptions
     public string UserAgent { get; set; }
 
     /// <summary>
+    /// Where the Python features of this library find CPython. Nothing here is read, and nothing of the
+    /// embedding layer is loaded, until a Python feature is used; obtaining, listing, resolving and
+    /// materializing models never look at it. Never <see langword="null"/>.
+    /// </summary>
+    public PythonOptions Python { get; set; } = new PythonOptions();
+
+    /// <summary>
     /// Resolves the directory a default-configured store uses: the OLLAMA_MODELS environment variable
     /// when it is set and not empty, otherwise <c>~/.ollama/models</c> under the user's home directory.
     /// </summary>

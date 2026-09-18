@@ -45,6 +45,13 @@ internal static class BundleFormatDetector
     public const string Imported = "imported";
 
     /// <summary>
+    /// The answer for a bundle this library produced itself whose files decide nothing. A derived
+    /// bundle whose files ARE weight-bearing says what they are - an export to ONNX reports
+    /// <see cref="Onnx"/> - so this is what is left when a tool wrote something else.
+    /// </summary>
+    public const string Derived = "derived";
+
+    /// <summary>
     /// Decides the model format of a set of publisher paths.
     /// </summary>
     /// <param name="paths">

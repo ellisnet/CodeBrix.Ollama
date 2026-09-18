@@ -52,6 +52,36 @@ public static class MusicModelDefinitions
             new ExpectedBundleFile("model.safetensors", 467701064L, "82ac8b2217f8f66f79737e444fe60c686d3cbfee54b0c8ef717f701213bbbb83"),
         });
 
+    /// <summary>
+    /// The ONNX pair the same repository ships, with the two configuration files and the model card and
+    /// nothing else: the subject of the pass-through export, where a publisher's own graphs become a
+    /// derived bundle without anything being converted. Its own tag keeps it apart from the gate-A pull.
+    /// </summary>
+    private static readonly FileFilter OnnxOnly = new FileFilter(
+        new[] { "onnx/**", "config.json", "generation_config.json", "README.md" },
+        Array.Empty<string>());
+
+    /// <summary>The ONNX pair of tv2o-medium with its configuration files; no safetensors, no .bin, no logs.</summary>
+    public static readonly MusicModel SkyTntMidiModelTv2oMediumOnnxOnly = new MusicModel(
+        BundleDefinition.ForHuggingFace(
+            "hf.co/skytnt/midi-model-tv2o-medium:onnx-only",
+            "skytnt/midi-model-tv2o-medium",
+            "0f8f265d4330f4e46527ac2313200254c5757f5f",
+            OnnxOnly,
+            new LicenseRecord("apache-2.0", "https://huggingface.co/skytnt/midi-model-tv2o-medium", "Licence tag on the Hugging Face model card."),
+            "The ONNX pair of tv2o-medium with its configuration files; no safetensors, no .bin, no logs."),
+        LiveTestsGate,
+        "0f8f265d4330f4e46527ac2313200254c5757f5f",
+        "apache-2.0",
+        new[]
+        {
+            new ExpectedBundleFile("README.md", 1279L, "2510e691d4da9fd0647c6c6a226f721a84df5676f56f227abc0ff3b6da471abc"),
+            new ExpectedBundleFile("config.json", 2016L, "1f393e1e8c630ddc81a976348ee246549d613f0a117dc0622eed49918dfcb511"),
+            new ExpectedBundleFile("generation_config.json", 69L, "e367d0feb45ba71e180b151aaf976961ce48b0a70ba8ed47bf7deba0dae273a3"),
+            new ExpectedBundleFile("onnx/model_base.onnx", 821713887L, "1af68e16a0509936caeb70d322ab30619d784c7af72df019f3a59276c67c1bc4"),
+            new ExpectedBundleFile("onnx/model_token.onnx", 116661381L, "cce9376abe8f5c8d51d1b110580cc8501d38679af55ebd5a332e757e62ab9911"),
+        });
+
     /// <summary>The smallest MuPT v1 checkpoint: LlamaForCausalLM weights with the custom ABC-notation tokenizer files.</summary>
     public static readonly MusicModel MuPtV1_190M = new MusicModel(
         BundleDefinition.ForHuggingFace(
@@ -324,7 +354,8 @@ public static class MusicModelDefinitions
     /// <summary>Every definition, in gate order.</summary>
     public static IReadOnlyList<MusicModel> All { get; } = new[]
     {
-        SkyTntMidiModelTv2oMedium, MuPtV1_190M, MagentaMusicTransformerUnconditional,
+        SkyTntMidiModelTv2oMedium, SkyTntMidiModelTv2oMediumOnnxOnly, MuPtV1_190M,
+        MagentaMusicTransformerUnconditional,
         MuseCocoText2Attribute, MuseCocoAttribute2Music,
         SkyTntMidiModel, SkyTntMidiModelTv2oMediumFull, SkyTntMidiModelTv2omJpopLora, SkyTntMidiModelTv2omTouhouLora,
         MuPtV1_1_97B, MagentaMusicTransformerMelodyConditioned, MagentaMusicTransformerPrimers,

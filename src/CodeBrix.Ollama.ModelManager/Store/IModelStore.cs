@@ -143,6 +143,137 @@ public interface IModelStore
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Exports a bundle to ONNX and stores the result as a DERIVED BUNDLE - a bundle this library
+    /// produced itself, which lists, shows, resolves, materializes and deletes like any other, and whose
+    /// config records what made it and from what.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="ExportRoute.Auto"/>, the default, reads the source and decides: a bundle that already
+    /// ships <c>.onnx</c> files is PASSED THROUGH - its graphs and the files that go with them are
+    /// registered under the new name without converting or copying anything, and NO PYTHON IS NEEDED OR
+    /// STARTED; a checkpoint whose <c>config.json</c> names an architecture the ONNX Runtime GenAI model
+    /// builder writes goes to <see cref="ExportRoute.GenAiBuilder"/>; anything else goes to
+    /// <see cref="ExportRoute.Optimum"/>.
+    /// </para>
+    /// <para>
+    /// Both converting routes need Python: the modules are checked before anything is laid out, the
+    /// source bundle is written into a temporary folder under the system temporary directory, the
+    /// publisher's own tool is run over it, and what it wrote is collected into the store and the
+    /// temporary folder removed. On a machine whose temporary directory is in memory, point TMPDIR at a
+    /// real file system first - a checkpoint is gigabytes.
+    /// </para>
+    /// </remarks>
+    /// <param name="name">The model name. It must name a bundle.</param>
+    /// <param name="options">
+    /// Which route, at what precision, under what name, and whether an existing bundle of that name may
+    /// be replaced. <see langword="null"/> means the automatic route at fp32 under the source name with
+    /// its tag replaced by <c>onnx</c>, replacing nothing.
+    /// </param>
+    /// <param name="progress">
+    /// Where the statuses go - "materializing source", "exporting", "collecting", "writing manifest",
+    /// "success" - or <see langword="null"/> to report nothing.
+    /// </param>
+    /// <param name="cancellationToken">
+    /// A token to cancel the operation. It cancels the wait for the interpreter and the work around the
+    /// export, never a conversion already running inside the tool.
+    /// </param>
+    /// <returns>The name of the derived bundle, the files it holds and what produced them.</returns>
+    /// <exception cref="ModelNotFoundException">The store has no such model.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The model is not a bundle, or <see cref="ExportRoute.PublisherOnnx"/> was named for a bundle that
+    /// ships no <c>.onnx</c> file.
+    /// </exception>
+    /// <exception cref="PythonNotAvailableException">
+    /// A converting route was chosen and there is no usable CPython.
+    /// </exception>
+    /// <exception cref="PythonModuleNotInstalledException">
+    /// A converting route was chosen and one of the modules it needs is not installed.
+    /// </exception>
+    /// <exception cref="PythonScriptException">The tool refused the model, or failed while writing it.</exception>
+    /// <exception cref="ModelManagerException">
+    /// The output name is taken and <see cref="ExportOptions.Overwrite"/> is not set, or the tool wrote
+    /// nothing.
+    /// </exception>
+    Task<ExportResult> ExportToOnnxAsync(
+        string name,
+        ExportOptions options = null,
+        IProgress<PullProgress> progress = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Makes the exported graphs a bundle holds SMALLER by quantizing their weights, and stores the
+    /// result as a derived bundle - one this library produced itself, which lists, shows, resolves,
+    /// materializes and deletes like any other, and whose config records what made it and from what.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A REDUCED MODEL IS AN APPROXIMATION OF THE ONE IT CAME FROM. Quantizing replaces floating-point
+    /// weights with smaller integers and a scale, which is arithmetic that cannot be undone: the file is
+    /// a fraction of the size and the numbers the model produces are close to, not the same as, what it
+    /// produced before. Measure what it does before shipping it.
+    /// </para>
+    /// <para>
+    /// Every <c>.onnx</c> file in the bundle is reduced unless <see cref="ReduceOptions.Files"/> names
+    /// some, and everything else the bundle holds - configurations, tokenizers, a model card, a graph
+    /// nobody asked to reduce - is carried through unchanged, so the derived bundle is a whole model and
+    /// not a folder of graphs. The source is laid out in a temporary folder under the system temporary
+    /// directory, the graphs are reduced into another, and what was written is collected into the store
+    /// and the temporary folders removed. On a machine whose temporary directory is in memory, point
+    /// TMPDIR at a real file system first.
+    /// </para>
+    /// <para>
+    /// TWO ENGINES DO THE WORK. The managed engine is this library's own code and needs nothing installed:
+    /// it covers <see cref="ReduceMode.WeightOnlyInt4"/> and <see cref="ReduceMode.WeightOnlyInt8"/>
+    /// always, and <see cref="ReduceMode.DynamicInt8"/> on a graph that has already been prepared. The
+    /// Python engine runs ONNX Runtime's own tools and needs <c>onnx</c> and <c>onnxruntime</c> installed
+    /// in the CPython this process finds; it covers <see cref="ReduceMode.PreprocessOnly"/>, which is
+    /// what prepares a graph, and dynamic quantization of a graph nobody has prepared. Modules are
+    /// checked before any file is laid out, and only for the engine that is going to run.
+    /// </para>
+    /// </remarks>
+    /// <param name="name">The model name. It must name a bundle that holds at least one <c>.onnx</c> file.</param>
+    /// <param name="options">
+    /// Which mode, with which block-wise settings, through which engine, over which files, under what
+    /// name, and whether an existing bundle of that name may be replaced. <see langword="null"/> means
+    /// dynamic INT8 over every graph, prepared first, under the source name with the mode's tag added.
+    /// </param>
+    /// <param name="progress">
+    /// Where the statuses go - "materializing source", "reducing &lt;file&gt;", "collecting", "writing
+    /// manifest", "success" - or <see langword="null"/> to report nothing.
+    /// </param>
+    /// <param name="cancellationToken">
+    /// A token to cancel the operation. It cancels the wait for the interpreter and the work between
+    /// graphs, never a quantization already running inside the tool.
+    /// </param>
+    /// <returns>
+    /// The name of the derived bundle, the files it holds, the engine and mode that ran, and how much
+    /// smaller the graphs became.
+    /// </returns>
+    /// <exception cref="ModelNotFoundException">The store has no such model.</exception>
+    /// <exception cref="InvalidOperationException">The model is not a bundle.</exception>
+    /// <exception cref="NotSupportedException">
+    /// <see cref="ReduceEngine.Managed"/> was named for <see cref="ReduceMode.PreprocessOnly"/>, which it
+    /// does not cover, or for a graph holding something it does not quantize.
+    /// </exception>
+    /// <exception cref="PythonNotAvailableException">There is no usable CPython.</exception>
+    /// <exception cref="PythonModuleNotInstalledException">
+    /// One of the modules the engine needs is not installed.
+    /// </exception>
+    /// <exception cref="PythonScriptException">The tool refused a graph, or failed while writing one.</exception>
+    /// <exception cref="ModelManagerException">
+    /// The bundle holds no <c>.onnx</c> file, <see cref="ReduceOptions.Files"/> names one it does not
+    /// hold, a graph is too large to prepare, the output name is taken and
+    /// <see cref="ReduceOptions.Overwrite"/> is not set, or dynamic quantization was asked for on an
+    /// unprepared graph with no CPython to prepare it in.
+    /// </exception>
+    Task<ReduceResult> ReduceOnnxAsync(
+        string name,
+        ReduceOptions options = null,
+        IProgress<PullProgress> progress = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Lists every model in the store, most recently modified first.
     /// </summary>
     /// <param name="cancellationToken">A token to cancel the operation.</param>

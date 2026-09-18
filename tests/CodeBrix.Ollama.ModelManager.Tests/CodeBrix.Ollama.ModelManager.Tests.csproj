@@ -25,7 +25,26 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\CodeBrix.Ollama.ModelManager\CodeBrix.Ollama.ModelManager.csproj" />
+    <!--
+      The probe is a console application, not a library: it is referenced only so that it is built before
+      these tests run, and its output is copied below rather than linked. The inert-dependency fence runs
+      it as a child process, because whether an assembly was loaded is a fact about a whole process.
+    -->
+    <ProjectReference Include="..\CodeBrix.Ollama.ModelManager.Probe\CodeBrix.Ollama.ModelManager.Probe.csproj" ReferenceOutputAssembly="false" Private="false" />
   </ItemGroup>
+
+  <!--
+    Copy the built probe into a sub-folder of this project's output, so the tests find it from
+    AppContext.BaseDirectory on every operating system instead of guessing at a sibling project's bin path
+    at run time. The item group is inside the target, so the wildcard is expanded after the
+    ProjectReference above has produced the files.
+  -->
+  <Target Name="CopyProbeToOutput" AfterTargets="Build">
+    <ItemGroup>
+      <_ProbeOutput Include="$(MSBuildThisFileDirectory)..\CodeBrix.Ollama.ModelManager.Probe\bin\$(Configuration)\$(TargetFramework)\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_ProbeOutput)" DestinationFiles="@(_ProbeOutput->'$(OutDir)probe\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" Condition="'@(_ProbeOutput)' != ''" />
+  </Target>
 
   <!--
     The GGUF conformance model, linked rather than copied: it is the same file the native builds regenerate
@@ -37,6 +56,15 @@
       <Link>test-vectors\%(Filename)%(Extension)</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+  </ItemGroup>
+
+  <!--
+    The ONNX oracle fixtures: the inputs the managed codec and quantizer read and the outputs ONNX Runtime's own
+    Python tools produced from them, compared byte for byte. generate_fixtures.py records how they were made and is
+    not run by the tests.
+  -->
+  <ItemGroup>
+    <None Update="Onnx\Fixtures\*.onnx;Onnx\Fixtures\*.data;Onnx\Fixtures\*.py" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

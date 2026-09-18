@@ -6,14 +6,14 @@ CodeBrix.Ollama.ModelManager.MitLicenseForever NuGet package
 
 OVERVIEW
 ========
-CodeBrix.Ollama.ModelManager is a cross-platform, zero-dependency .NET 10
+CodeBrix.Ollama.ModelManager is a cross-platform .NET 10
 library that maintains a local store of large language models in exactly
 Ollama's on-disk layout, pulls models into it from any registry that speaks
 Ollama's manifest-and-blob protocol, obtains the files of a model that no such
 registry serves, and resolves a model name to the files on disk that an
 in-process runner loads.
 
-It does four things, and they build on one another:
+It does five things, and they build on one another:
 
   1. NAMES -- Ollama's model-name syntax, parsed and validated by Ollama's own
      rules, completed from configurable defaults, and turned into the
@@ -35,7 +35,16 @@ It does four things, and they build on one another:
      deleting and pruning work on them unchanged. What a publisher states
      about the licence is reported, and MaterializeAsync writes the files
      back out as the file tree the publisher wrote.
-  4. THE FILE FORMATS -- a Modelfile parser that accepts what Ollama's parser
+  4. DERIVED BUNDLES -- a model this library made from one already in the
+     store, stored beside it and recording what made it and from what:
+     ExportToOnnxAsync turns a checkpoint into ONNX (or registers the graphs a
+     publisher already ships), and ReduceOnnxAsync makes those graphs several
+     times smaller by quantizing their weights. Converting a checkpoint needs
+     a CPython on the machine, because that work only exists in Python;
+     REDUCING AN EXISTING GRAPH TO FOUR- OR EIGHT-BIT WEIGHTS NEEDS NOTHING
+     INSTALLED, because this library does it itself. A reduced model is an
+     approximation of the one it came from.
+  5. THE FILE FORMATS -- a Modelfile parser that accepts what Ollama's parser
      accepts, with the same messages and line numbers, and a GGUF header
      reader that returns every key-value and tensor descriptor without ever
      touching tensor data.
@@ -44,6 +53,14 @@ Everything that touches the disk or the network is async and takes a
 CancellationToken last, with a default; name parsing, Modelfile parsing and the
 tensor-type arithmetic are ordinary synchronous methods, and there are no
 synchronous wrappers over the async work.
+
+The package has exactly ONE NuGet dependency, CodeBrix.Python, and it is INERT:
+nothing of it is loaded until a Python feature actually runs. Obtaining a model,
+listing, showing, resolving, materializing, importing a folder, parsing a
+Modelfile, reading GGUF metadata, passing a publisher's own ONNX graphs through
+and reducing an ONNX graph to four- or eight-bit weights are not Python
+features and never load it. Converting a checkpoint to ONNX is. See PYTHON
+below, which says feature by feature which is which.
 
 Target framework: .NET 10 or later; no netstandard and no .NET Framework
 target. Source: https://github.com/ellisnet/CodeBrix.Ollama
@@ -70,10 +87,20 @@ PackageId: CodeBrix.Ollama.ModelManager.MitLicenseForever
 IMPORTANT: the ".MitLicenseForever" suffix belongs to the PACKAGE ID only. It
 never appears in a namespace, a using directive, an assembly name or a type
 name; the assembly is CodeBrix.Ollama.ModelManager and the single namespace is
-CodeBrix.Ollama.ModelManager. NuGet dependencies: NONE -- the dependency group
-is empty, JSON goes through the in-box System.Text.Json, hashing through
-System.Security.Cryptography, and no native library ships in the package.
-License: MIT, with license acceptance required.
+CodeBrix.Ollama.ModelManager. NuGet dependencies: EXACTLY ONE,
+CodeBrix.Python, and it is inert -- nothing of it is loaded until a Python
+feature is used, and obtaining, listing, resolving and materializing models are
+not Python features, nor is making an existing ONNX graph smaller.
+Everything else is in-box: JSON goes through
+System.Text.Json and hashing through System.Security.Cryptography, and no
+native library ships in the package. License: MIT, with license acceptance
+required.
+
+A CPython SHARED LIBRARY is needed ONLY for the Python features -- and only at
+the moment one runs. Nothing here ships, installs or downloads CPython or any
+pip module; the store, the registry, Modelfiles, GGUF metadata and the managed
+reduction engine need none of it. See PYTHON below for which features are which,
+how a CPython is found, and what is reported when there is none.
 
 NULLABLE REFERENCE TYPES ARE OFF in the library, so the compiler will not warn
 you about anything it hands back. Where a member can be null its XML
@@ -92,10 +119,15 @@ KEY NAMESPACES / USINGS
 That is the whole story. The library declares ONE namespace, and every
 public type lives in it - the bundle vocabulary (BundleDefinition,
 BundleFile, BundleListing, FileFilter, LicenseRecord, PullOptions, PullSource,
-ImportOptions, MaterializeOptions, MaterializeLink, ResolvedFile) and the two
+ImportOptions, MaterializeOptions, MaterializeLink, ResolvedFile), the two
 sources (HuggingFaceHubSource, HttpFileListSource, with the helper
-GoogleCloudStorageListing) among them. The repository folders (Common/, Names/,
-Gguf/, Modelfile/, Store/, Registry/, Bundles/, Sources/) are FILE
+GoogleCloudStorageListing), the conversion and reduction vocabulary
+(ExportOptions, ExportRoute, ExportResult, ReduceOptions, ReduceMode,
+ReduceEngine, ReduceResult, ModelConfigKeys) and the Python corner
+(PythonSupport, PythonOptions, PythonSupportReport, PythonModuleReport,
+PythonLibrarySource, PythonVirtualEnvironmentSource, PythonEngineOwner) among
+them. The repository folders (Common/, Names/, Gguf/, Modelfile/, Store/,
+Registry/, Bundles/, Sources/, Python/, Export/, Reduce/, Onnx/) are FILE
 ORGANIZATION ONLY, not namespaces:
 `using CodeBrix.Ollama.ModelManager.Store;` is a CS0246 error.
 Everything under Registry/ is internal -- the registry client, the blob
@@ -150,7 +182,15 @@ and what it hands back:
                                     own file tree
     IMPORTING A FOLDER              a folder already on disk as a bundle
     RESOLVING A BUNDLE              ResolvedModel.Format and .Files
+    DERIVED BUNDLES                 a bundle this library made, and what it
+                                    records about how it was made
     SHOWING AND LISTING             what a bundle reports about itself
+    PYTHON                          which features need a CPython, which never
+                                    do, and how one is found
+    EXPORTING TO ONNX               ExportToOnnxAsync, its four routes and what
+                                    each one needs
+    REDUCING AN ONNX MODEL          ReduceOnnxAsync, its four modes and its two
+                                    engines - one of which needs nothing
     THE ERROR MODEL                 every exception and when it is thrown
     THREAD SAFETY AND CONCURRENCY   what is and is not coordinated
 
@@ -276,6 +316,10 @@ on the store a local Ollama install would use.
     HttpMessageHandler HttpMessageHandler = null
     string   UserAgent            = null       null -> the library's own name
                                                and assembly version
+    PythonOptions Python          = new()      where a CPython is, for the
+                                               features that need one. NEVER
+                                               null, and nothing reads it until
+                                               such a feature runs - see PYTHON
     static string ResolveDefaultStoreDirectory()
 
 HttpMessageHandler AND TESTING. Nothing in this library reaches the network by
@@ -332,6 +376,15 @@ substitute your own in tests.
                      CreateOptions options = null, CancellationToken)
     Task<IReadOnlyList<string>> PruneAsync(TimeSpan gracePeriod,
                                            CancellationToken)
+    Task<ExportResult> ExportToOnnxAsync(string name,
+                                         ExportOptions options = null,
+                                         IProgress<PullProgress> progress
+                                             = null,
+                                         CancellationToken)
+    Task<ReduceResult> ReduceOnnxAsync(string name,
+                                       ReduceOptions options = null,
+                                       IProgress<PullProgress> progress = null,
+                                       CancellationToken)
 
 Every CancellationToken parameter is last and defaulted. Every name argument
 must parse to a fully qualified name: a null or blank name is an
@@ -927,7 +980,8 @@ and whose Name is the publisher's relative path. The config layer carries:
     model_format    what the file names say the weights are: "onnx",
                     "pytorch", "tensorflow-checkpoint", or "mixed" when more
                     than one kind is present. When no file decides, the source
-                    does: "huggingface", "files" or "imported"
+                    does: "huggingface", "files", "imported", or "derived" for
+                    a bundle this library produced itself
     model_family    the model part of the name
     source          "hf.co", "url" or "local"
     repository      <namespace>/<repository>, the folder that was imported, or
@@ -1246,7 +1300,8 @@ members that carry the difference:
                                          Ollama-protocol registry, and one of
                                          "huggingface", "pytorch", "onnx",
                                          "tensorflow-checkpoint", "mixed",
-                                         "files" or "imported" for a bundle.
+                                         "files", "imported" or "derived" for a
+                                         bundle.
                                          null when the config states none and
                                          no GGUF weights layer says otherwise
     IReadOnlyList<ResolvedFile> Files    the files of a bundle, in manifest
@@ -1265,6 +1320,68 @@ Read the files through Files, or materialize them. As for any resolve, paths
 are computed from digests and no file is opened, so check File.Exists if you
 cannot rule out a blob deleted by hand.
 
+
+DERIVED BUNDLES
+---------------
+A DERIVED BUNDLE is a bundle THIS LIBRARY produced, rather than one it
+obtained: the result of exporting a model to ONNX, or of reducing one. It is an
+ordinary bundle in every respect - it lists, it shows, it resolves, it
+materializes, it copies and it deletes - with four things in its config that an
+obtained bundle has none of, which ShowAsync reports as properties of their
+own:
+
+    string DerivedFrom      the model it was made from, spelled exactly as
+                            that model is stored, or null when the bundle was
+                            not derived
+    string Tool             what did the work: an export records
+                            "onnxruntime-genai", "optimum", or "publisher" when
+                            the files are the publisher's own and this library
+                            only registered them; a reduction records
+                            "onnxruntime" when ONNX Runtime's own tools ran and
+                            "CodeBrix.Ollama.ModelManager" when the managed
+                            engine did
+    string ToolVersion      what that tool reports about itself - this
+                            library's own assembly version for the managed
+                            engine - or null for a pass-through, which ran
+                            nothing
+    IReadOnlyDictionary<string, string> Settings
+                            the options that work was given - an export records
+                            the route, the precision and whether remote code
+                            was allowed; a reduction records the mode, the
+                            engine asked for and the engine used, whether the
+                            graph was prepared, the block-wise settings and the
+                            files that were reduced - or null when the bundle
+                            was not derived
+
+The same values, and the timestamps beside them, are in the config layer under
+the names on ModelConfigKeys, which is a public class of string constants for
+exactly this purpose:
+
+    ModelConfigKeys.Source / Repository / Revision / LicenseId / LicenseSource
+    / PulledAt                      written by every bundle pull and import
+    ModelConfigKeys.DerivedFrom / Tool / ToolVersion / Settings / DerivedAt
+                                    written only by a derived bundle
+
+    ModelInfo info = await store.ShowAsync("hf.co/skytnt/midi-model:onnx");
+    if (info.DerivedFrom != null)
+    {
+        Console.WriteLine($"{info.Tool} {info.ToolVersion} made this from " +
+                          info.DerivedFrom);
+        Console.WriteLine(info.Config
+            .AdditionalProperties[ModelConfigKeys.DerivedAt].GetString());
+    }
+
+THE LICENCE IS CARRIED OVER from the source, unchanged, because deriving a file
+from a model does not change whose terms it is under. As everywhere else in
+this library a licence is REPORTED, never enforced.
+
+A DERIVED BUNDLE IS A SNAPSHOT. Nothing links it to its source afterwards: the
+source can be deleted, replaced or re-pulled at another revision and the
+derived bundle stays exactly as it was, still naming what it came from. Export
+or reduce again when the source changes.
+
+DELETING EITHER ONE LEAVES THE OTHER ALONE. Blobs are shared by digest, and a
+blob is removed only once no manifest in the store names it.
 
 SHOWING AND LISTING
 ===================
@@ -1308,6 +1425,719 @@ directory lists the model, reports its size and removes it, and refuses to run
 it - which is the right answer, since there is nothing there for it to load.
 
 
+PYTHON
+======
+ONE CORNER of this library needs CPython, and it is not the corner most
+consumers use. Obtaining a model, listing, showing, resolving, materializing,
+importing a folder, parsing a Modelfile, reading GGUF metadata, passing a
+publisher's own ONNX graphs through and reducing a graph with the managed
+engine are pure managed code that will never touch Python, on a machine that
+has none. CONVERTING A CHECKPOINT to ONNX, and preparing a graph for a
+quantizer, are the work that only exists in Python.
+
+The package declares exactly ONE NuGet dependency, CodeBrix.Python, and it is
+INERT. Every type of it this library names lives in a single internal class, so
+the runtime has no reason to load that assembly until a Python feature actually
+runs. A consumer whose work never reaches one never loads it -- there are tests
+in this repository that run a whole import, list, resolve and materialize cycle,
+a whole pass-through export, and a whole reduction through the managed engine,
+each in a process of its own, and assert that no assembly of that name is loaded
+afterwards.
+
+FEATURE BY FEATURE, AND EXACTLY. The left column is what you call; the right is
+what the machine must have for that call, and "nothing" means no interpreter is
+looked for, started or loaded. The reduction rows assume the default
+ReduceEngine.Auto except where they say otherwise; ReduceEngine.Managed needs
+nothing whatever the mode, and refuses what it does not cover rather than
+reaching for Python:
+
+  PullAsync, ImportBundleAsync,       NOTHING
+  ListAsync, ExistsAsync, ShowAsync,
+  ResolveAsync, MaterializeAsync,
+  CopyAsync, DeleteAsync, PruneAsync,
+  CreateAsync, Modelfile.Parse,
+  GgufMetadata.ReadAsync
+
+  ExportToOnnxAsync                   NOTHING - a pass-through converts
+    Route = PublisherOnnx               nothing and starts nothing
+  ExportToOnnxAsync                   CPython + onnxruntime_genai, torch,
+    Route = GenAiBuilder                transformers, onnx
+  ExportToOnnxAsync                   CPython + optimum, onnx, torch,
+    Route = Optimum                     transformers
+  ExportToOnnxAsync                   whatever the route it picks needs, and
+    Route = Auto                        it picks PublisherOnnx - which needs
+                                        nothing - for a source that already
+                                        ships .onnx files
+
+  ReduceOnnxAsync                     NOTHING - the managed engine, and Auto
+    WeightOnlyInt4, WeightOnlyInt8      never even asks whether Python is there
+  ReduceOnnxAsync                     NOTHING - the managed engine, because a
+    DynamicInt8, on a graph that        prepared graph carries the shapes that
+    PreprocessOnly has prepared         mode reads
+  ReduceOnnxAsync                     CPython + onnx, onnxruntime - the
+    DynamicInt8, on a graph nobody      preparation pass runs there. With
+    has prepared                        neither the call fails and says to
+                                        prepare the model or pick a
+                                        weight-only mode
+  ReduceOnnxAsync                     CPython + onnx, onnxruntime - preparing
+    PreprocessOnly                      a graph is that runtime's own work and
+                                        is not ported
+  ReduceOnnxAsync                     CPython + onnx, onnxruntime, whatever
+    Engine = Python                     the mode: you asked for that engine
+
+  PythonSupport.Check                 nothing to CALL it - it NEVER throws and
+                                      reports a machine with no CPython as
+                                      exactly that. With modules named it
+                                      starts an interpreter to import them
+  PythonSupport.Require               a CPython with the modules named, or it
+                                      throws the exception that says which
+                                      part is missing
+  PythonSupport.Shutdown              nothing; on a machine that never started
+                                      an interpreter it does nothing
+
+What Python IS for in this library is the tooling that only exists in Python:
+converting a model to another format, and preparing a graph for a quantizer.
+Each feature names the modules it imports and checks for them BEFORE it does
+anything, so a machine that cannot run one is told so in a second; finding that
+out in advance is what PythonSupport.Check is for. MAKING AN EXISTING GRAPH
+SMALLER IS NOT ONE OF THEM: the weight-only modes, and dynamic quantization of
+a prepared graph, are this library's own managed code.
+
+WHAT THIS PACKAGE DOES NOT DO ABOUT PYTHON: it does not ship, install or
+download CPython, and it does not install pip modules. A CPython SHARED LIBRARY
+must already be on the machine -- libpython3.XX.so, python3XX.dll or
+libpython3.XX.dylib -- and the modules a feature needs must already be
+installed in the interpreter that will run it.
+
+SAYING WHERE CPYTHON IS
+-----------------------
+    public sealed class PythonOptions
+        string VirtualEnvironment      the venv folder - the one holding
+                                       pyvenv.cfg, bin/python and
+                                       site-packages. null by default.
+        string LibraryPath             the full path of the CPython shared
+                                       library. null by default.
+        const string VirtualEnvironmentVariable   "CODEBRIX_OLLAMA_PYTHON_VENV"
+        const string LibraryPathVariable          "PYTHONNET_PYDLL"
+
+ModelStoreOptions carries one, and it is never null:
+
+    var options = new ModelStoreOptions();
+    options.Python.VirtualEnvironment = "/home/me/venvs/models";
+    using var store = new ModelStore(options);
+
+Every PythonSupport call takes a PythonOptions of its own, and null means "all
+defaults", so a consumer who sets the environment variables need pass nothing:
+
+    PythonSupportReport report = PythonSupport.Check(null, "onnx");
+
+THE RESOLUTION ORDER, and CODE ALWAYS BEATS AN ENVIRONMENT VARIABLE:
+
+    the virtual environment      1. PythonOptions.VirtualEnvironment
+                                 2. CODEBRIX_OLLAMA_PYTHON_VENV
+                                 3. PYTHONNET_VENV or VIRTUAL_ENV -- the
+                                    environment the PROCESS was launched in
+                                 4. none: the interpreter runs out of its own
+                                    installation
+    the shared library           1. PythonOptions.LibraryPath
+                                 2. PYTHONNET_PYDLL
+                                 3. the base interpreter the virtual
+                                    environment's pyvenv.cfg records - its
+                                    home and version keys name the
+                                    installation the library is looked for in
+                                 4. none: nothing named one
+
+A report says which of the four answered, in LibrarySource (Code,
+EnvironmentVariable, VirtualEnvironment, NotFound) and VirtualEnvironmentSource
+(Code, EnvironmentVariable, Inherited, None). There is a fifth LibrarySource,
+Host: a host application that started the interpreter before this library
+looked and named its own shared library in code. Nothing here resolved that
+path, so the report carries the path the RUNNING interpreter states about
+itself and says Host; Owner says Host as well.
+
+A VIRTUAL ENVIRONMENT IS THE WAY TO DO THIS. Naming one is what puts its
+site-packages on the interpreter's path, and it is where a distribution that
+refuses a system-wide pip install expects a module to go. No path manipulation
+is needed or wanted: name the folder and the interpreter reads its pyvenv.cfg
+for itself.
+
+ASKING WHETHER IT WILL WORK
+---------------------------
+    PythonSupportReport PythonSupport.Check(PythonOptions options,
+                                            params string[] requiredModules)
+
+NEVER THROWS. A machine with no CPython at all produces a report that says so.
+
+    PythonSupportReport
+        string LibraryPath                 the library that was resolved, or
+                                           null; once an interpreter is
+                                           running, the one it really loaded
+        PythonLibrarySource LibrarySource  where that path came from
+        bool LibraryLoads                  the operating system loaded it (and
+                                           freed it again; no interpreter was
+                                           started to find out)
+        Version Version                    the CPython version, or null
+        bool IsSupportedVersion            inside the range the embedding layer
+                                           supports
+        string VirtualEnvironment          the environment in effect, or null
+        PythonVirtualEnvironmentSource VirtualEnvironmentSource
+        bool IsInitialized                 an interpreter is running
+        PythonEngineOwner Owner            None | ModelManager | Host
+        IReadOnlyList<PythonModuleReport> Modules
+                                           Name, IsInstalled, Error - one entry
+                                           per module asked about, in order
+        IReadOnlyList<string> Problems     human sentences, empty when nothing
+                                           is wrong
+        bool IsUsable                      the library loads, the version is
+                                           supported, and every module asked
+                                           about imports
+
+TWO KINDS OF CHECK, and the difference matters:
+
+  - Check WITH NO MODULES touches no interpreter and starts none. It is a file
+    check, a load-and-free of the shared library and a version comparison, and
+    it is cheap enough to call on a settings page.
+  - Check WITH MODULES STARTS AN INTERPRETER, under the ownership rules below,
+    because importing a module is the only way to know whether it is there.
+    That is what a real feature would do anyway. It is not cheap the first
+    time, and the interpreter it starts lasts for the life of the process.
+
+    PythonSupportReport report =
+        PythonSupport.Check(options, "onnx", "onnxruntime");
+    if (!report.IsUsable)
+    {
+        foreach (string problem in report.Problems)
+        {
+            Console.WriteLine(problem);
+        }
+    }
+
+DEMANDING THAT IT WORK
+----------------------
+    void PythonSupport.Require(PythonOptions options, string feature,
+                               params string[] requiredModules)
+
+This is what a feature calls before it runs Python, and what a consumer can
+call to fail early with a message worth showing. `feature` is a PHRASE, and it
+ends every message: "exporting to ONNX", "reducing an ONNX model".
+
+    PythonNotAvailableException        no CPython shared library was found, the
+                                       one that was found will not load, or its
+                                       version is outside the supported range.
+                                       string Feature.
+    PythonModuleNotInstalledException  the interpreter is fine; a module is not
+                                       installed in it. string Feature, string
+                                       ModuleName, and the message carries the
+                                       COMMAND that installs it in THAT
+                                       interpreter - the virtual environment's
+                                       own pip when there is one, a plain
+                                       pip install when there is not.
+                                       PythonModuleNotInstalledException
+                                       .InstallCommand(module, venv) builds the
+                                       same line for your own messages.
+    PythonScriptException              a script this package ships failed for
+                                       some other reason. string Feature,
+                                       string ScriptName, string PythonMessage.
+
+All three derive from ModelManagerException.
+
+    try
+    {
+        PythonSupport.Require(
+            options, "exporting to ONNX", "onnx", "onnxruntime");
+    }
+    catch (PythonModuleNotInstalledException missing)
+    {
+        //"The Python module 'onnxruntime' is not installed in the CPython at
+        // /usr/lib/x86_64-linux-gnu/libpython3.13.so (virtual environment
+        // /home/me/venvs/models). Install it there with:
+        // /home/me/venvs/models/bin/pip install onnxruntime It is needed for
+        // exporting to ONNX."
+        Console.WriteLine(missing.Message);
+    }
+
+WHO OWNS THE INTERPRETER
+------------------------
+There is ONE CPython interpreter per process, it cannot be restarted once it
+has been shut down, and it belongs to whoever started it. This library decides
+ownership the first time it looks, and the contract runs BOTH WAYS.
+
+  THIS LIBRARY OWNS IT -- nothing had started an interpreter when the first
+  Python call was made. It applies PythonOptions, starts the interpreter, hands
+  the interpreter lock back so that a run may happen on any thread, and asks
+  the embedding layer to BOUND its own process-exit shutdown, which is the
+  safety net for an application that never disposes anything: a process that
+  simply ends still ends. PythonSupport.Owner reports ModelManager, and
+  PythonSupport.Shutdown() is what ends it.
+
+  THE HOST OWNS IT -- your application had already started an interpreter. This
+  library configures NOTHING (no virtual environment, no library path, no
+  process-exit mode), adopts what is running, and NEVER SHUTS IT DOWN.
+  PythonSupport.Owner reports Host, and PythonSupport.Shutdown() is a no-op.
+  Your own lifetime rules are the only ones in force.
+
+SHUTTING DOWN
+-------------
+    void PythonSupport.Shutdown()
+
+Call it ONCE, when your application is finished with every Python feature. It
+is idempotent, it does nothing at all when the host owns the interpreter, and
+after it every Python entry point throws InvalidOperationException("Python has
+been shut down for this process; it cannot be initialized again."). There is no
+way to start a fresh interpreter afterwards, and nothing in this library tries.
+
+DISPOSING A ModelStore DOES NOT SHUT PYTHON DOWN. Several stores may share a
+process, and a store that ended the process's interpreter would break the rest
+of the application.
+
+    using (var store = new ModelStore(options))
+    {
+        // ... work, some of which may use Python ...
+    }
+    PythonSupport.Shutdown();   // once, at the end of the application
+
+WHEN A VIRTUAL ENVIRONMENT STOPS WORKING. A virtual environment records the
+base interpreter it was made from. When that interpreter moves to a new MINOR
+version - 3.13 to 3.14 - the environment has to be recreated and any explicit
+LibraryPath repointed; point releases inside a minor version flow through
+without help. The symptom is a report whose Problems name a library that is not
+there, or an interpreter that will not start.
+
+THREADS. After the interpreter starts, the interpreter lock is handed back, so
+a Python run may happen on any thread. One run happens at a time, the lock is
+held only for the duration of a run, and nothing is awaited while it is held.
+
+
+EXPORTING TO ONNX
+=================
+    Task<ExportResult> ExportToOnnxAsync(string name,
+        ExportOptions options = null,
+        IProgress<PullProgress> progress = null,
+        CancellationToken cancellationToken = default)
+
+turns a bundle into ONNX and stores the result as a DERIVED BUNDLE. The model
+must be a bundle: a GGUF model pulled from an Ollama-protocol registry has no
+publisher file tree and is refused with InvalidOperationException.
+
+THE FOUR ROUTES, ExportOptions.Route:
+
+    Auto            the default. Reads the source and decides, by the rules
+                    below
+    PublisherOnnx   a PASS-THROUGH of the .onnx files the publisher already
+                    shipped. NO PYTHON IS NEEDED OR STARTED, nothing is
+                    converted, and not one byte is copied: the store is content
+                    addressed, so the derived bundle names the blobs the source
+                    already holds. It takes every file of the source except the
+                    checkpoints the graph replaces - .safetensors, .bin, .pt,
+                    .pth, .h5, .msgpack and TensorFlow .ckpt files - so the
+                    configuration, the tokenizer files and any external-data
+                    file beside the graph all come with it
+    GenAiBuilder    the ONNX Runtime GenAI model builder, which writes a
+                    model.onnx, its external data and the genai_config.json
+                    beside them for the transformer architectures it supports
+    Optimum         Hugging Face Optimum's ONNX exporter, which traces the
+                    model's own Python code. It reaches architectures the
+                    builder does not write and is the fallback for them
+
+WHAT Auto DECIDES:
+
+    the source ships at least one .onnx file          -> PublisherOnnx
+    its config.json names an architecture the GenAI
+      builder writes (LlamaForCausalLM, Qwen2/3,
+      Phi, Gemma, Mistral, Granite, Whisper and the
+      rest of that list)                              -> GenAiBuilder
+    anything else                                     -> Optimum
+
+Naming a route outright overrides all of it, which is how a model the automatic
+rules do not know is still exported: name GenAiBuilder and let the builder
+answer for itself.
+
+WHICH ROUTES NEED PYTHON, AND WHICH MODULES
+
+    PublisherOnnx   none. Nothing of the embedding layer is loaded
+    GenAiBuilder    onnxruntime_genai, torch, transformers, onnx
+    Optimum         optimum, onnx, torch, transformers
+
+A Python route calls PythonSupport.Require BEFORE it lays anything out, so a
+machine without the modules says so in a second rather than after copying a
+checkpoint into a temporary folder. The feature is named "exporting to ONNX" in
+every message.
+
+ExportOptions
+
+    ExportRoute Route        Auto (the default) | PublisherOnnx | GenAiBuilder
+                             | Optimum
+    string Precision         "fp32" (the default), "fp16", "bf16", "int8",
+                             "int4" - whatever the tool accepts; it is passed
+                             verbatim and the TOOL decides. Never null: an
+                             unset value reads as
+                             ExportOptions.DefaultPrecision.
+                             THE Optimum ROUTE IGNORES IT and exports at the
+                             checkpoint's own precision; what was asked for is
+                             still recorded in the provenance, so a bundle
+                             never claims a precision that was not applied
+    string OutputName        null takes the source name with its tag replaced
+                             by "onnx"
+    bool Overwrite           false; a name already in the store fails the
+                             export and names this option
+    bool AllowRemoteCode     false. See below
+
+ExportResult   string Name (ready to show, resolve or materialize);
+    IReadOnlyList<string> Files; string Tool; string ToolVersion;
+    ExportRoute RouteUsed (the route that RAN, so never Auto).
+
+ALLOWING THE PUBLISHER'S OWN PYTHON. Some checkpoints define their tokenizer or
+their configuration class in .py files inside the repository, and the tooling
+refuses to load them unless it is told to import those files.
+ExportOptions.AllowRemoteCode = true is that instruction: it reaches the GenAI
+builder as hf_remote and Optimum as trust_remote_code, and it RUNS THE
+PUBLISHER'S OWN PYTHON in your process, with everything that implies. It is
+false by default. Set it only for a model whose files you have looked at, and
+never for one you did not choose yourself. The PublisherOnnx route ignores it,
+because it runs no Python at all.
+
+THE PROGRESS STREAM, IN ORDER
+
+    "materializing source"   the source bundle is written into a temporary
+                             folder for the tool to read (Python routes only)
+    "exporting"              the tool is running. It prints its own progress to
+                             standard output, which is the tool's habit, not
+                             this library's
+    "collecting"             what the tool wrote is being taken into the store
+    "writing manifest"       the derived bundle's manifest
+    "success"                the last report
+
+THE TEMPORARY FOLDER is under the system temporary directory, is removed
+however the export ends, and holds a whole copy of the source plus whatever the
+tool writes. ON A MACHINE WHOSE TEMPORARY DIRECTORY IS IN MEMORY - which is
+most Linux desktops - POINT TMPDIR AT A REAL FILE SYSTEM before exporting a
+checkpoint of any size. The pass-through route writes no temporary folder at
+all.
+
+    // A publisher who ships ONNX: instant, and no Python anywhere.
+    ExportResult passed = await store.ExportToOnnxAsync(
+        "hf.co/skytnt/midi-model-tv2o-medium:onnx-only");
+    Console.WriteLine(passed.Name);        // ...:onnx
+    Console.WriteLine(passed.RouteUsed);   // PublisherOnnx
+
+    // A checkpoint, converted by the builder at int4, under a name of its own.
+    var options = new ExportOptions
+    {
+        Route = ExportRoute.GenAiBuilder,
+        Precision = "int4",
+        OutputName = "hf.co/m-a-p/MuPT-v1-8192-190M:onnx-int4",
+        AllowRemoteCode = true,     // this checkpoint ships its own tokenizer
+        Overwrite = true
+    };
+    var progress = new Progress<PullProgress>(p => Console.WriteLine(p.Status));
+    ExportResult built = await store.ExportToOnnxAsync(
+        "hf.co/m-a-p/MuPT-v1-8192-190M", options, progress);
+    foreach (string file in built.Files)
+    {
+        Console.WriteLine(file);
+    }
+
+    // Then use it like any other bundle.
+    await store.MaterializeAsync(built.Name, "/somewhere/on/disk");
+
+WHAT CAN GO WRONG: ModelNotFoundException (no such model),
+InvalidOperationException (not a bundle, or PublisherOnnx named for a bundle
+with no .onnx in it), PythonNotAvailableException and
+PythonModuleNotInstalledException (a Python route on a machine that cannot run
+it), PythonScriptException (the tool refused the model or failed - its own
+message is in PythonMessage), and ModelManagerException (the output name is
+taken and Overwrite is not set, or the tool wrote nothing).
+
+
+REDUCING AN ONNX MODEL
+======================
+    Task<ReduceResult> ReduceOnnxAsync(string name,
+        ReduceOptions options = null,
+        IProgress<PullProgress> progress = null,
+        CancellationToken cancellationToken = default)
+
+makes the exported graphs a bundle holds SMALLER by quantizing their weights,
+and stores the result as another DERIVED BUNDLE. The source must be a bundle
+holding at least one .onnx file - one a publisher shipped, one this library
+exported, or one it reduced before - and anything else is refused with a
+message saying to export it first.
+
+A REDUCED MODEL IS AN APPROXIMATION OF THE ONE IT CAME FROM. Quantizing
+replaces floating-point weights with smaller integers and a scale, and that
+cannot be undone: the file is a fraction of the size and the numbers the model
+produces are CLOSE TO, not the same as, what it produced before. How close
+depends on the model, on the mode and on what you ask it. Measure it on your
+own inputs before you ship it.
+
+THE FOUR MODES, ReduceOptions.Mode:
+
+    DynamicInt8       the default. Every constant weight of a MatMul becomes
+                      eight-bit and the activations are quantized while the
+                      model runs. The graph gains MatMulInteger nodes and the
+                      scales that go with them. A Gemm that can become a MatMul
+                      is rewritten into one first, so it is covered as well
+    WeightOnlyInt8    the constant weight of every MatMul is split into blocks
+                      along its rows, and each block is stored as eight-bit
+                      values with a scale of its own in a MatMulNBits node.
+                      The activations stay in floating point
+    WeightOnlyInt4    the same with four bits per value: the smallest of these
+                      modes, and the one that changes the numbers most
+    PreprocessOnly    shape inference and the basic graph optimizations a
+                      quantizer wants to see, stored as a bundle of its own and
+                      quantized by nobody. It is how the same prepared graph is
+                      given to more than one quantizer, so that what they
+                      produce can be compared
+
+WHAT TO EXPECT OF THE SIZE. Only the MatMul weights shrink, so the ratio is
+decided by how much of the file they are - which is most of it for a
+transformer and less of it for a model with large embedding tables, since
+embeddings are read by Gather and no mode here touches Gather. For a graph that
+is almost all MatMul weights, expect roughly:
+
+    WeightOnlyInt4    about six to seven times smaller
+    WeightOnlyInt8    about three and a half times smaller
+    DynamicInt8       about three and a half to four times smaller
+    PreprocessOnly    the same size, give or take the shapes it writes in
+
+Work the number out for your own model before you are surprised by it: a block
+of 128 single-precision values is 512 bytes and becomes 64 bytes plus a 4-byte
+scale plus a packed zero point at four bits, or 128 bytes plus the same at
+eight; a dynamically quantized weight becomes a quarter of what it was. Then
+add everything in the file that is not a MatMul weight, which does not change.
+
+THE TWO ENGINES
+---------------
+Two implementations do this work, and which one runs decides what the machine
+has to have on it.
+
+    Managed     THIS LIBRARY'S OWN CODE, and it needs NOTHING INSTALLED: no
+                Python, no native library, no NuGet package. It reads and
+                writes the ONNX format itself and quantizes in memory. It
+                covers WeightOnlyInt4 and WeightOnlyInt8 always, and
+                DynamicInt8 on a graph that has already been prepared
+    Python      ONNX Runtime's own quantization tools, run in a CPython this
+                machine has, with onnx and onnxruntime importable there. It is
+                the reference implementation, and the only engine for
+                PreprocessOnly - preparing a graph is shape inference and that
+                runtime's own graph optimizer, neither of which is ported - and
+                for dynamic quantization of a graph nobody has prepared
+
+REDUCING AN EXISTING .onnx TO FOUR- OR EIGHT-BIT WEIGHTS NEEDS NOTHING
+INSTALLED. That is the plain form of it: obtain a model that already ships ONNX
+(or export one on a machine that does have Python), and every machine afterwards
+can make it smaller with nothing but this package.
+
+The two engines write THE SAME FILE. Not a similar file: the same bytes, node
+for node and weight for weight, for every mode the managed engine covers. There
+are tests in this repository that reduce real published models with both engines
+and compare what they wrote byte for byte.
+
+CHOOSING AN ENGINE, ReduceOptions.Engine:
+
+    Auto        the default, and the rules are these:
+                  WeightOnlyInt4, WeightOnlyInt8 -> Managed, always. Nothing is
+                    installed, nothing is looked for, no interpreter is started
+                  DynamicInt8 -> Managed when the graph records having been
+                    through shape inference, which is what PreprocessOnly
+                    leaves behind; otherwise Python, because that pass runs
+                    there. With neither - an unprepared graph and no usable
+                    CPython - the call fails with a ModelManagerException that
+                    says to prepare the model first or to choose a weight-only
+                    mode
+                  PreprocessOnly -> Python
+    Python      ONNX Runtime's own tools, whatever the mode
+    Managed     this library's own code. PreprocessOnly is refused with a
+                NotSupportedException saying why; a graph holding something the
+                port does not implement is refused the same way, naming it
+
+ReduceResult.EngineUsed always names the engine that actually ran, and is never
+Auto. The Python engine calls PythonSupport.Require BEFORE anything is laid
+out, so a machine without the modules says so in a second rather than after a
+bundle has been linked into a temporary folder; the feature is named "reducing
+an ONNX model" in every message. The managed engine requires nothing and asks
+nothing of the machine.
+
+WHAT THE MANAGED ENGINE DOES NOT COVER, and refuses rather than approximating:
+preparing a graph; the QDQ form of weight-only quantization; quantizing a
+Gather into GatherBlockQuantized; a weight of any rank but two, or in bfloat16;
+a node carrying a sub-graph; and a Gemm with a transposed B side that is not a
+constant. The Python engine covers all of it. Every OTHER operator - the
+Gathers an embedding table is read by, the Transposes, everything a transformer
+is made of besides its matrix multiplies - is carried through untouched, which
+is exactly what ONNX Runtime's own tools do with the operator types this
+library asks them for.
+
+ReduceOptions
+
+    ReduceMode Mode          DynamicInt8 (the default) | WeightOnlyInt8 |
+                             WeightOnlyInt4 | PreprocessOnly
+    int BlockSize            128, the tooling's own default. How many weight
+                             values share one scale in the weight-only modes;
+                             smaller blocks cost more scales and keep more
+                             accuracy. Runtimes implement a fixed set of block
+                             sizes - 16, 32, 64, 128, 256 - so a graph
+                             quantized with anything else is written but may
+                             not load. DynamicInt8 ignores it. A value that is
+                             not greater than zero is refused
+    bool IsSymmetric         false, the tooling's own default: each block keeps
+                             a zero point. true stores a scale alone
+    int? AccuracyLevel       null, the tooling's own default: the runtime
+                             chooses what to compute the block-wise matrix
+                             multiply at. It is written into the graph as an
+                             attribute and means nothing to the file's size
+    bool Preprocess          true. It applies to DynamicInt8, which reads the
+                             shapes that preprocessing infers and warns about a
+                             graph nobody prepared. THE WEIGHT-ONLY MODES NEVER
+                             PREPROCESS, whatever this says: they read the
+                             weights themselves, so preparing a graph for them
+                             costs time and changes the graph for no gain.
+                             PreprocessOnly is the way to prepare one on purpose
+    string OutputName        null takes the default name below
+    bool Overwrite           false; a name already in the store fails the
+                             reduction and names this option
+    ReduceEngine Engine      Auto (the default) | Python | Managed
+    IReadOnlyList<string>
+        Files                null - the default - reduces every .onnx file the
+                             bundle holds. Naming files reduces those and
+                             CARRIES THE REST OF THE BUNDLE THROUGH UNCHANGED,
+                             which is how a bundle that ships several graphs
+                             has one of them reduced and stays complete. A name
+                             the bundle does not hold is refused, and the
+                             message lists the ones it does
+
+ReduceResult   string Name (ready to show, resolve or materialize);
+    IReadOnlyList<string> Files; ReduceEngine EngineUsed (the engine that RAN,
+    so never Auto); ReduceMode Mode; long SourceBytes; long ReducedBytes;
+    string Tool; string ToolVersion. SourceBytes and ReducedBytes are about the
+    GRAPHS THAT WERE REDUCED and the files of weights beside them, not about
+    the whole bundle: what is carried through counts towards neither.
+
+THE DEFAULT NAME adds the mode's tag to the tag the source carries:
+
+    DynamicInt8       int8
+    WeightOnlyInt8    int8-weights
+    WeightOnlyInt4    int4-weights
+    PreprocessOnly    onnx-preprocessed
+
+A source with no tag of its own, or only the default one, takes the mode's tag
+alone (hf.co/x/y becomes hf.co/x/y:int4-weights); anything else is appended to
+with a hyphen (hf.co/x/y:onnx becomes hf.co/x/y:onnx-int4-weights). A tag is
+never repeated: a mode's tag that already begins with the source's own IS the
+whole tag, which is what makes the prepared form of :onnx read
+:onnx-preprocessed rather than saying onnx twice.
+
+WHAT THE BUNDLE HOLDS AFTERWARDS is the source with the graphs replaced: every
+reduced graph, any file of weights the tool wrote beside one, and every other
+file of the source - the configuration, the tokenizer files, the model card, a
+graph nobody asked to reduce. The checkpoints an export already replaces
+(.safetensors, .bin, .pt and the rest) are left behind, as they are by an
+export. Provenance is recorded the way an export records it: derivedFrom is the
+source, and settings carry the mode, the engine asked for and the engine used,
+whether the graph was prepared, the block-wise settings and the files that were
+reduced. The tool is the engine that ran - "onnxruntime" with the version that
+package reports, or "CodeBrix.Ollama.ModelManager" with this library's own
+version - so a bundle says which of the two made it and which build of it.
+
+EXTERNAL DATA. A graph too large for one protocol buffer message keeps its
+weights in a file beside it. Either engine reads such a graph and either can
+write one: this library measures the graph and its weights together and asks
+for them to be written apart when what is about to be written comes near the
+two-gibibyte message limit. Both engines ask the same question of the same
+graph, so both write the same shape of answer - one file, or a graph and a file
+of weights named after it. The file of weights that belonged to a graph being
+reduced is replaced with it, not carried through.
+
+THE ONE LIMIT WORTH KNOWING: the preparation pass writes its result as a single
+message unless it was asked for external data, and such a message cannot exceed
+two gibibytes. A graph that runs into it fails with a ModelManagerException
+naming the graph and the limit, and saying what to do instead - one of the
+weight-only modes, which need no preparation, or Preprocess = false.
+
+THE PROGRESS STREAM, IN ORDER
+
+    "materializing source"    the source bundle is written into a temporary
+                              folder for the tools to read
+    "reducing <file>"         one report per graph, naming it as the bundle
+                              spells it. The tools print their own progress to
+                              standard output, which is their habit, not this
+                              library's
+    "collecting"              the files that were not reduced are put beside
+                              the ones that were
+    "writing manifest"        the derived bundle's manifest
+    "success"                 the last report
+
+THE TEMPORARY FOLDER is under the system temporary directory, is removed
+however the reduction ends, and holds the source, the prepared copy of one
+graph at a time and everything the tools write. ON A MACHINE WHOSE TEMPORARY
+DIRECTORY IS IN MEMORY - which is most Linux desktops - POINT TMPDIR AT A REAL
+FILE SYSTEM before reducing anything of size.
+
+    // Smallest first: four-bit block-wise weights, every graph in the bundle.
+    ReduceResult small = await store.ReduceOnnxAsync(
+        "hf.co/skytnt/midi-model-tv2o-medium:onnx",
+        new ReduceOptions { Mode = ReduceMode.WeightOnlyInt4 });
+    Console.WriteLine(small.Name);            // ...:onnx-int4-weights
+    Console.WriteLine(small.SourceBytes);     // what the graphs were
+    Console.WriteLine(small.ReducedBytes);    // what they are now
+
+    // Eight-bit dynamic, one graph of several, under a name of its own.
+    var options = new ReduceOptions
+    {
+        Mode = ReduceMode.DynamicInt8,
+        Files = new[] { "onnx/model_token.onnx" },
+        OutputName = "hf.co/skytnt/midi-model-tv2o-medium:token-int8",
+        Overwrite = true
+    };
+    var progress = new Progress<PullProgress>(p => Console.WriteLine(p.Status));
+    ReduceResult one = await store.ReduceOnnxAsync(
+        "hf.co/skytnt/midi-model-tv2o-medium:onnx", options, progress);
+
+    // Prepare once, then quantize the prepared bundle without preparing it
+    // again - which is how two quantizers are given the same starting graph,
+    // and how dynamic quantization reaches the managed engine: the prepared
+    // graph records the shape inference the managed engine does not run.
+    ReduceResult prepared = await store.ReduceOnnxAsync(
+        "hf.co/skytnt/midi-model-tv2o-medium:onnx",
+        new ReduceOptions { Mode = ReduceMode.PreprocessOnly });   // Python
+    ReduceResult dynamic = await store.ReduceOnnxAsync(
+        prepared.Name,
+        new ReduceOptions { Mode = ReduceMode.DynamicInt8, Preprocess = false });
+    Console.WriteLine(dynamic.EngineUsed);    // Managed
+
+    // Four-bit weights on a machine with no Python at all. Nothing is
+    // installed, nothing is looked for, and EngineUsed says so.
+    ReduceResult managed = await store.ReduceOnnxAsync(
+        "hf.co/skytnt/midi-model-tv2o-medium:onnx",
+        new ReduceOptions
+        {
+            Mode = ReduceMode.WeightOnlyInt4,
+            OutputName = "hf.co/skytnt/midi-model-tv2o-medium:managed-int4",
+            Overwrite = true
+        });
+    Console.WriteLine(managed.EngineUsed);    // Managed
+    Console.WriteLine(managed.Tool);          // CodeBrix.Ollama.ModelManager
+
+    // Then use it like any other bundle.
+    await store.MaterializeAsync(small.Name, "/somewhere/on/disk");
+
+WHAT CAN GO WRONG: ModelNotFoundException (no such model),
+InvalidOperationException (not a bundle), NotSupportedException (the managed
+engine was asked for something it does not cover),
+PythonNotAvailableException and
+PythonModuleNotInstalledException (a machine that cannot run the tools),
+PythonScriptException (a tool refused a graph or failed - its own message is in
+PythonMessage), and ModelManagerException (the bundle holds no .onnx file,
+Files names one it does not hold, a graph is too large to prepare, the output
+name is taken and Overwrite is not set, or dynamic quantization was asked for
+on an unprepared graph with no CPython to prepare it in).
+
+WHAT RUNS A REDUCED MODEL. A four-bit graph needs a runtime that implements
+MatMulNBits, and a dynamically quantized one needs MatMulInteger; ONNX Runtime
+implements both, and something else may implement neither. Neither this library
+nor CodeBrix.Ollama.ModelRunner runs an ONNX model at all - ModelRunner runs
+GGUF - so whatever you reduce here is for a runtime you bring yourself.
+
+
 THE ERROR MODEL
 ===============
 Everything this library raises derives from ModelManagerException, itself an
@@ -1329,6 +2159,15 @@ Exception. Catch the base type to catch all of it.
                                    problem
       ModelNotFoundException       no manifest, locally or on the registry;
                                    ModelName holds the name as you wrote it
+      PythonModuleNotInstalledException
+                                   a Python feature was asked for and a module
+                                   it needs is not installed in the interpreter
+                                   that would run it; Feature, ModuleName, and
+                                   the install command in the message
+      PythonNotAvailableException  a Python feature was asked for and there is
+                                   no usable CPython shared library; Feature
+      PythonScriptException        a Python script that ships in this package
+                                   failed; Feature, ScriptName, PythonMessage
       RegistryException            an error status, a 401, a transport failure
                                    that survived every retry, an insecure
                                    http:// name, or an answer that is not a
@@ -1374,10 +2213,14 @@ WHAT THE BUNDLE PATHS ADD, exception by exception:
 
 Framework exceptions you will also see: ArgumentException (a null or blank
 model name or store directory), ArgumentNullException (a null Modelfile, a null
-GGUF path or stream), ObjectDisposedException (any operation after Dispose),
-OperationCanceledException, InvalidOperationException (ToRelativePath on a name
-that is not fully qualified), UriFormatException (BaseUrl), and IOException and
-UnauthorizedAccessException from the file system, unwrapped. A
+GGUF path or stream), ArgumentOutOfRangeException (a ReduceOptions.BlockSize
+that is not greater than zero), ObjectDisposedException (any operation after
+Dispose), OperationCanceledException, InvalidOperationException
+(ToRelativePath on a name that is not fully qualified; exporting or
+materializing a model with no publisher file tree; any Python entry point after
+PythonSupport.Shutdown), NotSupportedException (the managed reduction engine
+asked for something it does not cover), UriFormatException (BaseUrl), and
+IOException and UnauthorizedAccessException from the file system, unwrapped. A
 RegistryException whose StatusCode is HttpStatusCode.Unauthorized is the one to
 filter on when you want to prompt for credentials.
 
@@ -1406,6 +2249,13 @@ What the code guarantees, and nothing more:
   - DIFFERENT MODELS IN PARALLEL IS FINE. They share no partial files, and
     pruning deletes a blob only after every manifest has been checked, so a
     blob the other pull just published is safe.
+  - ONE PYTHON RUN AT A TIME, whatever thread asks for it. There is one
+    interpreter per process and this library serializes its own use of it; the
+    interpreter lock is held only for the duration of a run and nothing is
+    awaited while it is held. The managed reduction engine takes no such lock,
+    but an export or a reduction of the SAME MODEL from two threads at once is
+    two calls writing the same derived name: serialize those yourself, as with
+    two pulls.
 
 
 COMPLETE EXAMPLES
@@ -1875,11 +2725,106 @@ COMMON PITFALLS TO AVOID
     from what is reported, and a source that states nothing reports
     LicenseRecord.None rather than a guess.
 
+21. DO NOT call PythonSupport.Shutdown() more than once, in the middle of an
+    application, or in the hope of starting a fresh interpreter. CPython cannot
+    be restarted in a process: after the call every Python entry point throws
+    InvalidOperationException, and no interpreter is ever started again. Call
+    it once, at the end, or not at all - the bounded process-exit mode means a
+    process that never calls it still exits.
+
+22. DO NOT expect PythonSupport.Shutdown() to end an interpreter your own
+    application started. It is a no-op when PythonSupport.Owner is Host, on
+    purpose: this library never shuts down an interpreter it did not start, and
+    a library that did would break the rest of your application. When the host
+    owns it, this library also configures nothing about it - not the virtual
+    environment, not the library path, not the process-exit mode.
+
+23. DO NOT assume PythonSupport.Check is cheap. With NO modules it is cheap and
+    starts nothing. With MODULES it starts an interpreter, because importing is
+    the only way to know whether a module is there, and that interpreter lasts
+    for the life of the process. Check once and keep the report, or check with
+    no modules when all you want to know is whether CPython is there at all.
+
+24. DO NOT expect a virtual environment to survive a minor-version move of the
+    interpreter it was made from. 3.13 to 3.14 means recreating the environment
+    and repointing any explicit PythonOptions.LibraryPath; point releases inside
+    a minor version need nothing.
+
+25. DO NOT treat a derived bundle as a live view of the model it came from. It
+    is a SNAPSHOT: the source can be deleted, re-pulled at another revision or
+    replaced and the derived bundle stays exactly as it was. Export again when
+    the source changes, and read DerivedFrom to know what it was made from.
+
+26. DO NOT set ExportOptions.AllowRemoteCode for a model you did not choose
+    yourself. It tells the export tooling to import the .py files the
+    CHECKPOINT ships - a custom tokenizer or configuration class - which runs
+    the publisher's own Python in your process. It is false by default, and
+    some checkpoints simply cannot be exported without it.
+
+27. DO NOT export a checkpoint with the system temporary directory in memory. A
+    Python route writes the whole source bundle into a temporary folder and the
+    tool writes its output beside it, so a machine whose /tmp is a RAM-backed
+    file system - most Linux desktops - needs TMPDIR pointed at a real one
+    first. The PublisherOnnx route writes no temporary folder at all.
+
+28. DO NOT expect ExportOptions.Precision to reach the Optimum route. It is
+    passed verbatim to the GenAI builder, which decides what it accepts, and
+    the Optimum exporter ignores it and exports at the checkpoint's own
+    precision. What was asked for is recorded in the provenance either way.
+
+29. DO NOT SHIP A REDUCED MODEL YOU HAVE NOT MEASURED. Quantizing is an
+    approximation, and how good an approximation depends on the model, the
+    mode and the input. Run the model you reduced beside the one you reduced it
+    from, on inputs you care about, and look at the difference before anyone
+    else does.
+
+30. DO NOT expect every runtime to load what a reduction wrote. Four-bit
+    weight-only quantization emits MatMulNBits and dynamic quantization emits
+    MatMulInteger; ONNX Runtime implements both, and something else may
+    implement neither. Neither this library nor CodeBrix.Ollama.ModelRunner
+    runs an ONNX model at all.
+
+31. DO NOT expect ReduceOptions.Preprocess to do anything for the weight-only
+    modes. They read the weights themselves and never preprocess, whatever it
+    says; only the dynamic mode reads inferred shapes. ReduceMode.PreprocessOnly
+    is the way to prepare a graph on purpose, and what it writes is an ordinary
+    bundle that can be reduced afterwards.
+
+32. DO NOT read ReduceResult.SourceBytes and ReducedBytes as the size of the
+    BUNDLE. They are the size of the graphs that were reduced and of the files
+    of weights beside them; everything carried through counts towards neither,
+    so a bundle of mostly tokenizer files shrinks less than the numbers suggest.
+
+33. DO NOT reduce a bundle with the system temporary directory in memory,
+    for the reason an export must not be run that way: the source is laid out
+    in a temporary folder and the tools write their output beside it.
+
+34. DO NOT expect DYNAMIC eight-bit quantization to run without Python on a
+    graph nobody has prepared. That mode reads the shapes a preparation pass
+    infers, and the managed engine infers none; it takes a graph that records
+    having been through one, which is what ReduceMode.PreprocessOnly leaves
+    behind - and preparation is the Python engine's work. Prepare the model
+    once on a machine that has CPython with onnx and onnxruntime, store the
+    prepared bundle, and every machine afterwards can quantize it with nothing
+    installed. The weight-only modes never ask: they are managed wherever they
+    run.
+
+35. DO NOT read ReduceResult.Tool as the name of a Python package. It names
+    the engine that ran - "onnxruntime" for the Python engine, with the
+    version that package reports, and "CodeBrix.Ollama.ModelManager" for the
+    managed one, with this library's own version. A bundle reduced by the
+    managed engine on a machine with no Python records no Python anything.
+
 
 WHAT THIS PACKAGE DOES NOT DO
 =============================
 Do NOT reach for this package to:
 
+  - SHIP, INSTALL or DOWNLOAD CPython, or install a pip module. A CPython
+    shared library must already be on the machine, and the modules a Python
+    feature imports must already be installed in the interpreter that runs it;
+    what this package does is find them, report what is missing and say which
+    command would install it.
   - PUSH a model. No upload, no manifest PUT, no blob POST; everything here is
     read-only against the registry.
   - Authenticate to a PRIVATE Ollama registry. Ollama signs its requests with
@@ -1911,10 +2856,15 @@ Do NOT reach for this package to:
   - Garbage-collect a store on its own. Blobs are removed by DeleteAsync, by
     the pruning PullAsync and CreateAsync do for the name they just wrote, and
     by PruneAsync when you call it; nothing runs in the background.
-  - RUN or CONVERT the files of a bundle. They are fetched, verified, stored
-    and laid out again as the publisher's tree; nothing here loads a
-    checkpoint, exports one to ONNX, quantizes anything or runs a tool over
-    it. What you do with the files is yours.
+  - RUN the files of a bundle, or CONVERT a checkpoint without the publisher's
+    own tooling. They are fetched, verified, stored and laid out again as the
+    publisher's tree, and the one conversion this package offers - exporting to
+    ONNX - is this library driving the ONNX Runtime GenAI model builder or
+    Hugging Face Optimum in an interpreter YOU already have, never a
+    re-implementation of either. Nothing here loads a checkpoint itself or runs
+    a model of any kind. Quantizing an ONNX graph IS done here - that is what
+    the managed reduction engine is - but it is the only arithmetic this
+    package does on a model's weights. What you do with the files is yours.
   - DECIDE ANYTHING ABOUT A LICENCE. It reports what a source states - an
     identifier, the address it was read from, the LICENSE text a bundle ships
     - and applies no rule of its own: no pull is refused over a licence or the
@@ -1929,9 +2879,10 @@ This package IS for: keeping a local, Ollama-compatible model store; pulling
 models into it with resumable, verified downloads, from an Ollama-protocol
 registry or from the Hugging Face repository, the list of addresses or the
 folder a publisher keeps a model in; listing, describing, copying, deleting and
-deriving models; laying a bundle out as its publisher's own file tree; parsing
-and writing Modelfiles; reading GGUF headers; and turning a name into the paths
-a runner opens.
+deriving models; exporting a bundle to ONNX and reducing the graphs it holds to
+smaller ones, keeping each result in the same store with its provenance; laying
+a bundle out as its publisher's own file tree; parsing and writing Modelfiles;
+reading GGUF headers; and turning a name into the paths a runner opens.
 
 
 WORKING EXAMPLES ON GITHUB
@@ -2056,6 +3007,32 @@ Feature-to-test-file map:
     https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Bundles/FileFilterTests.cs
     https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Bundles/PullOptionsTests.cs
 
+  Exporting to ONNX: what each route needs, how the automatic one decides,
+  the pass-through that copies nothing, the derived bundle's provenance, and
+  the names and refusals an export can produce
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Store/ModelStoreExportTests.cs
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Export/OnnxExportTests.cs
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Store/ModelStoreDerivedBundleTests.cs
+
+  Reducing an ONNX model: the four modes, the engine the automatic choice
+  reaches, the derived names, the files carried through, and whole reductions
+  run by the managed engine with no interpreter in the process at all
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Store/ModelStoreReduceTests.cs
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Reduce/OnnxReduceTests.cs
+
+  Asking for Python and being told what is missing: the report a machine with
+  no CPython produces, the resolution order, the two exceptions, and the test
+  that proves a whole import, list, resolve and materialize cycle never loads
+  the dependency at all
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Python/PythonSupportTests.cs
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Python/PythonInertFenceTests.cs
+
+  The tests that need a real CPython, in a second suite of their own, skipped
+  by default: exporting and reducing real published models, and the comparison
+  that requires the managed engine and ONNX Runtime's own tools to write the
+  same bytes
+    https://github.com/ellisnet/CodeBrix.Ollama/tree/main/tests/CodeBrix.Ollama.ModelManager.Python.Tests
+
   The live tests, skipped by default, that pull real repositories and real
   bucket objects from their publishers, check every file against what was
   stated, materialize the tree and delete everything again
@@ -2083,7 +3060,8 @@ QUICK REFERENCE CARD
 
 INSTALL     dotnet add package CodeBrix.Ollama.ModelManager.MitLicenseForever
 USING       using CodeBrix.Ollama.ModelManager;
-TARGET      .NET 10 or later   DEPENDENCIES  none   LICENSE  MIT
+TARGET      .NET 10 or later   LICENSE  MIT
+DEPENDENCIES  one, CodeBrix.Python, inert until a Python feature is used
             no native library ships in the package
 NULLABLE    off in the library -- read the per-member notes
 STORE       using var store = new ModelStore();
@@ -2126,14 +3104,95 @@ BUNDLE IN   ResolvedModel.Files (ResolvedFile: Name, BlobPath, Size, Digest)
             ModelSummary.Config.ModelFormat tells a bundle from a GGUF model
 BUNDLE STATUS   listing <repository> -> pulling <path> (per file) -> verifying
             sha256 digest -> writing manifest -> success
+EXPORT      ExportToOnnxAsync(name, ExportOptions { Route, Precision,
+            OutputName, Overwrite, AllowRemoteCode }, IProgress<PullProgress>,
+            ct) -> ExportResult { Name, Files, Tool, ToolVersion, RouteUsed;
+            ToString() }. ExportOptions.DefaultPrecision is what an unset
+            Precision reads as ("fp32").
+            Routes (ExportRoute): Auto (default) | PublisherOnnx (NO PYTHON,
+            no bytes copied) | GenAiBuilder (onnxruntime_genai, torch,
+            transformers, onnx) | Optimum (optimum, onnx, torch, transformers).
+            Auto: ships .onnx -> PublisherOnnx; config.json names an
+            architecture the builder writes -> GenAiBuilder; else Optimum.
+            AllowRemoteCode runs the PUBLISHER'S OWN Python; false by default.
+            TMPDIR must be on a real file system for a converting route
+EXPORT STATUS   materializing source -> exporting -> collecting -> writing
+            manifest -> success
+REDUCE      ReduceOnnxAsync(name, ReduceOptions { Mode, BlockSize, IsSymmetric,
+            AccuracyLevel, Preprocess, OutputName, Overwrite, Engine, Files },
+            IProgress<PullProgress>, ct) -> ReduceResult { Name, Files,
+            EngineUsed, Mode, SourceBytes, ReducedBytes, Tool, ToolVersion;
+            ToString() }. ReduceOptions.DefaultBlockSize is the block size an
+            untouched ReduceOptions carries (128).
+            Modes (ReduceMode): DynamicInt8 (default, MatMulInteger, ~3.5x) |
+            WeightOnlyInt8 (MatMulNBits, about 3.5x) | WeightOnlyInt4
+            (MatMulNBits, about 6x) | PreprocessOnly (prepare, quantize
+            nothing). Defaults: block 128, asymmetric, no accuracy level - ONNX
+            Runtime's own. Engine (ReduceEngine): Auto (default) | Python
+            (onnx, onnxruntime) | Managed (this library's own code; NEEDS
+            NOTHING INSTALLED). Auto: weight-only -> Managed always;
+            DynamicInt8 -> Managed on a prepared graph, else Python;
+            PreprocessOnly -> Python. Both engines write the same bytes.
+            Files: null = every .onnx; naming some carries the rest through
+            unchanged. Only MatMul weights shrink, so a graph of embeddings
+            shrinks less. TMPDIR must be on a real file system, whichever
+            engine runs. A REDUCED MODEL IS AN APPROXIMATION
+REDUCE NAME the source's tag plus the mode's: int8 | int8-weights |
+            int4-weights | onnx-preprocessed. No tag of its own (or "latest")
+            takes the mode's tag alone; a tag is never repeated, so :onnx
+            prepared reads :onnx-preprocessed
+REDUCE STATUS   materializing source -> reducing <file> (one per graph) ->
+            collecting -> writing manifest -> success
+DERIVED     a bundle this library produced. ModelInfo.DerivedFrom, .Tool,
+            .ToolVersion, .Settings (all null for a bundle that was obtained);
+            the config keys are on ModelConfigKeys (DerivedFrom, Tool,
+            ToolVersion, Settings, DerivedAt, beside the Source, Repository,
+            Revision, LicenseId, LicenseSource and PulledAt an obtained bundle
+            writes). Default name: the source with its tag replaced by "onnx"
+            for an export, and with the mode's tag added for a reduction.
+            It is a SNAPSHOT; deleting it leaves the source alone
 MODELFILE   Modelfile.Parse(text) | Parse(reader) | ReadFileAsync(path); FROM
             LICENSE TEMPLATE SYSTEM ADAPTER DRAFT RENDERER PARSER PARAMETER
             MESSAGE REQUIRES;  GetParameters() -> ModelParameters
 GGUF        GgufMetadata.ReadAsync(path | stream, options, ct); header only,
             never tensor data; MaxArraySize 1024 (negative keeps everything)
+PYTHON      needed by the converting export routes and by the Python
+            reduction engine, and by nothing else - obtaining a model and
+            making an existing graph smaller are pure managed code.
+            PythonSupport.Check(options, modules) -> PythonSupportReport
+            (never throws); PythonSupport.Require(options, feature, modules)
+            (throws); PythonSupport.Shutdown() once, at the end;
+            PythonSupport.IsInitialized, PythonSupport.Owner
+PYTHON WHERE  PythonOptions { VirtualEnvironment, LibraryPath }, on
+            ModelStoreOptions.Python and on every PythonSupport call. venv:
+            code, then CODEBRIX_OLLAMA_PYTHON_VENV, then PYTHONNET_VENV /
+            VIRTUAL_ENV. library: code, then PYTHONNET_PYDLL, then the venv's
+            base interpreter. Code always beats an environment variable. The
+            two variable names are the consts
+            PythonOptions.VirtualEnvironmentVariable and .LibraryPathVariable
+PYTHON REPORT  PythonSupportReport { LibraryPath, LibrarySource, LibraryLoads,
+            Version, IsSupportedVersion, VirtualEnvironment,
+            VirtualEnvironmentSource, IsInitialized, Owner, Modules, Problems,
+            IsUsable }; Modules is PythonModuleReport { Name, IsInstalled,
+            Error } in the order asked for; Problems is empty when nothing is
+            wrong. PythonLibrarySource: NotFound | Code | EnvironmentVariable
+            | VirtualEnvironment | Host. PythonVirtualEnvironmentSource: None |
+            Code | EnvironmentVariable | Inherited. PythonEngineOwner: None |
+            ModelManager | Host
+PYTHON OWNER  ModelManager when this library started the interpreter (it
+            configures it, bounds the process-exit shutdown and ends it on
+            Shutdown); Host when your application started one first (it
+            configures nothing and never ends it). ModelStore.Dispose does NOT
+            shut Python down.
 ERRORS      ModelManagerException: DigestMismatchException, GgufFormatException,
             InvalidModelNameException, ModelfileParseException,
-            ModelNotFoundException, RegistryException
+            ModelNotFoundException, PythonModuleNotInstalledException,
+            PythonNotAvailableException, PythonScriptException,
+            RegistryException. The Python three carry Feature; the module one
+            also ModuleName and the static
+            PythonModuleNotInstalledException.InstallCommand(module, venv),
+            which builds the same pip line the message carries; the script one
+            also ScriptName and PythonMessage
 RUNNER      ResolvedModel.ModelPath is what an in-process GGUF runner loads.
             CodeBrix.Ollama.ModelRunner is a separate package with its own
             AGENT-README.

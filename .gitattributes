@@ -18,6 +18,8 @@
 # translation applied to it is silently corrupt, so these are declared rather
 # than left to git's heuristic.
 *.gguf  binary
+*.onnx binary
+*.data binary
 *.png   binary
 *.dylib binary
 *.so    binary

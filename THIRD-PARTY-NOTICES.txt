@@ -15,7 +15,9 @@ grammar converter (entry 1), Ollama's template, thinking and tools packages
 Jinja project (entry 7) were read but never copied; both are listed anyway, so
 that the record is complete rather than merely obligatory. Entries 8 to 14
 cover the public models' chat templates the ModelRunner test suite carries as
-fixtures.
+fixtures. Entry 15 covers ONNX Runtime's quantization tools, whose Python and
+C++ code ModelManager's managed reduction engine ports so that reducing a model
+needs none of them installed.
 
 Four distinct things in this repository come from other people today, and all
 four are covered below. They are a way of grouping what is here, not the list
@@ -44,9 +46,11 @@ holder, and one of these four things can span several of them.
      public C headers (Native/) and ported from llama.cpp's schema-to-grammar
      converter (Grammar/), from the Go standard library's text/template
      (Templates/OllamaGo/), and from Ollama's template, thinking and tools
-     packages (Templates/OllamaGo/ and Parsing/). Every ported file names its
-     upstream source in its first lines, in a trailing comment on its
-     namespace line.
+     packages (Templates/OllamaGo/ and Parsing/).
+     src/CodeBrix.Ollama.ModelManager/Onnx/Quantization/ contains C# ported
+     from ONNX Runtime's own quantization tools, in Python and in C++ (entry
+     15). Every ported file names its upstream source in its first lines, in
+     a trailing comment on its namespace line.
 
   4. THE COPIED DATA FILES. src/CodeBrix.Ollama.ModelRunner/Templates/
      OllamaGo/BuiltIn/ holds Ollama's twenty built-in chat templates, their
@@ -61,6 +65,12 @@ All four are governed by the licences reproduced in full below. Every one of
 them - MIT, BSD-3-Clause, and the Apache License 2.0 (with and without the LLVM
 exception) - is permissive and compatible with this repository's own MIT
 licence.
+
+NuGet package dependencies are not listed here, as elsewhere in this family.
+CodeBrix.Ollama.ModelManager depends on CodeBrix.Python.MitLicenseForever,
+which carries its own LICENSE and THIRD-PARTY-NOTICES.txt; this file covers
+only source code incorporated INTO this repository, and no CodeBrix.Python
+source is.
 
 HOW THE MIT LICENCE'S NOTICE REQUIREMENT IS SATISFIED
     The MIT licence requires that "the above copyright notice and this
@@ -1340,6 +1350,104 @@ MODIFICATIONS
 
 
 ================================================================================
+15. Microsoft Corporation - ONNX Runtime  (the quantization tools whose Python
+    and C++ code the managed reduction engine ports)
+================================================================================
+
+Project:        https://github.com/microsoft/onnxruntime
+                    tag v1.30.0
+License:        MIT
+
+WHAT WAS TAKEN
+    LOGIC, by hand, into C#. Nothing from ONNX Runtime is vendored, compiled,
+    linked, downloaded or referenced as a package: this repository has no
+    Microsoft.ML.OnnxRuntime dependency and never loads a native ONNX Runtime
+    library. What was taken is the arithmetic and the exact output shape of two
+    of its quantization tools, so that the managed engine behind
+    CodeBrix.Ollama.ModelManager's ReduceOnnxAsync writes the same file those
+    tools write, byte for byte, for the modes it covers.
+
+SCOPE - the files that carry the marker
+    src/CodeBrix.Ollama.ModelManager/Onnx/Quantization/ holds every ported
+    file, and each one names its upstream source in a trailing comment on its
+    namespace line:
+
+      OnnxBlockwiseQuantizer.cs      onnxruntime/core/mlas/lib/q4_dq.cpp
+      OnnxMatMulNBitsQuantizer.cs    python/tools/quantization/matmul_nbits_quantizer.py
+      OnnxWeightOnlyQuantizationOptions.cs
+                                     python/tools/quantization/matmul_nbits_quantizer.py
+      OnnxDynamicQuantizer.cs        python/tools/quantization/onnx_quantizer.py
+      OnnxDynamicQuantizationOptions.cs
+                                     python/tools/quantization/quantize.py
+      OnnxQuantizationUtilities.cs   python/tools/quantization/quant_utils.py
+      OnnxGraphEditor.cs             python/tools/quantization/onnx_model.py
+      OnnxQuantizedValue.cs          python/tools/quantization/quant_utils.py
+
+    Four further upstream files were read while porting those and are named
+    here because their logic is inside the ports above, although no file
+    carries their name: python/tools/quantization/base_quantizer.py,
+    registry.py, operators/matmul.py and operators/gemm.py. Three more were
+    read as the reference for the packed layout: core/mlas/inc/mlas_q4.h,
+    core/mlas/lib/q4common.h and the wrapper that calls the kernel,
+    python/onnxruntime_pybind_quant.cc.
+
+    The check, from the repository root:
+
+        grep -rl "was previously: onnxruntime/" src/
+
+    must list exactly the eight files above.
+
+WHAT IS NOT FROM ONNX RUNTIME
+    src/CodeBrix.Ollama.ModelManager/Onnx/ outside that Quantization/ folder -
+    the protocol buffer reader and writer and the ONNX message classes - is
+    original code of this repository, written against the published onnx.proto
+    schema, and carries no marker. That schema is a specification; it is not
+    code taken from anyone.
+
+MODIFICATIONS MADE DURING THE PORT
+    - Python and C++ became C#: dictionaries became typed collections, numpy
+      array operations became loops, and the tools' own file handling was
+      replaced by this repository's asynchronous input and output.
+    - Only the QOperator form of the weight-only quantizer is ported, for
+      MatMul alone. The QDQ form, the GatherBlockQuantized branch, sub-graphs
+      and every algorithm other than the default one are not ported, and the
+      managed engine refuses them rather than approximating them.
+    - Dynamic quantization is ported for MatMul and for the Gemm upstream
+      first rewrites into one, which is the pair of operator types this
+      library asks those tools for. The other operators upstream's integer
+      registry covers are not ported, and are refused if they are asked for.
+    - Upstream runs shape inference on its way in; the managed engine runs
+      none, and requires a model that records having been through it.
+    - The tools' warnings, logging and command-line entry points were not
+      ported.
+
+----- ONNX Runtime licence (MIT), reproduced verbatim from LICENSE at tag
+      v1.30.0 -----
+
+MIT License
+
+Copyright (c) Microsoft Corporation
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+================================================================================
 INVENTORY: HOW THIS FILE WAS COMPILED, AND HOW TO RE-CHECK IT
 ================================================================================
 (This section covers entries 1 and 2, the vendored llama.cpp snapshot. The
@@ -1351,6 +1459,7 @@ repository root:
   entry 4  grep -rl "was previously: LLamaSharp" src/
   entry 5  grep -rl "was previously: golang/go" src/
   entry 6  grep -rl "was previously: agnivade/levenshtein" src/
+  entry 15 grep -rl "was previously: onnxruntime/" src/
 
 Each list must match that entry's scope table exactly, in both directions:
 a marked file missing from a table, or a table naming a file that no longer

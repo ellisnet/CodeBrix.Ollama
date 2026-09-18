@@ -26,10 +26,15 @@ AGENT-README FILES (consumer documentation, one per NuGet package)
       Ollama registry into a local store laid out exactly as Ollama's own,
       obtains the files of a model no such registry serves - a Hugging Face
       file repository, a list of HTTPS addresses, a folder on disk - into the
-      same store and lays them out again as the publisher wrote them, lists,
-      shows, copies, deletes and creates models from Modelfiles, reads GGUF
-      metadata, and resolves a model name to the files on disk. Pure managed
-      code.
+      same store and lays them out again as the publisher wrote them, exports a
+      model to ONNX and reduces the graphs it holds to smaller ones, keeping
+      each result as a derived bundle with its provenance, lists, shows,
+      copies, deletes and creates models from
+      Modelfiles, reads GGUF metadata, and resolves a model name to the files
+      on disk. Pure managed
+      code, with one inert NuGet dependency - CodeBrix.Python - that nothing
+      loads until a Python feature is used; the PYTHON section of its
+      AGENT-README is the whole of that story.
 
 MAINTAINER AND EXTRAS
 ---------------------
@@ -38,7 +43,10 @@ MAINTAINER AND EXTRAS
       maintainers, including how the native llama.cpp libraries are built by
       llama-native-tools/ and adopted into the ModelRunner package.
   EXTRAS-README.txt
-      Samples, tools and other non-package content in this repository.
+      Samples, tools and other non-package content in this repository,
+      including the probe console application the tests run as a child process
+      to observe what a whole process does, and the second, gated test
+      executable for the tests that need a real CPython.
 
 GENERAL
 -------

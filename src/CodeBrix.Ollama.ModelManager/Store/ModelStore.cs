@@ -31,23 +31,8 @@ public sealed class ModelStore : IModelStore, IDisposable
     /// <summary>The value the config's <c>source</c> property carries for an imported folder.</summary>
     private const string LocalSource = "local";
 
-    /// <summary>The config property that says where a bundle's files came from.</summary>
-    private const string SourceProperty = "source";
-
-    /// <summary>The config property that names the repository or folder a bundle came from.</summary>
-    private const string RepositoryProperty = "repository";
-
-    /// <summary>The config property that records the commit a listing resolved to.</summary>
-    private const string RevisionProperty = "revision";
-
-    /// <summary>The config property that records the licence identifier the source states.</summary>
-    private const string LicenseIdProperty = "licenseId";
-
-    /// <summary>The config property that records where the licence statement was read from.</summary>
-    private const string LicenseSourceProperty = "licenseSource";
-
-    /// <summary>The config property that records when a bundle was pulled or imported.</summary>
-    private const string PulledAtProperty = "pulledAt";
+    /// <summary>The value the config's <c>source</c> property carries for a bundle this library made.</summary>
+    private const string DerivedSource = "derived";
 
     private static readonly IReadOnlyList<GgufMetadata> NoMetadata = Array.Empty<GgufMetadata>();
     private static readonly IReadOnlyList<ModelMessage> NoMessages = Array.Empty<ModelMessage>();
@@ -261,6 +246,10 @@ public sealed class ModelStore : IModelStore, IDisposable
             Licenses = await ReadLicenseTextsAsync(layers, cancellationToken).ConfigureAwait(false),
             License = ReadLicenseRecord(layers.Config),
             Format = ReadFormat(layers),
+            DerivedFrom = ReadConfigProperty(layers.Config, ModelConfigKeys.DerivedFrom),
+            Tool = ReadConfigProperty(layers.Config, ModelConfigKeys.Tool),
+            ToolVersion = ReadConfigProperty(layers.Config, ModelConfigKeys.ToolVersion),
+            Settings = ReadConfigSettings(layers.Config),
             Messages = layers.Messages ?? NoMessages,
             Metadata = metadata,
             ProjectorMetadata = projectorMetadata,
@@ -351,6 +340,644 @@ public sealed class ModelStore : IModelStore, IDisposable
             parsed, relativePaths, BundleFormatDetector.Imported, LocalSource, root, null, license);
 
         await WriteBundleManifestAsync(parsed, layers, config, deleteMap, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<ExportResult> ExportToOnnxAsync(
+        string name,
+        ExportOptions options = null,
+        IProgress<PullProgress> progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        ModelName parsed = ParseModelName(name, nameof(name));
+        ExportOptions effective = options ?? new ExportOptions();
+
+        StoredManifest stored = await RequireManifestAsync(parsed, name, cancellationToken).ConfigureAwait(false);
+        ModelLayerReader layers = await ModelLayerReader
+            .ReadAsync(_paths, stored.Manifest, cancellationToken).ConfigureAwait(false);
+
+        if (layers.BundleFiles.Count == 0)
+        {
+            throw new InvalidOperationException(
+                "The model " + parsed.DisplayShortest() + " has no publisher file tree, so there is"
+                    + " nothing to export: it carries no bundle file layers. Only a bundle - a model"
+                    + " pulled with PullOptions or imported from a folder - can be exported.");
+        }
+
+        string sourceName = stored.Name.DisplayShortest();
+        LicenseRecord license = ReadLicenseRecord(layers.Config);
+        string outputName = string.IsNullOrWhiteSpace(effective.OutputName)
+            ? DeriveName(stored.Name, OnnxExport.OnnxTag)
+            : effective.OutputName.Trim();
+
+        //The checkpoint's own configuration decides two things: which route an automatic export takes,
+        //and, for the Optimum route, which task it exports for - Optimum's own inference reads the Hub
+        //and refuses a local folder, which is all this library ever hands it.
+        string configJson = await ReadBundleFileTextAsync(
+            layers.BundleFiles, OnnxExport.ConfigFileName, cancellationToken).ConfigureAwait(false);
+
+        ExportRoute route = effective.Route;
+        if (route == ExportRoute.Auto)
+        {
+            route = OnnxExport.ChooseRoute(layers.BundleFiles, configJson);
+        }
+
+        IReadOnlyDictionary<string, string> settings = OnnxExport.SettingsFor(route, effective);
+
+        if (route == ExportRoute.PublisherOnnx)
+        {
+            return await PassThroughOnnxAsync(
+                layers, sourceName, outputName, license, settings, effective, progress, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        //Checked before anything is laid out on disk, so that a machine without the modules says so in a
+        //second rather than after copying a checkpoint into a temporary folder.
+        PythonSupport.Require(_options.Python, OnnxExport.Feature, OnnxExport.ModulesFor(route));
+
+        string work = Path.Combine(
+            Path.GetTempPath(), "codebrix-ollama-export-" + Guid.NewGuid().ToString("N"));
+        string input = Path.Combine(work, "source");
+        string output = Path.Combine(work, "onnx");
+        string cache = Path.Combine(work, "cache");
+
+        try
+        {
+            Directory.CreateDirectory(input);
+            Directory.CreateDirectory(output);
+            Directory.CreateDirectory(cache);
+
+            Report(progress, "materializing source");
+            await BundleMaterializer.WriteAsync(
+                layers.BundleFiles,
+                input,
+                new MaterializeOptions { Link = MaterializeLink.Hardlink, Overwrite = true },
+                cancellationToken).ConfigureAwait(false);
+
+            Report(progress, "exporting");
+            OnnxExportRun run = await OnnxExport.RunAsync(
+                _options.Python,
+                route,
+                sourceName,
+                input,
+                output,
+                cache,
+                effective,
+                OnnxExport.TaskFor(OnnxExport.ReadArchitectures(configJson)),
+                cancellationToken).ConfigureAwait(false);
+
+            Report(progress, "collecting");
+            var provenance = new DerivedProvenance(
+                sourceName, run.Tool, run.ToolVersion, settings, BundleFormatDetector.Derived, license);
+
+            Report(progress, "writing manifest");
+            IReadOnlyList<string> written = await WriteDerivedBundleAsync(
+                outputName, output, provenance, effective.Overwrite, cancellationToken).ConfigureAwait(false);
+
+            Report(progress, "success");
+            return new ExportResult(outputName, written, run.Tool, run.ToolVersion, route);
+        }
+        finally
+        {
+            TryDeleteDirectory(work);
+        }
+    }
+
+    /// <summary>
+    /// Registers the exported graphs a publisher already shipped as a derived bundle of their own.
+    /// Nothing is converted, nothing is copied and no interpreter is started.
+    /// </summary>
+    /// <param name="layers">The decoded layers of the source bundle.</param>
+    /// <param name="sourceName">The source model, spelled as it is stored.</param>
+    /// <param name="outputName">The name the derived bundle is stored under.</param>
+    /// <param name="license">What the source states about the licence, carried over unchanged.</param>
+    /// <param name="settings">The options the export was asked for.</param>
+    /// <param name="options">The options the caller gave.</param>
+    /// <param name="progress">Where progress reports go, or <see langword="null"/>.</param>
+    /// <param name="cancellationToken">A token that cancels the work.</param>
+    /// <returns>What was written.</returns>
+    /// <exception cref="InvalidOperationException">The source ships no <c>.onnx</c> file.</exception>
+    private async Task<ExportResult> PassThroughOnnxAsync(
+        ModelLayerReader layers,
+        string sourceName,
+        string outputName,
+        LicenseRecord license,
+        IReadOnlyDictionary<string, string> settings,
+        ExportOptions options,
+        IProgress<PullProgress> progress,
+        CancellationToken cancellationToken)
+    {
+        IReadOnlyList<ResolvedFile> files = OnnxExport.PassThroughFiles(layers.BundleFiles);
+        if (!OnnxExport.HasOnnxFiles(files))
+        {
+            throw new InvalidOperationException(
+                "The model " + sourceName + " ships no .onnx file, so there is nothing for the"
+                    + " PublisherOnnx route to register. Leave ExportOptions.Route at Auto, or name"
+                    + " GenAiBuilder or Optimum to convert the checkpoint instead.");
+        }
+
+        Report(progress, "collecting");
+        var provenance = new DerivedProvenance(
+            sourceName, OnnxExport.PublisherTool, null, settings, BundleFormatDetector.Onnx, license);
+
+        Report(progress, "writing manifest");
+        IReadOnlyList<string> written = await WriteDerivedBundleFromStoreAsync(
+            outputName, files, provenance, options.Overwrite, cancellationToken).ConfigureAwait(false);
+
+        Report(progress, "success");
+        return new ExportResult(outputName, written, OnnxExport.PublisherTool, null, ExportRoute.PublisherOnnx);
+    }
+
+    /// <inheritdoc />
+    public async Task<ReduceResult> ReduceOnnxAsync(
+        string name,
+        ReduceOptions options = null,
+        IProgress<PullProgress> progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        ModelName parsed = ParseModelName(name, nameof(name));
+        ReduceOptions effective = options ?? new ReduceOptions();
+
+        StoredManifest stored = await RequireManifestAsync(parsed, name, cancellationToken).ConfigureAwait(false);
+        ModelLayerReader layers = await ModelLayerReader
+            .ReadAsync(_paths, stored.Manifest, cancellationToken).ConfigureAwait(false);
+
+        if (layers.BundleFiles.Count == 0)
+        {
+            throw new InvalidOperationException(
+                "The model " + parsed.DisplayShortest() + " has no publisher file tree, so there is"
+                    + " nothing to reduce: it carries no bundle file layers. Only a bundle that holds"
+                    + " .onnx files can be reduced.");
+        }
+
+        IReadOnlyList<string> selected = OnnxReduce.SelectFiles(layers.BundleFiles, effective.Files);
+
+        //Resolved before anything is laid out: whether the graphs have been prepared decides which engine can take
+        //them, and that is read from the stored blobs themselves - a few hundred bytes each, whatever they weigh.
+        bool hasInferMarker = OnnxReduce.NeedsInferMarker(effective.Engine, effective.Mode)
+            && await HaveInferMarkerAsync(layers.BundleFiles, selected, cancellationToken).ConfigureAwait(false);
+        bool isPythonAvailable =
+            OnnxReduce.NeedsPythonAvailability(effective.Engine, effective.Mode, hasInferMarker)
+            && OnnxReduce.IsPythonAvailable(_options.Python);
+        ReduceEngine engine = OnnxReduce.ResolveEngine(
+            effective.Engine, effective.Mode, hasInferMarker, isPythonAvailable);
+
+        string sourceName = stored.Name.DisplayShortest();
+        LicenseRecord license = ReadLicenseRecord(layers.Config);
+        string outputName = string.IsNullOrWhiteSpace(effective.OutputName)
+            ? DeriveName(
+                stored.Name, OnnxReduce.AppendTag(stored.Name.Tag, OnnxReduce.TagFor(effective.Mode)))
+            : effective.OutputName.Trim();
+
+        //Checked before anything is laid out on disk, so that a machine without the modules says so in a
+        //second rather than after a whole bundle has been linked into a temporary folder.
+        OnnxReduce.RequireEngine(_options.Python, engine);
+
+        string work = Path.Combine(
+            Path.GetTempPath(), "codebrix-ollama-reduce-" + Guid.NewGuid().ToString("N"));
+        string input = Path.Combine(work, "source");
+        string output = Path.Combine(work, "reduced");
+        string stage = Path.Combine(work, "prepared");
+
+        try
+        {
+            Directory.CreateDirectory(input);
+            Directory.CreateDirectory(output);
+
+            Report(progress, "materializing source");
+            await BundleMaterializer.WriteAsync(
+                layers.BundleFiles,
+                input,
+                new MaterializeOptions { Link = MaterializeLink.Hardlink, Overwrite = true },
+                cancellationToken).ConfigureAwait(false);
+
+            long sourceBytes = 0;
+            long reducedBytes = 0;
+            string tool = engine == ReduceEngine.Managed ? OnnxReduce.ManagedTool : OnnxReduce.Tool;
+            string toolVersion = null;
+
+            foreach (string relativePath in selected)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                Report(progress, "reducing " + relativePath);
+
+                string from = Path.Combine(input, relativePath.Replace('/', Path.DirectorySeparatorChar));
+                string to = Path.Combine(output, relativePath.Replace('/', Path.DirectorySeparatorChar));
+                Directory.CreateDirectory(Path.GetDirectoryName(to));
+
+                sourceBytes += OnnxReduce.MeasureGraph(from);
+
+                //The tools read a graph's weights through the ONNX package, which refuses a file of
+                //weights that has more than one link to its content; the layout above made links.
+                OnnxReduce.UnlinkExternalData(from);
+
+                OnnxReduceRun run = await OnnxReduce.RunAsync(
+                    _options.Python, engine, effective.Mode, effective, from, to, stage, cancellationToken)
+                    .ConfigureAwait(false);
+
+                reducedBytes += run.TotalBytes;
+                tool = run.Tool ?? tool;
+                toolVersion = run.ToolVersion ?? toolVersion;
+
+                //The prepared copy of one graph is of no use once that graph has been quantized, and
+                //keeping it would double what the temporary folder holds for the next one.
+                TryDeleteDirectory(stage);
+            }
+
+            Report(progress, "collecting");
+            CarryThroughFiles(OnnxReduce.CompanionFiles(layers.BundleFiles, selected), input, output,
+                cancellationToken);
+
+            IReadOnlyDictionary<string, string> settings =
+                OnnxReduce.SettingsFor(effective.Mode, engine, effective, selected);
+            var provenance = new DerivedProvenance(
+                sourceName, tool, toolVersion, settings, BundleFormatDetector.Derived, license);
+
+            Report(progress, "writing manifest");
+            IReadOnlyList<string> written = await WriteDerivedBundleAsync(
+                outputName, output, provenance, effective.Overwrite, cancellationToken).ConfigureAwait(false);
+
+            Report(progress, "success");
+            return new ReduceResult(
+                outputName, written, engine, effective.Mode, sourceBytes, reducedBytes, tool, toolVersion);
+        }
+        finally
+        {
+            TryDeleteDirectory(work);
+        }
+    }
+
+    /// <summary>
+    /// Whether every graph a reduction is about to run over records having been through shape inference.
+    /// </summary>
+    /// <param name="files">The source bundle's files.</param>
+    /// <param name="selected">The graphs being reduced.</param>
+    /// <param name="cancellationToken">A token that cancels the reads.</param>
+    /// <returns><see langword="true"/> when they all carry the marker.</returns>
+    /// <remarks>
+    /// The blobs are read where they lie, because this happens before anything is laid out, and only the outermost
+    /// message of each is walked. One graph without the marker answers for the whole bundle: a reduction writes one
+    /// bundle with one engine, so the engine has to be one every graph in it can be taken by.
+    /// </remarks>
+    private static async Task<bool> HaveInferMarkerAsync(
+        IReadOnlyList<ResolvedFile> files,
+        IReadOnlyList<string> selected,
+        CancellationToken cancellationToken)
+    {
+        foreach (string relativePath in selected)
+        {
+            string blobPath = null;
+            foreach (ResolvedFile file in files)
+            {
+                if (string.Equals(file.Name, relativePath, StringComparison.Ordinal))
+                {
+                    blobPath = file.BlobPath;
+                    break;
+                }
+            }
+
+            if (blobPath == null
+                || !await OnnxMetadataProbe.HasMetadataEntryAsync(
+                        blobPath,
+                        OnnxQuantizationUtilities.InferMetadataKey,
+                        OnnxQuantizationUtilities.InferMetadataValue,
+                        cancellationToken)
+                    .ConfigureAwait(false))
+            {
+                return false;
+            }
+        }
+
+        return selected.Count > 0;
+    }
+
+    /// <summary>
+    /// Puts the files a reduction does not touch beside the ones it wrote, so that what is stored is the
+    /// whole model and not only its graphs. They are hard-linked where the file system allows it, so a
+    /// tokenizer or a graph nobody asked to reduce costs nothing to carry.
+    /// </summary>
+    /// <param name="files">The files to carry through.</param>
+    /// <param name="input">The folder the source was laid out in.</param>
+    /// <param name="output">The folder the reduced graphs were written into.</param>
+    /// <param name="cancellationToken">A token that cancels the work.</param>
+    private static void CarryThroughFiles(
+        IReadOnlyList<ResolvedFile> files,
+        string input,
+        string output,
+        CancellationToken cancellationToken)
+    {
+        foreach (ResolvedFile file in files)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            string relativePath = file.Name.Replace('/', Path.DirectorySeparatorChar);
+            string from = Path.Combine(input, relativePath);
+            string to = Path.Combine(output, relativePath);
+
+            if (!File.Exists(from) || File.Exists(to))
+            {
+                continue;
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(to));
+            if (!HardLink.TryCreate(from, to))
+            {
+                File.Copy(from, to, false);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The name a derived bundle takes when the caller names none: the source name with its tag
+    /// replaced.
+    /// </summary>
+    /// <param name="source">The source model name.</param>
+    /// <param name="tag">The tag the derived bundle takes, for example "onnx".</param>
+    /// <returns>The derived name.</returns>
+    private static string DeriveName(ModelName source, string tag)
+        => new ModelName(source.Host, source.Namespace, source.Model, tag, source.ProtocolScheme)
+            .DisplayShortest();
+
+    /// <summary>
+    /// Reads one of a bundle's files as text, by the publisher's path.
+    /// </summary>
+    /// <param name="files">The bundle's files.</param>
+    /// <param name="path">The relative path to read.</param>
+    /// <param name="cancellationToken">A token that cancels the read.</param>
+    /// <returns>The text, or <see langword="null"/> when the bundle has no such file.</returns>
+    private async Task<string> ReadBundleFileTextAsync(
+        IReadOnlyList<ResolvedFile> files, string path, CancellationToken cancellationToken)
+    {
+        foreach (ResolvedFile file in files)
+        {
+            if (!string.Equals(file.Name, path, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            try
+            {
+                return await LayerFactory
+                    .ReadBlobTextAsync(_paths, file.Digest, cancellationToken).ConfigureAwait(false);
+            }
+            catch (ModelManagerException)
+            {
+                //A file the manifest names but the store no longer holds decides nothing about the route.
+                return null;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Hands one status to a caller that asked for progress, and does nothing for one that did not.
+    /// </summary>
+    /// <param name="progress">Where reports go, or <see langword="null"/>.</param>
+    /// <param name="status">The status to report.</param>
+    private static void Report(IProgress<PullProgress> progress, string status)
+        => progress?.Report(new PullProgress(status));
+
+    /// <summary>
+    /// Removes a working directory, and says nothing when it cannot: a temporary folder that outlives
+    /// its export is untidy, never a failure of the export.
+    /// </summary>
+    /// <param name="directory">The directory to remove.</param>
+    private static void TryDeleteDirectory(string directory)
+    {
+        try
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, true);
+            }
+        }
+        catch (IOException)
+        {
+            //As above.
+        }
+        catch (UnauthorizedAccessException)
+        {
+            //As above.
+        }
+    }
+
+    /// <summary>
+    /// Writes a bundle THIS LIBRARY produced, from a folder a tool has just filled, and records how it
+    /// was produced. It is the writing half of every derived artifact - an export, and later a reduction
+    /// - and the only way a config gains the provenance fields.
+    /// </summary>
+    /// <remarks>
+    /// Files are hard-linked into the blobs directory where the file system allows it, because the
+    /// folder a tool wrote into is about to be deleted; a link that cannot be made becomes a copy, as
+    /// everywhere else in this library.
+    /// </remarks>
+    /// <param name="name">The name the derived bundle is stored under.</param>
+    /// <param name="directory">The folder the tool wrote. It is walked to its full depth.</param>
+    /// <param name="provenance">What produced these files, and from what.</param>
+    /// <param name="overwrite">Whether a bundle already stored under the name may be replaced.</param>
+    /// <param name="cancellationToken">A token that cancels the work.</param>
+    /// <returns>The publisher-style relative paths that were stored, in manifest order.</returns>
+    /// <exception cref="ModelManagerException">
+    /// The folder does not exist or is empty, or the name is taken and <paramref name="overwrite"/> is
+    /// <see langword="false"/>.
+    /// </exception>
+    internal async Task<IReadOnlyList<string>> WriteDerivedBundleAsync(
+        string name,
+        string directory,
+        DerivedProvenance provenance,
+        bool overwrite,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        ModelName parsed = ParseModelName(name, nameof(name));
+        if (provenance == null)
+        {
+            throw new ArgumentNullException(nameof(provenance));
+        }
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            throw new ArgumentException("A directory is required.", nameof(directory));
+        }
+
+        string root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory));
+        if (!Directory.Exists(root))
+        {
+            throw new ModelManagerException("the directory " + root + " does not exist");
+        }
+
+        IReadOnlyList<string> relativePaths = CollectImportPaths(root, FileFilter.Default, cancellationToken);
+        if (relativePaths.Count == 0)
+        {
+            throw new ModelManagerException("the directory " + root + " holds no file to store");
+        }
+
+        await _paths.EnsureDirectoriesAsync(cancellationToken).ConfigureAwait(false);
+        Dictionary<string, string> deleteMap = await PrepareDerivedAsync(
+            parsed, name, overwrite, cancellationToken).ConfigureAwait(false);
+
+        var layers = new List<ModelLayer>(relativePaths.Count);
+        foreach (string relativePath in relativePaths)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            string filePath = Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
+            ModelLayer layer = await LayerFactory.CreateFromFileAsync(
+                _paths, filePath, MediaTypes.BundleFile, provenance.SourceName, true, cancellationToken)
+                .ConfigureAwait(false);
+            layer.Name = relativePath;
+            layers.Add(layer);
+            deleteMap.Remove(layer.Digest);
+        }
+
+        ModelConfig config = BuildDerivedConfig(parsed, relativePaths, provenance);
+        await WriteBundleManifestAsync(parsed, layers, config, deleteMap, cancellationToken).ConfigureAwait(false);
+        return relativePaths;
+    }
+
+    /// <summary>
+    /// Writes a bundle THIS LIBRARY produced out of files that are already in the store, which is what a
+    /// pass-through export is: the publisher shipped the files, and all that is added is a bundle of its
+    /// own that names them and says where they came from.
+    /// </summary>
+    /// <remarks>
+    /// Not one byte is copied. The store is content addressed, so a second manifest naming the same
+    /// digests shares the same blobs, exactly as <see cref="CopyAsync"/> does; deleting either bundle
+    /// leaves the other's files alone, because a blob is removed only once no manifest names it.
+    /// </remarks>
+    /// <param name="name">The name the derived bundle is stored under.</param>
+    /// <param name="files">The files to name, as <see cref="ResolveAsync"/> reported them.</param>
+    /// <param name="provenance">What produced these files, and from what.</param>
+    /// <param name="overwrite">Whether a bundle already stored under the name may be replaced.</param>
+    /// <param name="cancellationToken">A token that cancels the work.</param>
+    /// <returns>The publisher-style relative paths that were stored, in manifest order.</returns>
+    /// <exception cref="ModelManagerException">
+    /// There are no files, one of their blobs is not in the store, or the name is taken and
+    /// <paramref name="overwrite"/> is <see langword="false"/>.
+    /// </exception>
+    internal async Task<IReadOnlyList<string>> WriteDerivedBundleFromStoreAsync(
+        string name,
+        IReadOnlyList<ResolvedFile> files,
+        DerivedProvenance provenance,
+        bool overwrite,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        ModelName parsed = ParseModelName(name, nameof(name));
+        if (provenance == null)
+        {
+            throw new ArgumentNullException(nameof(provenance));
+        }
+        if (files == null)
+        {
+            throw new ArgumentNullException(nameof(files));
+        }
+        if (files.Count == 0)
+        {
+            throw new ModelManagerException("there is no file to store under " + parsed.DisplayShortest());
+        }
+
+        await _paths.EnsureDirectoriesAsync(cancellationToken).ConfigureAwait(false);
+        Dictionary<string, string> deleteMap = await PrepareDerivedAsync(
+            parsed, name, overwrite, cancellationToken).ConfigureAwait(false);
+
+        var layers = new List<ModelLayer>(files.Count);
+        var relativePaths = new List<string>(files.Count);
+        foreach (ResolvedFile file in files)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            ModelLayer layer = await LayerFactory.CreateFromExistingBlobAsync(
+                _paths, file.Digest, MediaTypes.BundleFile, provenance.SourceName, cancellationToken)
+                .ConfigureAwait(false);
+            layer.Name = file.Name;
+            layers.Add(layer);
+            relativePaths.Add(file.Name);
+            deleteMap.Remove(layer.Digest);
+        }
+
+        ModelConfig config = BuildDerivedConfig(parsed, relativePaths, provenance);
+        await WriteBundleManifestAsync(parsed, layers, config, deleteMap, cancellationToken).ConfigureAwait(false);
+        return relativePaths;
+    }
+
+    /// <summary>
+    /// Refuses a derived bundle that would replace something the caller did not ask to replace, and
+    /// collects what the manifest being replaced referenced.
+    /// </summary>
+    /// <param name="parsed">The name the derived bundle is stored under.</param>
+    /// <param name="name">The name as the caller wrote it, for the message.</param>
+    /// <param name="overwrite">Whether an existing bundle may be replaced.</param>
+    /// <param name="cancellationToken">A token that cancels the read.</param>
+    /// <returns>The digests of the manifest being replaced, if there is one.</returns>
+    /// <exception cref="ModelManagerException">The name is taken and <paramref name="overwrite"/> is false.</exception>
+    private async Task<Dictionary<string, string>> PrepareDerivedAsync(
+        ModelName parsed, string name, bool overwrite, CancellationToken cancellationToken)
+    {
+        StoredManifest existing = await TryReadManifestAsync(parsed, cancellationToken).ConfigureAwait(false);
+        if (existing != null && !overwrite)
+        {
+            throw new ModelManagerException(
+                "the model " + parsed.DisplayShortest() + " is already in the store; set Overwrite in the"
+                    + " options to replace it, or choose another name with OutputName");
+        }
+
+        return CollectDeleteMap(existing);
+    }
+
+    /// <summary>
+    /// Builds the config layer of a derived bundle: its files, where they came from and what made them.
+    /// </summary>
+    /// <param name="name">The name the bundle is stored under.</param>
+    /// <param name="paths">The relative paths, which decide the model format.</param>
+    /// <param name="provenance">What produced the files, and from what.</param>
+    /// <returns>The config.</returns>
+    private static ModelConfig BuildDerivedConfig(
+        ModelName name, IReadOnlyList<string> paths, DerivedProvenance provenance)
+    {
+        LicenseRecord stated = provenance.License;
+        string timestamp = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture);
+
+        return new ModelConfig
+        {
+            ModelFormat = BundleFormatDetector.Detect(paths, provenance.Format),
+            ModelFamily = name.Model,
+            AdditionalProperties = new Dictionary<string, JsonElement>(StringComparer.Ordinal)
+            {
+                [ModelConfigKeys.Source] = ToJsonElement(DerivedSource),
+                [ModelConfigKeys.Repository] = ToJsonElement(provenance.SourceName),
+                [ModelConfigKeys.Revision] = ToJsonElement(null),
+                [ModelConfigKeys.LicenseId] = ToJsonElement(stated.LicenseId),
+                [ModelConfigKeys.LicenseSource] = ToJsonElement(stated.LicenseSource),
+                [ModelConfigKeys.PulledAt] = ToJsonElement(timestamp),
+                [ModelConfigKeys.DerivedFrom] = ToJsonElement(provenance.SourceName),
+                [ModelConfigKeys.Tool] = ToJsonElement(provenance.Tool),
+                [ModelConfigKeys.ToolVersion] = ToJsonElement(provenance.ToolVersion),
+                [ModelConfigKeys.DerivedAt] = ToJsonElement(timestamp),
+                [ModelConfigKeys.Settings] = ToSettingsElement(provenance.Settings)
+            }
+        };
+    }
+
+    /// <summary>
+    /// Turns the settings a tool was given into the JSON object the config carries.
+    /// </summary>
+    /// <param name="settings">The settings, which may be empty.</param>
+    /// <returns>A JSON object whose values are strings.</returns>
+    private static JsonElement ToSettingsElement(IReadOnlyDictionary<string, string> settings)
+    {
+        var ordered = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (settings != null)
+        {
+            foreach (KeyValuePair<string, string> setting in settings)
+            {
+                ordered[setting.Key] = setting.Value;
+            }
+        }
+
+        return JsonSerializer.SerializeToElement(ordered, ModelManagerJson.Options);
     }
 
     /// <inheritdoc />
@@ -935,12 +1562,12 @@ public sealed class ModelStore : IModelStore, IDisposable
             ModelFamily = name.Model,
             AdditionalProperties = new Dictionary<string, JsonElement>(StringComparer.Ordinal)
             {
-                [SourceProperty] = ToJsonElement(source),
-                [RepositoryProperty] = ToJsonElement(repository),
-                [RevisionProperty] = ToJsonElement(revision),
-                [LicenseIdProperty] = ToJsonElement(stated.LicenseId),
-                [LicenseSourceProperty] = ToJsonElement(stated.LicenseSource),
-                [PulledAtProperty] = ToJsonElement(DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture))
+                [ModelConfigKeys.Source] = ToJsonElement(source),
+                [ModelConfigKeys.Repository] = ToJsonElement(repository),
+                [ModelConfigKeys.Revision] = ToJsonElement(revision),
+                [ModelConfigKeys.LicenseId] = ToJsonElement(stated.LicenseId),
+                [ModelConfigKeys.LicenseSource] = ToJsonElement(stated.LicenseSource),
+                [ModelConfigKeys.PulledAt] = ToJsonElement(DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture))
             }
         };
     }
@@ -1114,8 +1741,8 @@ public sealed class ModelStore : IModelStore, IDisposable
     /// </returns>
     private static LicenseRecord ReadLicenseRecord(ModelConfig config)
     {
-        string licenseId = ReadConfigProperty(config, LicenseIdProperty);
-        string licenseSource = ReadConfigProperty(config, LicenseSourceProperty);
+        string licenseId = ReadConfigProperty(config, ModelConfigKeys.LicenseId);
+        string licenseSource = ReadConfigProperty(config, ModelConfigKeys.LicenseSource);
         return licenseId == null && licenseSource == null
             ? LicenseRecord.None
             : new LicenseRecord(licenseId, licenseSource, null);
@@ -1153,6 +1780,34 @@ public sealed class ModelStore : IModelStore, IDisposable
             && value.ValueKind == JsonValueKind.String
                 ? value.GetString()
                 : null;
+    }
+
+    /// <summary>
+    /// Reads the settings object a derived bundle's config records.
+    /// </summary>
+    /// <param name="config">The config layer.</param>
+    /// <returns>
+    /// The settings as strings, in the order they were written, or <see langword="null"/> when the
+    /// config carries no settings object - which is every bundle this library did not derive itself.
+    /// </returns>
+    private static IReadOnlyDictionary<string, string> ReadConfigSettings(ModelConfig config)
+    {
+        if (config == null || config.AdditionalProperties == null
+            || !config.AdditionalProperties.TryGetValue(ModelConfigKeys.Settings, out JsonElement value)
+            || value.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        var settings = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (JsonProperty property in value.EnumerateObject())
+        {
+            settings[property.Name] = property.Value.ValueKind == JsonValueKind.String
+                ? property.Value.GetString()
+                : property.Value.ToString();
+        }
+
+        return settings;
     }
 
     /// <summary>

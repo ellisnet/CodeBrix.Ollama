@@ -1,7 +1,7 @@
 # CodeBrix.Ollama
 
-Two cross-platform, zero-dependency .NET libraries for **downloading, managing and running
-large language models in-process**, with no Ollama installation and no server:
+Two cross-platform .NET libraries for **downloading, managing and running large language
+models in-process**, with no Ollama installation and no server:
 
 * **CodeBrix.Ollama.ModelManager** - a local model store laid out exactly as Ollama's own
   (`blobs/sha256-<hex>` and `manifests/<host>/<namespace>/<model>/<tag>`), fed from any registry
@@ -11,7 +11,8 @@ large language models in-process**, with no Ollama installation and no server:
   GGUF metadata, and resolves a model name to the GGUF files on disk. It also obtains models
   that no such registry serves - a Hugging Face file repository, any list of HTTPS addresses, a
   folder on disk - into the same store, and lays their files back out as the publisher wrote
-  them. Pure managed code.
+  them. It exports a model to ONNX and makes the graphs it holds several times smaller, keeping
+  each result in the same store with a record of what made it. Pure managed code.
 * **CodeBrix.Ollama.ModelRunner** - runs a GGUF model in-process over a self-built native
   inference engine, bound through hand-written P/Invoke and exposed to the application through
   an interface contract: completion, streaming chat through the model's own chat template, tool
@@ -50,9 +51,12 @@ lives in it - the folders you see in the repository are file organization, not n
 
 XML documentation (IntelliSense) ships alongside each assembly.
 
-Neither package has any NuGet dependencies: each dependency group is empty and they pull in
-nothing but the .NET runtime. Downloads go through the in-box `HttpClient`, JSON through
-`System.Text.Json` and hashing through `System.Security.Cryptography`.
+ModelRunner has no NuGet dependencies at all: its dependency group is empty and it pulls in
+nothing but the .NET runtime. ModelManager has exactly one, `CodeBrix.Python`, and it is inert -
+nothing of it is loaded until you use a Python feature, and obtaining, listing, resolving and
+materializing models are not Python features. Everything else in both libraries is in-box:
+downloads go through `HttpClient`, JSON through `System.Text.Json` and hashing through
+`System.Security.Cryptography`.
 
 The ModelRunner package additionally carries a native inference library for each supported
 runtime identifier, in the standard NuGet `runtimes/<rid>/native/` layout - `win-x64`,
@@ -73,6 +77,19 @@ your application the one it needs. There is no build-time compilation and no run
   keeps behind a sign-in
 * Materializing a bundle as the file tree its publisher wrote, hard-linked by default so laying
   it out costs no disk space
+* Exporting a bundle to ONNX and keeping the result in the same store as a *derived bundle* that
+  records what made it and from what: the graphs a publisher already ships are passed through with
+  no conversion and no Python at all, and a checkpoint is converted by the ONNX Runtime GenAI model
+  builder or by Hugging Face Optimum, running in a CPython the machine already has
+* Reducing the ONNX graphs a bundle holds - dynamic INT8, or block-wise four- or eight-bit
+  weights - into another derived bundle a few times smaller than the one it came from, with the
+  files that are not graphs carried through unchanged and the settings recorded; a reduced model
+  is an approximation of the one it came from, so measure it before you ship it
+* Making an existing `.onnx` graph smaller with **nothing installed at all**: block-wise four- and
+  eight-bit weights, and dynamic INT8 on a graph that has already been prepared, are done by this
+  library's own managed ONNX codec and quantizer - no Python, no native library - and write the
+  same bytes ONNX Runtime's own tools write for the same model, which the test suite checks
+  against real published models file by file
 * Reporting the licence a publisher states - the identifier, the address it was read from, and
   the `LICENSE` text a bundle ships - and applying no rule of its own
 * A store directory interchangeable with a real Ollama install's `~/.ollama/models` (the default
@@ -92,8 +109,8 @@ your application the one it needs. There is no build-time compilation and no run
   takes a `CancellationToken` as its last parameter
 
 Not in this package: running a model, rendering chat templates, pushing to a registry,
-safetensors layers in an Ollama manifest, converting or reducing the files it fetched, deciding
-anything about a licence, or any HTTP server.
+safetensors layers in an Ollama manifest, loading a checkpoint itself rather than driving the
+publisher's own export tooling, deciding anything about a licence, or any HTTP server.
 
 ## CodeBrix.Ollama.ModelRunner supports:
 
@@ -136,6 +153,10 @@ serving many conversations from one loaded model at once.
   bundle's files come from, for pulls only.
   Everything else works offline against the local store. Disk space for the store; a pull writes
   to the store directory and nowhere else.
+* For ModelManager's ONNX features: converting a checkpoint needs a CPython shared library on the
+  machine with the export tooling installed in it, and the library says which module is missing and
+  how to install it when one is not. Passing a publisher's own ONNX graphs through, and making an
+  existing graph smaller with block-wise four- or eight-bit weights, need nothing installed.
 * For ModelRunner: a GGUF file on disk, and enough memory for it. Memory mapping is the default
   load mode, so the weights are paged in on demand rather than read in, and a 20 GB model runs on
   a 32 GiB machine. No GPU is required - CPU-only inference is the tested path.
@@ -183,6 +204,34 @@ Console.WriteLine($"{info.Format}, licence {info.License.LicenseId ?? "not state
 
 // The publisher's own file tree, hard-linked out of the store.
 foreach (var path in await store.MaterializeAsync(name, "/work/example-model"))
+    Console.WriteLine(path);
+```
+
+### Export a Bundle to ONNX and Make It Smaller
+
+```csharp
+using CodeBrix.Ollama.ModelManager;
+
+using var store = new ModelStore();
+
+// Export. The automatic route passes a publisher's own .onnx files through - no conversion,
+// no Python, no bytes copied - and converts a checkpoint with the tooling that suits it.
+ExportResult exported = await store.ExportToOnnxAsync("hf.co/example-org/example-model");
+Console.WriteLine($"{exported.Name} by {exported.Tool} ({exported.RouteUsed})");
+
+// Reduce. Block-wise four-bit weights are this library's own managed code: nothing installed,
+// and the same bytes ONNX Runtime's own tools write.
+ReduceResult reduced = await store.ReduceOnnxAsync(
+    exported.Name, new ReduceOptions { Mode = ReduceMode.WeightOnlyInt4 });
+
+Console.WriteLine($"{reduced.Name}: {reduced.SourceBytes} -> {reduced.ReducedBytes} bytes " +
+                  $"({reduced.EngineUsed})");
+
+// Both results are ordinary models in the same store, recording what made them.
+var info = await store.ShowAsync(reduced.Name);
+Console.WriteLine($"{info.Tool} {info.ToolVersion} made this from {info.DerivedFrom}");
+
+foreach (var path in await store.MaterializeAsync(reduced.Name, "/work/example-model-int4"))
     Console.WriteLine(path);
 ```
 

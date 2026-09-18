@@ -56,7 +56,7 @@
     <Product>CodeBrix.Ollama.ModelManager</Product>
     <Title>CodeBrix.Ollama.ModelManager</Title>
     <Authors>Jeremy Ellis</Authors>
-    <Description>A cross-platform, zero-dependency .NET library that downloads and maintains a local store of LLM models. Pulls models from the Ollama registry with sha256 verification and resumable downloads, keeps them in Ollama's own on-disk blob and manifest layout, lists, shows, copies, deletes and creates models from Modelfiles, reads GGUF metadata, and resolves a model name to the GGUF file on disk for an in-process runner such as CodeBrix.Ollama.ModelRunner. Also obtains models that no such registry serves - the files of a Hugging Face repository, of any list of HTTPS addresses or of a folder on disk - into the same store, and materializes them as the publisher's own file tree. Pure managed code; no server, no native libraries.</Description>
+    <Description>A cross-platform .NET library that downloads and maintains a local store of LLM models. Pulls models from the Ollama registry with sha256 verification and resumable downloads, keeps them in Ollama's own on-disk blob and manifest layout, lists, shows, copies, deletes and creates models from Modelfiles, reads GGUF metadata, and resolves a model name to the GGUF file on disk for an in-process runner such as CodeBrix.Ollama.ModelRunner. Also obtains models that no such registry serves - the files of a Hugging Face repository, of any list of HTTPS addresses or of a folder on disk - into the same store, and materializes them as the publisher's own file tree. Exports a model to ONNX - passing through the graphs a publisher already ships, or running the ONNX Runtime GenAI model builder or Hugging Face Optimum in a CPython the machine already has - and keeps the result in the same store as a derived bundle with its provenance. Reduces an exported graph - dynamic INT8, or block-wise four- or eight-bit weights - into another derived bundle a few times smaller than the one it came from; the weight-only modes, and dynamic INT8 on a prepared graph, are done by the library's own managed ONNX codec and quantizer, so making an existing graph smaller needs nothing installed and writes the same bytes ONNX Runtime's own tools write. Pure managed code; no server, no native libraries. It has exactly one NuGet dependency, CodeBrix.Python, which stays inert until a Python feature is used: obtaining, listing, resolving and materializing models never load it, and neither does the managed reduction engine.</Description>
     <Copyright>Copyright (c) 2026 Jeremy Ellis and contributors</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/ellisnet/CodeBrix.Ollama</PackageProjectUrl>
@@ -67,8 +67,21 @@
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
     <IsPackable>true</IsPackable>
-    <PackageTags>ollama;llm;gguf;model;registry;download;modelfile;huggingface;bundles;ai;local-ai;CodeBrix</PackageTags>
+    <PackageTags>ollama;llm;gguf;model;registry;download;modelfile;huggingface;bundles;onnx;export;quantization;ai;local-ai;python;CodeBrix</PackageTags>
   </PropertyGroup>
+
+  <!--
+    The library's ONE package dependency. It is inert: every CodeBrix.Python type this assembly names
+    lives in Python/PythonHost.cs, so the runtime loads that assembly only when a Python feature runs.
+  -->
+  <ItemGroup>
+    <PackageReference Include="CodeBrix.Python.MitLicenseForever" Version="1.0.260.1181" />
+  </ItemGroup>
+
+  <!-- The Python scripts this library runs ship inside the assembly, never as files on disk. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Python\Scripts\*.py" />
+  </ItemGroup>
 
   <ItemGroup>
     <None Include="..\..\icon-codebrix-128.png" Pack="true" PackagePath="" />

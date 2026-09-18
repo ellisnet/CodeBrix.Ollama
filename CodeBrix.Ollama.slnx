@@ -12,6 +12,8 @@
     <File Path="THIRD-PARTY-NOTICES.txt" />
   </Folder>
   <Folder Name="/Tests/">
+    <Project Path="tests/CodeBrix.Ollama.ModelManager.Probe/CodeBrix.Ollama.ModelManager.Probe.csproj" />
+    <Project Path="tests/CodeBrix.Ollama.ModelManager.Python.Tests/CodeBrix.Ollama.ModelManager.Python.Tests.csproj" />
     <Project Path="tests/CodeBrix.Ollama.ModelManager.Tests/CodeBrix.Ollama.ModelManager.Tests.csproj" />
     <Project Path="tests/CodeBrix.Ollama.ModelRunner.Tests/CodeBrix.Ollama.ModelRunner.Tests.csproj" />
   </Folder>

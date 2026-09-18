@@ -61,6 +61,32 @@ public sealed class ModelInfo
     /// </summary>
     public string Format { get; set; }
 
+    /// <summary>
+    /// The model this one was DERIVED from - exported, or reduced - spelled exactly as that model is
+    /// stored, or <see langword="null"/> when this bundle was not produced by this library from another
+    /// model. Nothing checks that the source is still in the store: a derived bundle is a snapshot of
+    /// what the source held when the tool ran.
+    /// </summary>
+    public string DerivedFrom { get; set; }
+
+    /// <summary>
+    /// The tool that produced a derived bundle - "onnxruntime-genai", "optimum" or "publisher" for files
+    /// the publisher shipped and this library only registered - or <see langword="null"/> when the
+    /// bundle was not derived.
+    /// </summary>
+    public string Tool { get; set; }
+
+    /// <summary>
+    /// The version of <see cref="Tool"/>, as the tool itself reported it, or <see langword="null"/>.
+    /// </summary>
+    public string ToolVersion { get; set; }
+
+    /// <summary>
+    /// The options the tool was run with, as strings, or <see langword="null"/> when the bundle was not
+    /// derived. An export records its route, its precision and whether remote code was allowed.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> Settings { get; set; }
+
     /// <summary>The messages layer decoded; empty when there is none.</summary>
     public IReadOnlyList<ModelMessage> Messages { get; set; }
 

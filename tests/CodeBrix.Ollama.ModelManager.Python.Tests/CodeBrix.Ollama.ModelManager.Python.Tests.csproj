@@ -1,0 +1,90 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The tests that need a real CPython. They are a SECOND EXECUTABLE rather than more classes in
+    CodeBrix.Ollama.ModelManager.Tests because an interpreter belongs to a process, is started once and
+    cannot be restarted: putting these tests beside the offline suite would leave every later run of that
+    suite with an interpreter it did not ask for. Gated by CODEBRIX_OLLAMA_RUN_PYTHON_TESTS=1; with the
+    gate closed every test skips and nothing is started.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>CodeBrix.Ollama.ModelManager.Python.Tests</AssemblyName>
+    <RootNamespace>CodeBrix.Ollama.ModelManager.Python.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="xunit.v3" Version="4.0.1" />
+    <PackageReference Include="SilverAssertions.ApacheLicenseForever" Version="1.0.248.1071" />
+  </ItemGroup>
+
+  <!--
+    xunit.runner.json configures the runner. It only takes effect when it sits beside the test assembly,
+    so it is copied explicitly. Here the serial setting is not a convenience: the whole assembly shares one
+    interpreter.
+  -->
+  <ItemGroup>
+    <None Update="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!--
+    The TEST-SIDE Python scripts. They are not embedded in anything and the library never reads them:
+    the tests spawn the virtual environment's own interpreter over them, which is how what a reduced
+    model COMPUTES is checked without the library ever running a model.
+  -->
+  <ItemGroup>
+    <None Update="Python\*.py" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!--
+    The music-model DEFINITIONS are LINKED from the other ModelManager test project rather than copied.
+    Every other piece of test infrastructure here is a copy, because no test project references another,
+    but these three files are pinned publisher DATA - sizes, sha256 values and a commit - generated from
+    one spike record, and two copies of that would be two things to keep true instead of one.
+  -->
+  <ItemGroup>
+    <Compile Include="..\CodeBrix.Ollama.ModelManager.Tests\Infrastructure\MusicModelDefinitions.cs" Link="Infrastructure\MusicModelDefinitions.cs" />
+    <Compile Include="..\CodeBrix.Ollama.ModelManager.Tests\Infrastructure\MusicModel.cs" Link="Infrastructure\MusicModel.cs" />
+    <Compile Include="..\CodeBrix.Ollama.ModelManager.Tests\Infrastructure\ExpectedBundleFile.cs" Link="Infrastructure\ExpectedBundleFile.cs" />
+  </ItemGroup>
+
+  <!--
+    The comparison of what the two reduction engines write is done with the SAME reader the offline suite compares
+    fixtures with, linked rather than copied for the same reason: two copies of the rules for "these are the same
+    model" would be two things to keep true, and the whole point of the comparison is that there is one.
+  -->
+  <ItemGroup>
+    <Compile Include="..\CodeBrix.Ollama.ModelManager.Tests\Onnx\OnnxModelComparison.cs" Link="Onnx\OnnxModelComparison.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\CodeBrix.Ollama.ModelManager\CodeBrix.Ollama.ModelManager.csproj" />
+    <!--
+      The probe is a console application, not a library: it is referenced only so that it is built before
+      these tests run, and its output is copied below rather than linked. The ownership modes are facts
+      about a whole process, so each one runs as a child process of its own.
+    -->
+    <ProjectReference Include="..\CodeBrix.Ollama.ModelManager.Probe\CodeBrix.Ollama.ModelManager.Probe.csproj" ReferenceOutputAssembly="false" Private="false" />
+  </ItemGroup>
+
+  <!--
+    Copy the built probe into a sub-folder of this project's output, so the tests find it from
+    AppContext.BaseDirectory on every operating system instead of guessing at a sibling project's bin path
+    at run time. The item group is inside the target, so the wildcard is expanded after the
+    ProjectReference above has produced the files.
+  -->
+  <Target Name="CopyProbeToOutput" AfterTargets="Build">
+    <ItemGroup>
+      <_ProbeOutput Include="$(MSBuildThisFileDirectory)..\CodeBrix.Ollama.ModelManager.Probe\bin\$(Configuration)\$(TargetFramework)\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_ProbeOutput)" DestinationFiles="@(_ProbeOutput->'$(OutDir)probe\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" Condition="'@(_ProbeOutput)' != ''" />
+  </Target>
+
+</Project>
