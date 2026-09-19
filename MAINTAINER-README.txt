@@ -848,7 +848,10 @@ ModelManager.Python.Tests and EndToEnd.Tests in Infrastructure/TestGates.cs:
                                         interpreter EndToEnd.Tests spawns over
                                         its own oracle script
     CODEBRIX_OLLAMA_ENGINE_CLONE        a checkout of the inference engine at
-                                        the vendored commit. It opens ONE test,
+                                        the vendored commit, WITH
+                                        oracle-converter.patch APPLIED (see
+                                        CONVERTING TO GGUF, END TO END). It
+                                        opens ONE test,
                                         the one that converts a real checkpoint
                                         with the engine's OWN converter and
                                         compares the bytes; unset, that test
@@ -1087,6 +1090,18 @@ what all eleven measured. The five conversion tests:
         general.size_label from the folder it is pointed at while the store
         derives them from the last segment of the model's name; a folder named
         anything else makes two correct files differ in three keys.
+        THE CHECKOUT MUST CARRY oracle-converter.patch, the same patch the
+        converter fixtures are generated with (see CONVERTING TO GGUF
+        (maintainer) - HOW THE ORACLE FIXTURES ARE REBUILT). The test runs convert_hf_to_gguf.py as it finds it, and a
+        PRISTINE checkout refuses MuPT: its tokenizer is a custom class named
+        by tokenizer_config.json's auto_map, and the unpatched converter calls
+        AutoTokenizer.from_pretrained without trust_remote_code, so the child
+        process exits 1 with "ValueError: The repository ... contains custom
+        code which must be executed". (On Linux transformers first tries to
+        PROMPT for the answer; on Windows, which has no SIGALRM, it raises at
+        once.) The patch also lets the slow tokenizer through and teaches the
+        converter MuPT's pre-tokenizer fingerprint. The converter additionally
+        needs sentencepiece in the virtual environment.
   the_largest_checkpoint_converts_without_being_held_in_memory
         LIVE gate plus CODEBRIX_OLLAMA_RUN_LARGE_MUSIC_TESTS - the same
         large-repository gate the store's own suite uses, and never opened by
@@ -1101,6 +1116,18 @@ what all eleven measured. The five conversion tests:
         then loads the converted model through the runner and generates. The
         CHECKPOINT is kept in the test-model cache afterwards, because
         downloading it again is what costs; the converted file is removed.
+
+The engine checkout, prepared once:
+
+    git clone --depth 1 --branch b10221 <the engine> ~/Temp/engine-b10221
+    git -C ~/Temp/engine-b10221 apply \
+        tests/CodeBrix.Ollama.ModelManager.Tests/Convert/Fixtures/\
+oracle-converter.patch
+
+On Windows the clone fails with "Filename too long" under the engine's web UI
+folder (tools/ui/...) unless long paths are allowed for that one command:
+`git -c core.longpaths=true clone ...`, or a short target folder. That changes
+no global configuration.
 
     export TMPDIR=$HOME/Temp/codebrix-ollama-tmp
     CODEBRIX_OLLAMA_RUN_LIVE_TESTS=1 \
