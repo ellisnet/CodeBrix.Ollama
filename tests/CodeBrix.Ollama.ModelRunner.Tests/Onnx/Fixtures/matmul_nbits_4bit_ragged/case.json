@@ -1,0 +1,27 @@
+{
+  "name": "matmul_nbits_4bit_ragged",
+  "opset": 21,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        2,
+        70
+      ],
+      "file": "in_a.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        2,
+        5
+      ],
+      "file": "out_y.bin"
+    }
+  ],
+  "note": "A reduction that is not a whole number of blocks, so the last block is short."
+}

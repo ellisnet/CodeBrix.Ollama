@@ -1,0 +1,30 @@
+{
+  "name": "unsqueeze_scalar",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [],
+      "file": "in_a.bin"
+    },
+    {
+      "name": "axes",
+      "type": "int64",
+      "shape": [
+        1
+      ],
+      "file": "in_axes.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        1
+      ],
+      "file": "out_y.bin"
+    }
+  ]
+}

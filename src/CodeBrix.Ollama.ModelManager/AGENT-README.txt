@@ -35,15 +35,19 @@ It does five things, and they build on one another:
      deleting and pruning work on them unchanged. What a publisher states
      about the licence is reported, and MaterializeAsync writes the files
      back out as the file tree the publisher wrote.
-  4. DERIVED BUNDLES -- a model this library made from one already in the
+  4. DERIVED MODELS -- a model this library made from one already in the
      store, stored beside it and recording what made it and from what:
      ExportToOnnxAsync turns a checkpoint into ONNX (or registers the graphs a
-     publisher already ships), and ReduceOnnxAsync makes those graphs several
-     times smaller by quantizing their weights. Converting a checkpoint needs
-     a CPython on the machine, because that work only exists in Python;
-     REDUCING AN EXISTING GRAPH TO FOUR- OR EIGHT-BIT WEIGHTS NEEDS NOTHING
-     INSTALLED, because this library does it itself. A reduced model is an
-     approximation of the one it came from.
+     publisher already ships), ReduceOnnxAsync makes those graphs several
+     times smaller by quantizing their weights, ConvertToGgufAsync turns a
+     checkpoint into an ordinary GGUF model a runner loads, and
+     QuantizeGgufAsync stores a smaller copy of a GGUF model that a quantizer
+     YOU supply writes - this library has none of its own. Exporting a
+     checkpoint to ONNX needs a CPython on the machine, because that work only
+     exists in Python; CONVERTING A CHECKPOINT TO GGUF AND REDUCING AN EXISTING
+     GRAPH TO FOUR- OR EIGHT-BIT WEIGHTS NEED NOTHING INSTALLED, because this
+     library does both itself. A reduced model is an approximation of the one
+     it came from.
   5. THE FILE FORMATS -- a Modelfile parser that accepts what Ollama's parser
      accepts, with the same messages and line numbers, and a GGUF header
      reader that returns every key-value and tensor descriptor without ever
@@ -57,10 +61,11 @@ synchronous wrappers over the async work.
 The package has exactly ONE NuGet dependency, CodeBrix.Python, and it is INERT:
 nothing of it is loaded until a Python feature actually runs. Obtaining a model,
 listing, showing, resolving, materializing, importing a folder, parsing a
-Modelfile, reading GGUF metadata, passing a publisher's own ONNX graphs through
-and reducing an ONNX graph to four- or eight-bit weights are not Python
-features and never load it. Converting a checkpoint to ONNX is. See PYTHON
-below, which says feature by feature which is which.
+Modelfile, reading GGUF metadata, passing a publisher's own ONNX graphs through,
+converting a checkpoint to GGUF, quantizing a stored GGUF model with a quantizer
+you supply and reducing an ONNX graph to four- or eight-bit weights are not
+Python features and never load it. Exporting a checkpoint to
+ONNX is. See PYTHON below, which says feature by feature which is which.
 
 Target framework: .NET 10 or later; no netstandard and no .NET Framework
 target. Source: https://github.com/ellisnet/CodeBrix.Ollama
@@ -68,14 +73,17 @@ target. Source: https://github.com/ellisnet/CodeBrix.Ollama
 HOW THIS RELATES TO CodeBrix.Ollama.ModelRunner
 -----------------------------------------------
 The same repository produces a second, SEPARATE package,
-CodeBrix.Ollama.ModelRunner.MitLicenseForever, which loads a GGUF file and runs
-it in-process. It has its own AGENT-README, and nothing in this document
-describes its API. The two packages are independent -- neither references the
-other, and neither is or contains an HTTP server. The seam between them is
-ResolveAsync: the paths in the ResolvedModel
+CodeBrix.Ollama.ModelRunner.MitLicenseForever, which loads a model file and runs
+it in-process -- a GGUF model over a native engine it ships, or an ONNX graph on
+a managed interpreter that needs nothing installed. It has its own AGENT-README,
+and nothing in this document describes its API. The two packages are independent
+-- neither references the other, and neither is or contains an HTTP server. The
+seam between them is ResolveAsync: the paths in the ResolvedModel
 it returns (ModelPath, ModelShardPaths, ProjectorPaths, AdapterPaths and
 DraftPath) are ordinary files, and they are what ANY in-process GGUF runner
-loads -- ModelRunner, another binding, or your own.
+loads -- ModelRunner, another binding, or your own. For a BUNDLE, which is many
+files rather than one, ResolvedModel.Files gives a name and a path for each, and
+those pairs are what ModelRunner's ONNX load methods take.
 
 
 INSTALLATION
@@ -90,17 +98,24 @@ name; the assembly is CodeBrix.Ollama.ModelManager and the single namespace is
 CodeBrix.Ollama.ModelManager. NuGet dependencies: EXACTLY ONE,
 CodeBrix.Python, and it is inert -- nothing of it is loaded until a Python
 feature is used, and obtaining, listing, resolving and materializing models are
-not Python features, nor is making an existing ONNX graph smaller.
+not Python features, nor is making an existing ONNX graph smaller, nor is
+converting a checkpoint to GGUF.
 Everything else is in-box: JSON goes through
 System.Text.Json and hashing through System.Security.Cryptography, and no
 native library ships in the package. License: MIT, with license acceptance
 required.
 
+THE TWO CodeBrix.Ollama PACKAGES ARE VERSIONED AND RELEASED TOGETHER. If your
+application also uses CodeBrix.Ollama.ModelRunner.MitLicenseForever, install
+both at the SAME version. A mixture builds without complaint and then fails at
+run time with a message telling you to do exactly this.
+
 A CPython SHARED LIBRARY is needed ONLY for the Python features -- and only at
 the moment one runs. Nothing here ships, installs or downloads CPython or any
-pip module; the store, the registry, Modelfiles, GGUF metadata and the managed
-reduction engine need none of it. See PYTHON below for which features are which,
-how a CPython is found, and what is reported when there is none.
+pip module; the store, the registry, Modelfiles, GGUF metadata, the checkpoint
+converter and the managed reduction engine need none of it. See PYTHON below for
+which features are which, how a CPython is found, and what is reported when
+there is none.
 
 NULLABLE REFERENCE TYPES ARE OFF in the library, so the compiler will not warn
 you about anything it hands back. Where a member can be null its XML
@@ -121,14 +136,15 @@ public type lives in it - the bundle vocabulary (BundleDefinition,
 BundleFile, BundleListing, FileFilter, LicenseRecord, PullOptions, PullSource,
 ImportOptions, MaterializeOptions, MaterializeLink, ResolvedFile), the two
 sources (HuggingFaceHubSource, HttpFileListSource, with the helper
-GoogleCloudStorageListing), the conversion and reduction vocabulary
+GoogleCloudStorageListing), the export, reduction and conversion vocabulary
 (ExportOptions, ExportRoute, ExportResult, ReduceOptions, ReduceMode,
-ReduceEngine, ReduceResult, ModelConfigKeys) and the Python corner
+ReduceEngine, ReduceResult, ConvertOptions, ConvertResult, GgufOutputType,
+CheckpointArchitecture, ModelConfigKeys) and the Python corner
 (PythonSupport, PythonOptions, PythonSupportReport, PythonModuleReport,
 PythonLibrarySource, PythonVirtualEnvironmentSource, PythonEngineOwner) among
 them. The repository folders (Common/, Names/, Gguf/, Modelfile/, Store/,
-Registry/, Bundles/, Sources/, Python/, Export/, Reduce/, Onnx/) are FILE
-ORGANIZATION ONLY, not namespaces:
+Registry/, Bundles/, Sources/, Python/, Export/, Reduce/, Onnx/, Checkpoints/,
+Convert/) are FILE ORGANIZATION ONLY, not namespaces:
 `using CodeBrix.Ollama.ModelManager.Store;` is a CS0246 error.
 Everything under Registry/ is internal -- the registry client, the blob
 downloader and the challenge parser are reached only through PullAsync. You
@@ -191,6 +207,10 @@ and what it hands back:
                                     each one needs
     REDUCING AN ONNX MODEL          ReduceOnnxAsync, its four modes and its two
                                     engines - one of which needs nothing
+    CONVERTING TO GGUF              ConvertToGgufAsync: a checkpoint becomes a
+                                    GGUF model, with nothing installed at all
+    QUANTIZING A STORED GGUF MODEL  QuantizeGgufAsync and the quantizer you
+                                    supply, with the complete consumer wiring
     THE ERROR MODEL                 every exception and when it is thrown
     THREAD SAFETY AND CONCURRENCY   what is and is not coordinated
 
@@ -385,6 +405,16 @@ substitute your own in tests.
                                        ReduceOptions options = null,
                                        IProgress<PullProgress> progress = null,
                                        CancellationToken)
+    Task<ConvertResult> ConvertToGgufAsync(string name,
+                                           ConvertOptions options = null,
+                                           IProgress<PullProgress> progress
+                                               = null,
+                                           CancellationToken)
+    Task<QuantizeGgufResult> QuantizeGgufAsync(string name,
+                                               QuantizeGgufOptions options,
+                                               IProgress<PullProgress> progress
+                                                   = null,
+                                               CancellationToken)
 
 Every CancellationToken parameter is last and defaulted. Every name argument
 must parse to a fully qualified name: a null or blank name is an
@@ -1380,8 +1410,20 @@ source can be deleted, replaced or re-pulled at another revision and the
 derived bundle stays exactly as it was, still naming what it came from. Export
 or reduce again when the source changes.
 
+A DERIVED BUNDLE CAN BE RUN, by the other package. ResolveAsync gives a name
+and a path for every file in it, and CodeBrix.Ollama.ModelRunner takes exactly
+those pairs - no copies, no MaterializeAsync, nothing laid out first. That is
+the only seam between the two packages and it is written in YOUR code.
+
 DELETING EITHER ONE LEAVES THE OTHER ALONE. Blobs are shared by digest, and a
 blob is removed only once no manifest in the store names it.
+
+A CONVERTED GGUF MODEL IS NOT A BUNDLE but records the same four properties, in
+the same config keys, for the same reason: ConvertToGgufAsync stores an ORDINARY
+GGUF model - weights, parameters and licence layers, nothing of a publisher's
+file tree - whose DerivedFrom names the checkpoint it was made from, whose Tool
+is "CodeBrix.Ollama.ModelManager" and whose Settings say what it was asked for.
+See CONVERTING TO GGUF.
 
 SHOWING AND LISTING
 ===================
@@ -1430,9 +1472,10 @@ PYTHON
 ONE CORNER of this library needs CPython, and it is not the corner most
 consumers use. Obtaining a model, listing, showing, resolving, materializing,
 importing a folder, parsing a Modelfile, reading GGUF metadata, passing a
-publisher's own ONNX graphs through and reducing a graph with the managed
+publisher's own ONNX graphs through, converting a checkpoint to GGUF and
+reducing a graph with the managed
 engine are pure managed code that will never touch Python, on a machine that
-has none. CONVERTING A CHECKPOINT to ONNX, and preparing a graph for a
+has none. EXPORTING A CHECKPOINT to ONNX, and preparing a graph for a
 quantizer, are the work that only exists in Python.
 
 The package declares exactly ONE NuGet dependency, CodeBrix.Python, and it is
@@ -1485,7 +1528,21 @@ reaching for Python:
   ReduceOnnxAsync                     CPython + onnx, onnxruntime, whatever
     Engine = Python                     the mode: you asked for that engine
 
-  PythonSupport.Check                 nothing to CALL it - it NEVER throws and
+  ConvertToGgufAsync                  NOTHING, in every case. The checkpoint
+                                      readers, the tokenizer export and the
+                                      GGUF writer are this library's own
+                                      managed code; no interpreter is looked
+                                      for, started or loaded, whatever the
+                                      checkpoint is written in
+
+  QuantizeGgufAsync                   NOTHING of this library's. The quantizer
+                                      is YOURS and this package has none, so
+                                      what the call needs is whatever your own
+                                      delegate needs - and the obvious one,
+                                      CodeBrix.Ollama.ModelRunner, needs
+                                      nothing installed either
+
+  PythonSupport.Check                nothing to CALL it - it NEVER throws and
                                       reports a machine with no CPython as
                                       exactly that. With modules named it
                                       starts an interpreter to import them
@@ -1496,12 +1553,14 @@ reaching for Python:
                                       an interpreter it does nothing
 
 What Python IS for in this library is the tooling that only exists in Python:
-converting a model to another format, and preparing a graph for a quantizer.
+exporting a model to ONNX, and preparing a graph for a quantizer.
 Each feature names the modules it imports and checks for them BEFORE it does
 anything, so a machine that cannot run one is told so in a second; finding that
-out in advance is what PythonSupport.Check is for. MAKING AN EXISTING GRAPH
-SMALLER IS NOT ONE OF THEM: the weight-only modes, and dynamic quantization of
-a prepared graph, are this library's own managed code.
+out in advance is what PythonSupport.Check is for. TWO THINGS THAT SOUND LIKE
+THEM ARE NOT: making an existing graph smaller - the weight-only modes, and
+dynamic quantization of a prepared graph - and converting a checkpoint to GGUF
+are this library's own managed code, and the second of those reads a PyTorch
+checkpoint without PyTorch.
 
 WHAT THIS PACKAGE DOES NOT DO ABOUT PYTHON: it does not ship, install or
 download CPython, and it does not install pip modules. A CPython SHARED LIBRARY
@@ -1751,6 +1810,14 @@ WHAT Auto DECIDES:
 Naming a route outright overrides all of it, which is how a model the automatic
 rules do not know is still exported: name GenAiBuilder and let the builder
 answer for itself.
+
+WHAT RUNS WHAT THIS WRITES. An exported bundle is a set of files in the store
+like any other, and this library does nothing more with it. The separate
+CodeBrix.Ollama.ModelRunner package can RUN one: resolve the bundle, hand it
+the (file name -> path) pairs ResolveAsync gives you, and it loads the graph on
+a managed interpreter that needs nothing installed - no ONNX runtime, no Python
+and no native library. See its AGENT-README, RUNNING ONNX MODELS. The two
+packages never reference each other and must be installed at the SAME version.
 
 WHICH ROUTES NEED PYTHON, AND WHICH MODULES
 
@@ -2132,10 +2199,399 @@ name is taken and Overwrite is not set, or dynamic quantization was asked for
 on an unprepared graph with no CPython to prepare it in).
 
 WHAT RUNS A REDUCED MODEL. A four-bit graph needs a runtime that implements
-MatMulNBits, and a dynamically quantized one needs MatMulInteger; ONNX Runtime
-implements both, and something else may implement neither. Neither this library
-nor CodeBrix.Ollama.ModelRunner runs an ONNX model at all - ModelRunner runs
-GGUF - so whatever you reduce here is for a runtime you bring yourself.
+MatMulNBits, and a dynamically quantized one needs MatMulInteger; a runtime that
+implements neither will not load one at all. THIS LIBRARY NEVER RUNS A MODEL OF
+ANY KIND - it obtains them, stores them and makes them smaller. The separate
+CodeBrix.Ollama.ModelRunner package DOES run an ONNX graph, on a managed
+interpreter inside that package which implements both operators and needs
+nothing installed; hand it the paths this library resolves. Its AGENT-README's
+RUNNING ONNX MODELS section is the whole of that story, including what it
+refuses and how close its numbers are to another runtime's. Anything else is a
+runtime you bring yourself.
+
+THE TWO PACKAGES ARE RELEASED TOGETHER AND MUST BE INSTALLED AT THE SAME
+VERSION. Neither references the other, so the only thing that joins them is
+your own code handing paths from one to the other.
+
+
+CONVERTING TO GGUF
+==================
+    Task<ConvertResult> ConvertToGgufAsync(string name,
+        ConvertOptions options = null,
+        IProgress<PullProgress> progress = null,
+        CancellationToken cancellationToken = default)
+
+turns a transformers CHECKPOINT held as a bundle into an ordinary GGUF model in
+the same store - one that lists, shows, resolves, copies and deletes like any
+model pulled from a registry, and whose file an in-process GGUF runner loads
+through ResolveAsync().ModelPath. The source must be a bundle holding the files
+a publisher ships for a checkpoint; a model that is already GGUF, a bundle whose
+graphs are ONNX, and a model with no publisher file tree at all are each refused
+by name.
+
+NOTHING HAS TO BE INSTALLED, AND NO PYTHON IS STARTED. This is the plain form of
+it, and it is worth saying twice because the source is a PyTorch checkpoint: the
+conversion is this library's own managed code from end to end. It opens the
+weights itself - safetensors, or the zip-and-pickle container that a
+pytorch_model.bin is - maps every tensor on to the name a GGUF runner expects,
+permutes the query and key projections into the layout that runner's rotary
+embedding wants, reads the tokenizer out of the publisher's own files, and
+writes the GGUF file. No CPython, no pip module, no native library, no tooling
+of the publisher's, and nothing is downloaded but the model itself.
+
+WHAT IT CONVERTS, AND WHAT IT REFUSES
+
+    architecture      the LLAMA FAMILY, which is what the great majority of
+                      published decoder-only checkpoints declare in
+                      config.json - whatever the model is called. Anything else
+                      is a NotSupportedException quoting what config.json said
+                      (architectures[0], or model_type when there is no
+                      architectures entry)
+    tokenizers        GPT-2 BYTE-LEVEL BPE (vocab.json + merges.txt) and
+                      SENTENCEPIECE BPE (tokenizer.model). Which road is taken
+                      is decided by the files, not by the configuration: a
+                      tokenizer.model makes it the SentencePiece one whatever
+                      sits beside it. A checkpoint whose only tokenizer is a
+                      tokenizer.json, and one that ships a tekken.json, are
+                      refused with a NotSupportedException naming that file -
+                      reading either needs the publisher's own tokenizer
+                      library, which a conversion never runs
+    containers        SAFETENSORS and PYTORCH ZIP PICKLES, each of them single
+                      or SHARDED across several files with an index beside
+                      them - model.safetensors.index.json, or
+                      pytorch_model.bin.index.json. A shard set whose index and
+                      files disagree is refused, naming both
+    output type       F32, F16 or BF16. The default keeps what the checkpoint
+                      already is
+    rotary scaling    NOT converted. A config.json that asks for scaled rotary
+                      embedding (a rope_type of any kind) is refused with a
+                      NotSupportedException naming it, because such a model
+                      needs keys - and in one case a tensor - that this version
+                      does not write, and a file that quietly lacked them would
+                      load and be wrong
+
+THE SIZE OF THE FILE IS NOT THE SIZE OF THE MEMORY. Tensors are read one at a
+time and written as they are read, so converting a checkpoint of several
+gigabytes costs a fraction of that in memory rather than all of it. There is no
+mode in which the whole checkpoint is held.
+
+READING A PICKLE SAFELY. A pytorch_model.bin is a Python PICKLE, and a pickle is
+a program: the ordinary interpreter for one can import any module and call any
+callable the file names. This library never uses that interpreter. It implements
+the handful of opcodes a tensor state dictionary is built from and nothing else,
+it never imports and never evaluates, and the only constructors it will honour
+are the tensor, parameter, ordered-dictionary and storage classes a state
+dictionary needs. Everything else - an opcode it does not implement, a global it
+does not allow, a persistent identifier of the wrong shape - raises
+PickleRefusedException, whose Construct property holds the opcode or the fully
+qualified name that was refused, so a refusal reads without a debugger. A
+malformed container of either kind is a CheckpointFormatException.
+
+ConvertOptions
+
+    GgufOutputType OutputType    Auto (the default) | F32 | F16 | BF16. Auto
+                                 keeps the checkpoint's own type, decided from
+                                 the WEIGHTS rather than from what the
+                                 configuration claims: a bfloat16 checkpoint
+                                 becomes BF16, a float16 one F16, and anything
+                                 else F16. Whatever is chosen, the tensors a
+                                 runner needs at full precision - every
+                                 one-dimensional tensor, and every
+                                 normalization weight - are always written as
+                                 32-bit floats
+    CheckpointArchitecture
+        Architecture             Auto (the default) | Llama. Auto reads
+                                 config.json; naming Llama outright reads a
+                                 checkpoint whose configuration this version
+                                 does not recognise as the family anyway, which
+                                 is how a model the automatic rule does not
+                                 know is still converted
+    string OutputName            null takes the source name with the tag below
+    bool Overwrite               false; a name already in the store fails the
+                                 conversion and names this option
+    string ModelId               the publisher's organization/model string, or
+                                 anything shaped like it, that the general.*
+                                 metadata is derived from. null - the default -
+                                 uses the last segment of the model's own name
+                                 in the store, so the metadata is a property of
+                                 the model rather than of a temporary folder
+    IReadOnlyList<string>
+        AddedSpecialTokens       null, the default. Token CONTENTS to treat as
+                                 added and special. See below
+
+ConvertResult   string Name (ready to show, resolve or delete);
+    CheckpointArchitecture Architecture (how the checkpoint was read);
+    int TensorCount; long OutputBytes; long SourceBytes;
+    GgufOutputType TypeWritten (the type that was WRITTEN, so never Auto);
+    string Tool ("CodeBrix.Ollama.ModelManager"); string ToolVersion (this
+    library's own assembly version).
+
+WHEN A CALLER NEEDS AddedSpecialTokens, and when it does nothing. A GGUF file
+records, for every token, whether it is an ordinary token or a control token,
+and the rule for deciding that is "a token is control when the tokenizer's ADDED
+vocabulary holds it and marks it special". Some checkpoints declare their
+unknown, beginning-of-sequence, end-of-sequence and padding tokens ONLY inside
+the tokenizer class in their own .py file - which this library never executes -
+and leave tokenizer_config.json declaring no special token at all. Their tokens
+are then written as ordinary tokens, because that is what the files say they
+are. Naming the contents here supplies the declaration the files are missing;
+the rule itself is untouched.
+
+    var options = new ConvertOptions
+    {
+        AddedSpecialTokens = new[] { "<pad>", "<unk>", "<bos>", "<eos>" }
+    };
+
+It changes the token TYPES and nothing else. The IDENTIFIERS of the special
+tokens come from config.json either way, so a model ends generation on the token
+its configuration names whether or not anything is supplied. Two rules about it:
+
+  - EVERY ENTRY MUST BE A TOKEN THE VOCABULARY HOLDS. One that is not fails the
+    conversion with an ArgumentException naming it (an empty entry names its
+    position), because a name that matches nothing is a mistake rather than a
+    request for nothing.
+  - IT IS REFUSED, NOT IGNORED, FOR A SENTENCEPIECE CHECKPOINT - an
+    ArgumentException whose ParamName is "options". Such a checkpoint always
+    declares its added tokens in files that are always read (added_tokens.json
+    and tokenizer_config.json's added-token table), so a value here is a caller
+    believing something untrue about the model. An EMPTY list is accepted,
+    because it says nothing.
+
+THE NAME THE RESULT TAKES adds a tag to the tag the source carries, exactly as a
+reduction does: "gguf" when the type was left to the checkpoint, and
+"gguf-f32", "gguf-f16" or "gguf-bf16" when the caller forced one, so that a name
+says what is inside the file.
+
+    hf.co/org/model            ->  hf.co/org/model:gguf
+    hf.co/org/model:latest     ->  hf.co/org/model:gguf
+    hf.co/org/model:weights    ->  hf.co/org/model:weights-gguf
+
+OutputName overrides all of it. Overwrite behaves as it does for an export or a
+reduction, and is enforced where they enforce it - at the writing step, after
+the work - so a refusal costs a conversion.
+
+WHAT THE STORED MODEL IS. An ordinary GGUF model, and every operation treats it
+as one:
+
+    ResolvedModel resolved = await store.ResolveAsync(result.Name);
+    resolved.ModelPath        // the GGUF file, for any in-process runner
+    resolved.Parameters.Stop  // the end-of-sequence token, when the files
+                              // named one; Parameters is null when they did not
+    resolved.Template         // null - see below
+
+    ModelInfo info = await store.ShowAsync(result.Name);
+    info.Format               // "gguf"
+    info.Metadata.Architecture, info.Capabilities   // read from the file itself
+    info.DerivedFrom          // the model it was converted from
+    info.Tool, info.ToolVersion, info.Settings      // the provenance below
+
+PROVENANCE is recorded the way an export and a reduction record theirs, under
+the same ModelConfigKeys names: DerivedFrom is the source model spelled as it is
+stored, Tool is "CodeBrix.Ollama.ModelManager", ToolVersion is this library's
+assembly version, and Settings carry outputType, requestedOutputType,
+architecture, requestedArchitecture, modelId and addedSpecialTokens. THE
+LICENCE IS CARRIED OVER from the source unchanged - the identifier and the
+address it was read from - and a LICENSE text the source ships becomes a licence
+layer of the converted model. As everywhere here a licence is reported, never
+enforced.
+
+NO TEMPLATE LAYER IS WRITTEN, and that is deliberate rather than an omission. A
+checkpoint's chat template is a Jinja template, and it IS carried over - into
+the GGUF file itself, where a runner reads it as the file's embedded template. A
+Modelfile TEMPLATE layer is the other dialect altogether, the one only a
+Modelfile ever carries, so copying the one into the other would hand you a
+template the renderer that layer selects cannot render. A stop PARAMETER is
+written when tokenizer_config.json names an end-of-sequence token, and only
+then.
+
+THE PROGRESS STREAM, IN ORDER
+
+    "materializing source"   the checkpoint is laid out in a temporary folder
+                             for the conversion to read, hard-linked where the
+                             file system allows it
+    "reading checkpoint"     the configuration and the weights are opened
+    "writing gguf"           the file is being written
+    "creating model"         the file is being taken into the store as a model
+    "success"                the last report
+
+THE TEMPORARY FOLDER is under the system temporary directory and is removed
+however the conversion ends, on success and on failure alike. ON A MACHINE
+WHOSE TEMPORARY DIRECTORY IS IN MEMORY - which is most Linux desktops - POINT
+TMPDIR AT A REAL FILE SYSTEM BEFORE CONVERTING A CHECKPOINT. A checkpoint is
+gigabytes.
+
+    using CodeBrix.Ollama.ModelManager;
+
+    using var store = new ModelStore();
+
+    // 1. Obtain the publisher's own files. A checkpoint is a bundle, so the
+    //    pull is asked for with PullOptions.
+    const string source = "hf.co/example-org/example-model";
+    await foreach (var p in store.PullAsync(source, PullOptions.ForHuggingFace(
+                       null, null, FileFilter.ExcludeTrainingArtifacts)))
+    {
+        Console.WriteLine(p.Status);
+    }
+
+    // 2. Convert it. Nothing is installed and no interpreter is started.
+    var progress = new Progress<PullProgress>(p => Console.WriteLine(p.Status));
+    ConvertResult result = await store.ConvertToGgufAsync(source, null, progress);
+
+    Console.WriteLine(result.Name);         // ...:gguf
+    Console.WriteLine(result.TypeWritten);  // BF16, F16 or F32
+    Console.WriteLine($"{result.TensorCount} tensors, " +
+                      $"{result.SourceBytes} -> {result.OutputBytes} bytes");
+
+    // 3. It is an ordinary GGUF model now. Hand the path to a runner.
+    ResolvedModel resolved = await store.ResolveAsync(result.Name);
+    Console.WriteLine(resolved.ModelPath);
+
+    // Half-precision instead, under a name of its own, replacing what is there.
+    ConvertResult half = await store.ConvertToGgufAsync(source, new ConvertOptions
+    {
+        OutputType = GgufOutputType.F16,
+        OutputName = "hf.co/example-org/example-model:half",
+        Overwrite = true
+    });
+
+WHAT CAN GO WRONG: ModelNotFoundException (no such model),
+InvalidOperationException (the model has no publisher file tree, or it holds a
+GGUF file or an exported ONNX graph rather than a checkpoint),
+NotSupportedException (the architecture, the tokenizer or the rotary scaling is
+one this version does not convert - the message quotes what the checkpoint's own
+files said), CheckpointFormatException (no config.json, or a container that is
+malformed), PickleRefusedException (a pickle construct the restricted reader
+will not interpret; Construct names it), ArgumentException
+(AddedSpecialTokens names a token the vocabulary does not hold, or was supplied
+for a SentencePiece checkpoint), and ModelManagerException (the output name is
+taken and Overwrite is not set). No Python exception is on that list, because no
+Python runs.
+
+
+QUANTIZING A STORED GGUF MODEL
+==============================
+    Task<QuantizeGgufResult> QuantizeGgufAsync(string name,
+        QuantizeGgufOptions options,
+        IProgress<PullProgress> progress = null,
+        CancellationToken cancellationToken = default)
+
+takes a GGUF model in the store, has a quantizer YOU SUPPLY write a smaller copy
+of it, and puts that copy away as an ordinary model of its own - one that lists,
+shows, resolves, copies and deletes like any other, carrying the source's
+template, system prompt, parameters, stored messages and licence, and recording
+where it came from.
+
+THE QUANTIZER IS YOURS, AND THAT IS THE DESIGN. Quantizing weights is an
+inference engine's work, and this package depends on no inference engine: it
+has none, it loads none, and the package that carries one does not appear in
+its dependencies. So QuantizeGgufOptions.Quantizer is REQUIRED, and it is the
+only part of the work this library does not do. Everything around it - finding
+the stored file, naming the result, carrying the source's layers over,
+recording the provenance, cleaning up whatever happens - is here.
+
+    public delegate Task GgufQuantizer(string inputPath, string outputPath,
+                                       CancellationToken cancellationToken);
+
+Your delegate is handed the stored blob's own path (it must not modify it) and
+a path in a temporary folder of this library's making, and must write that
+file. CodeBrix.Ollama.ModelRunner.QuantizeAsync fits the shape exactly; so does
+a command-line tool you start yourself.
+
+THE COMPLETE WIRING, WITH BOTH PACKAGES - the only place the two meet, and it
+is in YOUR code:
+
+    using CodeBrix.Ollama.ModelManager;
+    using CodeBrix.Ollama.ModelRunner;
+
+    using var store = new ModelStore();
+
+    var progress = new Progress<PullProgress>(p => Console.WriteLine(p.Status));
+
+    QuantizeGgufResult result = await store.QuantizeGgufAsync(
+        "hf.co/example-org/example-model:gguf",
+        new QuantizeGgufOptions
+        {
+            Type = "q4_k_m",
+            Tool = "CodeBrix.Ollama.ModelRunner",
+            ToolVersion = ModelRunner.GetNativeRuntimeInfo().BuildInfo,
+            Quantizer = (input, output, ct) => ModelRunner.QuantizeAsync(
+                input, output, GgufQuantizationType.Q4_K_M, null, ct),
+        },
+        progress);
+
+    Console.WriteLine(result.Name);   // ...:gguf-q4_k_m
+    Console.WriteLine($"{result.SourceBytes} -> {result.OutputBytes} bytes");
+
+    // It is an ordinary model now. Hand its path to the runner.
+    ResolvedModel resolved = await store.ResolveAsync(result.Name);
+    await using IRunningModel model = await ModelRunner.LoadAsync(
+        new ModelRunnerOptions { ModelPath = resolved.ModelPath });
+
+(Both libraries declare FLAT namespaces under CodeBrix.Ollama. If your own code
+sits in a namespace under CodeBrix.Ollama too, the name ModelRunner reaches the
+NAMESPACE rather than the class; the fix is an alias or the fully qualified
+name. Ordinary code is unaffected.)
+
+QuantizeGgufOptions
+-------------------
+    GgufQuantizer Quantizer   REQUIRED; the delegate above
+    string  Type              REQUIRED; what the quantization is called, e.g.
+                              "q4_k_m". It becomes part of the stored name and
+                              of the provenance, and nothing here interprets it
+    string  OutputName        null -> the source name with a tag that names the
+                              quantization
+    bool    Overwrite         false; whether a model of that name is replaced
+    string  Tool              recorded as the provenance tool, e.g.
+                              "CodeBrix.Ollama.ModelRunner"
+    string  ToolVersion       recorded as the provenance tool version
+
+THE TYPE IS A TAG, NOT A LIST THIS LIBRARY KNOWS. What "q4_k_m" means is the
+quantizer's business; a store that carried an engine's list of types would go
+out of date every time that list grew. All it insists on is that the string can
+be part of a model name - letters, digits and underscores, with dashes and dots
+after the first character - and a string that cannot is an ArgumentException
+quoting it. It is lower-cased before it is used.
+
+THE NAME (the same rule the other derived artifacts follow): the source name
+with the tag "gguf-<type>", so "example:gguf" becomes "example:gguf-q4_k_m" and
+"example:weights" becomes "example:weights-gguf-q4_k_m". OutputName overrides it
+outright.
+
+QuantizeGgufResult
+------------------
+    string Name / SourceName        the stored name, and the model it came from
+    string Type                     the type, lower-cased
+    long   SourceBytes / OutputBytes the two file sizes
+    string Tool / ToolVersion        what you said did the work
+
+WHAT IS CARRIED OVER, AND WHAT IS NOT. Quantizing changes the weights and
+nothing else about how a model is used, so the result carries the source's
+TEMPLATE, SYSTEM, PARAMETER, MESSAGE and LICENSE layers and its licence record,
+and its Format is "gguf". What it does not carry is the source's own provenance:
+the new model's provenance says that it was derived from the source, by the tool
+you named, with the settings { "type": "<type>" }, which ShowAsync reports as
+DerivedFrom, Tool, ToolVersion and Settings.
+
+THE PROGRESS STREAM, IN ORDER
+
+    "quantizing"       your quantizer is running
+    "creating model"   the file it wrote is being taken into the store
+    "success"          the last report
+
+THE STORED FILE IS READ WHERE IT LIES - nothing is copied - and the quantized
+file is written into a temporary folder under the system temporary directory,
+which is removed however the call ends, on success and on failure alike. ON A
+MACHINE WHOSE TEMPORARY DIRECTORY IS IN MEMORY - which is most Linux desktops -
+POINT TMPDIR AT A REAL FILE SYSTEM FIRST. A model is gigabytes.
+
+WHAT CAN GO WRONG: ArgumentNullException (no options at all), ArgumentException
+(no Quantizer, or a Type that cannot be part of a name), ModelNotFoundException
+(no such model), InvalidOperationException (the model is a publisher file tree
+rather than a GGUF model, or carries no weights at all), NotSupportedException
+(the model keeps its weights in several files; this version quantizes a model
+held in one), ModelManagerException (your quantizer returned without writing the
+file, or the output name is taken and Overwrite is not set), and whatever your
+own quantizer throws, which is passed through untouched.
 
 
 THE ERROR MODEL
@@ -2149,6 +2605,12 @@ Exception. Catch the base type to catch all of it.
                                    blob the store does not have, a layer whose
                                    JSON will not decode, and a source model
                                    missing its config during a create
+      CheckpointFormatException    a checkpoint being converted to GGUF is not
+                                   the format it claims to be, declares
+                                   something the reader refuses to believe - an
+                                   unknown element type, an offset outside the
+                                   file, a header past the cap - or has no
+                                   config.json at all
       DigestMismatchException      ExpectedDigest and ActualDigest, both
                                    "sha256:<hex>"; the bad file is already gone
       GgufFormatException          not a GGUF file, or a header this reader
@@ -2159,6 +2621,10 @@ Exception. Catch the base type to catch all of it.
                                    problem
       ModelNotFoundException       no manifest, locally or on the registry;
                                    ModelName holds the name as you wrote it
+      PickleRefusedException       a PyTorch checkpoint's pickle stream asks
+                                   for something the restricted reader will not
+                                   do; Construct holds the opcode, the fully
+                                   qualified global or the shape refused
       PythonModuleNotInstalledException
                                    a Python feature was asked for and a module
                                    it needs is not installed in the interpreter
@@ -2212,14 +2678,19 @@ WHAT THE BUNDLE PATHS ADD, exception by exception:
                                 the bad file is already gone
 
 Framework exceptions you will also see: ArgumentException (a null or blank
-model name or store directory), ArgumentNullException (a null Modelfile, a null
+model name or store directory; a ConvertOptions.AddedSpecialTokens entry the
+vocabulary does not hold, or any such entry for a SentencePiece checkpoint),
+ArgumentNullException (a null Modelfile, a null
 GGUF path or stream), ArgumentOutOfRangeException (a ReduceOptions.BlockSize
 that is not greater than zero), ObjectDisposedException (any operation after
 Dispose), OperationCanceledException, InvalidOperationException
-(ToRelativePath on a name that is not fully qualified; exporting or
-materializing a model with no publisher file tree; any Python entry point after
+(ToRelativePath on a name that is not fully qualified; exporting, converting or
+materializing a model with no publisher file tree; converting one that already
+holds a GGUF file or an ONNX graph; any Python entry point after
 PythonSupport.Shutdown), NotSupportedException (the managed reduction engine
-asked for something it does not cover), UriFormatException (BaseUrl), and
+asked for something it does not cover; a checkpoint whose architecture,
+tokenizer or rotary scaling this version does not convert),
+UriFormatException (BaseUrl), and
 IOException and UnauthorizedAccessException from the file system, unwrapped. A
 RegistryException whose StatusCode is HttpStatusCode.Unauthorized is the one to
 filter on when you want to prompt for credentials.
@@ -2252,10 +2723,11 @@ What the code guarantees, and nothing more:
   - ONE PYTHON RUN AT A TIME, whatever thread asks for it. There is one
     interpreter per process and this library serializes its own use of it; the
     interpreter lock is held only for the duration of a run and nothing is
-    awaited while it is held. The managed reduction engine takes no such lock,
-    but an export or a reduction of the SAME MODEL from two threads at once is
-    two calls writing the same derived name: serialize those yourself, as with
-    two pulls.
+    awaited while it is held. The managed reduction engine and the checkpoint
+    converter take no such lock,
+    but an export, a reduction or a conversion of the SAME MODEL from two
+    threads at once is two calls writing the same derived name: serialize those
+    yourself, as with two pulls.
 
 
 COMPLETE EXAMPLES
@@ -2780,9 +3252,10 @@ COMMON PITFALLS TO AVOID
 
 30. DO NOT expect every runtime to load what a reduction wrote. Four-bit
     weight-only quantization emits MatMulNBits and dynamic quantization emits
-    MatMulInteger; ONNX Runtime implements both, and something else may
-    implement neither. Neither this library nor CodeBrix.Ollama.ModelRunner
-    runs an ONNX model at all.
+    MatMulInteger, and a runtime may implement neither. This library never runs
+    a model of any kind; CodeBrix.Ollama.ModelRunner runs an ONNX graph with
+    nothing installed and implements both operators, and is where a reduced
+    model made here can be run without bringing a runtime of your own.
 
 31. DO NOT expect ReduceOptions.Preprocess to do anything for the weight-only
     modes. They read the weights themselves and never preprocess, whatever it
@@ -2815,6 +3288,51 @@ COMMON PITFALLS TO AVOID
     managed one, with this library's own version. A bundle reduced by the
     managed engine on a machine with no Python records no Python anything.
 
+36. DO NOT expect ConvertToGgufAsync to convert a checkpoint outside what it
+    reads. It is the llama family, the GPT-2 byte-level and SentencePiece
+    tokenizers, safetensors and PyTorch zip pickles, and unscaled rotary
+    embedding. Anything else is REFUSED by name rather than approximated - a
+    file that loaded and was quietly wrong would be worse than a message - and
+    the message quotes what the checkpoint's own files said, which is the thing
+    to read before asking why.
+
+37. DO NOT reach for ConvertOptions.AddedSpecialTokens unless the checkpoint's
+    files really do declare no special token. It supplies what a tokenizer
+    class hid in its own .py file, it moves token TYPES and never identifiers,
+    an entry the vocabulary does not hold fails the call, and any value at all
+    for a SentencePiece checkpoint fails it too - that road reads the added
+    tokens from files, so there is nothing to supply.
+
+38. DO NOT expect a converted model to carry a Modelfile TEMPLATE. The
+    checkpoint's Jinja chat template travels INSIDE the GGUF file, which is
+    where a runner reads an embedded template from; a TEMPLATE layer is the
+    other dialect and is deliberately not written. A stop PARAMETER is written
+    when tokenizer_config.json names an end-of-sequence token, and
+    ResolvedModel.Parameters is null when it names none.
+
+39. DO NOT convert a checkpoint with the system temporary directory in memory,
+    for the reason an export must not be run that way: the checkpoint is laid
+    out in a temporary folder and the GGUF file is written beside it. The
+    conversion itself holds one tensor at a time rather than the file, so it is
+    the DISK that has to be real, not the memory.
+
+40. DO NOT look for a quantizer in this package. QuantizeGgufAsync REQUIRES
+    one of yours, because a store that could not be used without an inference
+    engine would be a different kind of thing altogether. Pass
+    CodeBrix.Ollama.ModelRunner's QuantizeAsync, or a tool you start yourself;
+    no Quantizer at all is an ArgumentException, not a default.
+
+41. DO NOT expect QuantizeGgufAsync to know what "q4_k_m" means. The type is a
+    TAG that goes into the name and the provenance, and this library never
+    interprets it: it is your delegate that decides what is written. Spell the
+    two consistently, or a model will be named after a quantization it does
+    not hold.
+
+42. DO NOT quantize a bundle or a split model. The source must be a GGUF model
+    held in ONE file - a publisher file tree is refused with a message pointing
+    at ConvertToGgufAsync, and a model whose weights are spread over several
+    files is a NotSupportedException.
+
 
 WHAT THIS PACKAGE DOES NOT DO
 =============================
@@ -2831,8 +3349,11 @@ Do NOT reach for this package to:
     an ed25519 key pair and exchanges the challenge for a token at the realm
     the registry names; none of that is implemented, and the only credential
     available is a bearer token you supply, offered only after a 401.
-  - Handle SAFETENSORS. Refused by PullAsync, skipped when a manifest is read,
-    impossible to import on create, and never converted to GGUF.
+  - Handle a SAFETENSORS LAYER IN AN OLLAMA MANIFEST. Refused by PullAsync,
+    skipped when a manifest is read, and impossible to import on create. A
+    .safetensors file that is one of a BUNDLE's publisher files is a different
+    thing entirely, and IS read - that is the container a checkpoint's weights
+    arrive in, and CONVERTING TO GGUF opens it.
   - Create a model with a DRAFT line. The parser keeps DRAFT commands and
     Modelfile.Drafts exposes them, but CreateAsync refuses them. A draft layer
     in a PULLED manifest is fine and surfaces as ResolvedModel.DraftPath.
@@ -2856,15 +3377,19 @@ Do NOT reach for this package to:
   - Garbage-collect a store on its own. Blobs are removed by DeleteAsync, by
     the pruning PullAsync and CreateAsync do for the name they just wrote, and
     by PruneAsync when you call it; nothing runs in the background.
-  - RUN the files of a bundle, or CONVERT a checkpoint without the publisher's
-    own tooling. They are fetched, verified, stored and laid out again as the
-    publisher's tree, and the one conversion this package offers - exporting to
-    ONNX - is this library driving the ONNX Runtime GenAI model builder or
-    Hugging Face Optimum in an interpreter YOU already have, never a
-    re-implementation of either. Nothing here loads a checkpoint itself or runs
-    a model of any kind. Quantizing an ONNX graph IS done here - that is what
-    the managed reduction engine is - but it is the only arithmetic this
-    package does on a model's weights. What you do with the files is yours.
+  - RUN the files of a bundle, or EXPORT a checkpoint to ONNX without the
+    publisher's own tooling. They are fetched, verified, stored and laid out
+    again as the publisher's tree, and exporting to ONNX is this library
+    driving the ONNX Runtime GenAI model builder or Hugging Face Optimum in an
+    interpreter YOU already have, never a re-implementation of either. Nothing
+    here runs a model of any kind - the separate CodeBrix.Ollama.ModelRunner
+    package runs a GGUF model, and also runs an exported or reduced ONNX graph
+    with nothing installed, from the paths ResolveAsync gives you. What this
+    package DOES do to a model's
+    weights itself, in its own managed code and with nothing installed, is
+    exactly two things: converting a llama-family checkpoint to GGUF, and
+    quantizing an ONNX graph. Both are described above. What you do with the
+    files is yours.
   - DECIDE ANYTHING ABOUT A LICENCE. It reports what a source states - an
     identifier, the address it was read from, the LICENSE text a bundle ships
     - and applies no rule of its own: no pull is refused over a licence or the
@@ -2880,7 +3405,8 @@ models into it with resumable, verified downloads, from an Ollama-protocol
 registry or from the Hugging Face repository, the list of addresses or the
 folder a publisher keeps a model in; listing, describing, copying, deleting and
 deriving models; exporting a bundle to ONNX and reducing the graphs it holds to
-smaller ones, keeping each result in the same store with its provenance; laying
+smaller ones, and converting a checkpoint to a GGUF model a runner loads,
+keeping each result in the same store with its provenance; laying
 a bundle out as its publisher's own file tree; parsing and writing Modelfiles;
 reading GGUF headers; and turning a name into the paths a runner opens.
 
@@ -3020,6 +3546,14 @@ Feature-to-test-file map:
     https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Store/ModelStoreReduceTests.cs
     https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Reduce/OnnxReduceTests.cs
 
+  Converting a checkpoint to GGUF: the name the result takes, the provenance
+  and the licence it carries, the stop parameter and the template that is not
+  written, the progress it reports, the supplied special tokens and what they
+  move, and every refusal - with whole conversions run over checked-in
+  synthetic checkpoints that need no network and no interpreter
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Store/ModelStoreConvertTests.cs
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Convert/GgufConversionTests.cs
+
   Asking for Python and being told what is missing: the report a machine with
   no CPython produces, the resolution order, the two exceptions, and the test
   that proves a whole import, list, resolve and materialize cycle never loads
@@ -3143,6 +3677,53 @@ REDUCE NAME the source's tag plus the mode's: int8 | int8-weights |
             prepared reads :onnx-preprocessed
 REDUCE STATUS   materializing source -> reducing <file> (one per graph) ->
             collecting -> writing manifest -> success
+QUANTIZE    QuantizeGgufAsync(name, QuantizeGgufOptions { Quantizer, Type,
+            OutputName, Overwrite, Tool, ToolVersion }, IProgress<PullProgress>,
+            ct) -> QuantizeGgufResult { Name, SourceName, Type, SourceBytes,
+            OutputBytes, Tool, ToolVersion }. A GGUF MODEL in the store becomes
+            a SMALLER GGUF MODEL in the same store. THE QUANTIZER IS YOURS -
+            GgufQuantizer(inputPath, outputPath, ct) -> Task - because this
+            package depends on no inference engine; pass
+            CodeBrix.Ollama.ModelRunner's QuantizeAsync.
+            Type is a TAG this library never interprets ("q4_k_m"), lower-cased,
+            letters/digits/underscores with dashes and dots after the first.
+QUANTIZE NAME  the source's tag plus "gguf-<type>": :gguf -> :gguf-q4_k_m.
+            OutputName overrides.
+QUANTIZE STATUS  quantizing -> creating model -> success. The stored blob is
+            read WHERE IT LIES; the new file is written under TMPDIR and the
+            folder is removed however it ends. Template, system, parameters,
+            messages and licence are CARRIED OVER; Format stays "gguf".
+CONVERT     ConvertToGgufAsync(name, ConvertOptions { OutputType, Architecture,
+            OutputName, Overwrite, ModelId, AddedSpecialTokens },
+            IProgress<PullProgress>, ct) -> ConvertResult { Name, Architecture,
+            TensorCount, OutputBytes, SourceBytes, TypeWritten, Tool,
+            ToolVersion }. A transformers CHECKPOINT held as a bundle becomes an
+            ORDINARY GGUF MODEL in the same store; ResolveAsync(name).ModelPath
+            is the file a runner loads. NEEDS NOTHING INSTALLED AND STARTS NO
+            PYTHON - it is this library's own managed code, whatever the
+            checkpoint is written in.
+            Types (GgufOutputType): Auto (default, keeps the checkpoint's own
+            type, read from the WEIGHTS) | F32 | F16 | BF16; one-dimensional
+            and normalization tensors are always F32.
+            Architecture (CheckpointArchitecture): Auto (default, from
+            config.json) | Llama - the llama family only.
+            Tokenizers: GPT-2 byte-level BPE (vocab.json + merges.txt) and
+            SentencePiece (tokenizer.model). Containers: safetensors and
+            PyTorch zip pickles, single or SHARDED with a *.index.json. A
+            pickle is read by a RESTRICTED reader that never imports and never
+            evaluates; a construct it will not interpret is
+            PickleRefusedException (.Construct).
+            AddedSpecialTokens: token CONTENTS to treat as added-and-special,
+            for a checkpoint that declares them only in its own .py file. It
+            moves token TYPES only; the identifiers still come from
+            config.json. A content the vocabulary lacks, or any value at all
+            for a SentencePiece checkpoint, is an ArgumentException.
+            TMPDIR must be on a real file system. A checkpoint is gigabytes
+CONVERT NAME    the source's tag plus "gguf", or "gguf-f32" / "gguf-f16" /
+            "gguf-bf16" when a type was forced. No tag of its own (or "latest")
+            takes it alone: hf.co/x/y -> hf.co/x/y:gguf
+CONVERT STATUS  materializing source -> reading checkpoint -> writing gguf ->
+            creating model -> success
 DERIVED     a bundle this library produced. ModelInfo.DerivedFrom, .Tool,
             .ToolVersion, .Settings (all null for a bundle that was obtained);
             the config keys are on ModelConfigKeys (DerivedFrom, Tool,
@@ -3150,15 +3731,17 @@ DERIVED     a bundle this library produced. ModelInfo.DerivedFrom, .Tool,
             Revision, LicenseId, LicenseSource and PulledAt an obtained bundle
             writes). Default name: the source with its tag replaced by "onnx"
             for an export, and with the mode's tag added for a reduction.
-            It is a SNAPSHOT; deleting it leaves the source alone
+            It is a SNAPSHOT; deleting it leaves the source alone. A CONVERTED
+            GGUF MODEL is not a bundle but records the same four properties
 MODELFILE   Modelfile.Parse(text) | Parse(reader) | ReadFileAsync(path); FROM
             LICENSE TEMPLATE SYSTEM ADAPTER DRAFT RENDERER PARSER PARAMETER
             MESSAGE REQUIRES;  GetParameters() -> ModelParameters
 GGUF        GgufMetadata.ReadAsync(path | stream, options, ct); header only,
             never tensor data; MaxArraySize 1024 (negative keeps everything)
 PYTHON      needed by the converting export routes and by the Python
-            reduction engine, and by nothing else - obtaining a model and
-            making an existing graph smaller are pure managed code.
+            reduction engine, and by nothing else - obtaining a model,
+            converting a checkpoint to GGUF and making an existing graph
+            smaller are pure managed code.
             PythonSupport.Check(options, modules) -> PythonSupportReport
             (never throws); PythonSupport.Require(options, feature, modules)
             (throws); PythonSupport.Shutdown() once, at the end;
@@ -3184,18 +3767,24 @@ PYTHON OWNER  ModelManager when this library started the interpreter (it
             Shutdown); Host when your application started one first (it
             configures nothing and never ends it). ModelStore.Dispose does NOT
             shut Python down.
-ERRORS      ModelManagerException: DigestMismatchException, GgufFormatException,
+ERRORS      ModelManagerException: CheckpointFormatException,
+            DigestMismatchException, GgufFormatException,
             InvalidModelNameException, ModelfileParseException,
-            ModelNotFoundException, PythonModuleNotInstalledException,
+            ModelNotFoundException, PickleRefusedException,
+            PythonModuleNotInstalledException,
             PythonNotAvailableException, PythonScriptException,
-            RegistryException. The Python three carry Feature; the module one
+            RegistryException. PickleRefusedException carries Construct, the
+            opcode or global that was refused. The Python three carry Feature;
+            the module one
             also ModuleName and the static
             PythonModuleNotInstalledException.InstallCommand(module, venv),
             which builds the same pip line the message carries; the script one
             also ScriptName and PythonMessage
-RUNNER      ResolvedModel.ModelPath is what an in-process GGUF runner loads.
-            CodeBrix.Ollama.ModelRunner is a separate package with its own
-            AGENT-README.
+RUNNER      ResolvedModel.ModelPath is what an in-process GGUF runner loads;
+            ResolvedModel.Files gives a (name, path) pair per file of a BUNDLE,
+            which is what an ONNX load takes. CodeBrix.Ollama.ModelRunner is a
+            separate package with its own AGENT-README, released at the same
+            version as this one and to be installed at the same version.
 
 
 ================================================================================

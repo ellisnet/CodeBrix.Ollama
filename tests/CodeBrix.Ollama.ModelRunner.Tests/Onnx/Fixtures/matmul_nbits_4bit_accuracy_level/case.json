@@ -1,0 +1,28 @@
+{
+  "name": "matmul_nbits_4bit_accuracy_level",
+  "opset": 21,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        2,
+        64
+      ],
+      "file": "in_a.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        2,
+        5
+      ],
+      "file": "out_y.bin"
+    }
+  ],
+  "tolerance": 0.01,
+  "note": "accuracy_level 4 asks a runtime to quantize the ACTIVATIONS to 8-bit integers as well, and onnxruntime takes the option while this engine keeps them in floats. The two therefore differ by far more than any other case here - the measured figure is about three thousandths - and the bar is the plan's own tolerance for a quantized graph. This case exists to PIN that difference rather than to hide it."
+}

@@ -9,10 +9,13 @@
   <Project Path="src/ModelQueryTool.MacOS/ModelQueryTool.MacOS.csproj" />
   <Project Path="src/ModelQueryTool.Win32Skia/ModelQueryTool.Win32Skia.csproj" />
   <Folder Name="/Libraries/">
+    <Project Path="src/libs/ModelQueryTool.ChatTerminal/ModelQueryTool.ChatTerminal.csproj" />
     <Project Path="src/libs/ModelQueryTool.ModelAccess/ModelQueryTool.ModelAccess.csproj" />
     <Project Path="src/libs/ModelQueryTool.ModelRunning/ModelQueryTool.ModelRunning.csproj" />
   </Folder>
   <Folder Name="/Tests/">
+    <Project Path="tests/ModelQueryTool.Core.Tests/ModelQueryTool.Core.Tests.csproj" />
+    <Project Path="tests/libs/ModelQueryTool.ChatTerminal.Tests/ModelQueryTool.ChatTerminal.Tests.csproj" />
     <Project Path="tests/libs/ModelQueryTool.ModelAccess.Tests/ModelQueryTool.ModelAccess.Tests.csproj" />
     <Project Path="tests/libs/ModelQueryTool.ModelRunning.Tests/ModelQueryTool.ModelRunning.Tests.csproj" />
   </Folder>

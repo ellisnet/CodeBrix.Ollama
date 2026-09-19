@@ -1,0 +1,31 @@
+{
+  "name": "gather_scalar_index",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        4,
+        3
+      ],
+      "file": "in_a.bin"
+    },
+    {
+      "name": "i",
+      "type": "int64",
+      "shape": [],
+      "file": "in_i.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        3
+      ],
+      "file": "out_y.bin"
+    }
+  ]
+}

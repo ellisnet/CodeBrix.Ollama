@@ -10,6 +10,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Channels;
 using System.Threading.Tasks;
+using CodeBrix.Ollama.Core;
 
 namespace CodeBrix.Ollama.ModelManager; //was previously: ollama/ollama server/images.go, server/create.go, server/model.go and x/create/manifest.go;
 
@@ -497,6 +498,7 @@ public sealed class ModelStore : IModelStore, IDisposable
         CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
+        RequireCoreContract();
         ModelName parsed = ParseModelName(name, nameof(name));
         ReduceOptions effective = options ?? new ReduceOptions();
 
@@ -607,6 +609,244 @@ public sealed class ModelStore : IModelStore, IDisposable
         {
             TryDeleteDirectory(work);
         }
+    }
+
+    /// <inheritdoc />
+    public async Task<ConvertResult> ConvertToGgufAsync(
+        string name,
+        ConvertOptions options = null,
+        IProgress<PullProgress> progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        RequireCoreContract();
+        ModelName parsed = ParseModelName(name, nameof(name));
+        ConvertOptions effective = options ?? new ConvertOptions();
+
+        StoredManifest stored = await RequireManifestAsync(parsed, name, cancellationToken).ConfigureAwait(false);
+        ModelLayerReader layers = await ModelLayerReader
+            .ReadAsync(_paths, stored.Manifest, cancellationToken).ConfigureAwait(false);
+
+        if (layers.BundleFiles.Count == 0)
+        {
+            throw new InvalidOperationException(
+                "The model " + parsed.DisplayShortest() + " has no publisher file tree, so there is nothing"
+                    + " to convert: it carries no bundle file layers. Only a bundle - a model pulled with"
+                    + " PullOptions or imported from a folder - holds a checkpoint.");
+        }
+
+        string sourceName = stored.Name.DisplayShortest();
+        LicenseRecord license = ReadLicenseRecord(layers.Config);
+        string outputName = string.IsNullOrWhiteSpace(effective.OutputName)
+            ? DeriveName(
+                stored.Name, OnnxReduce.AppendTag(stored.Name.Tag, GgufConvert.TagFor(effective.OutputType)))
+            : effective.OutputName.Trim();
+
+        //Everything that can refuse the source is read out of the stored blobs first, so that a model that
+        //was never going to convert says so in a moment rather than after gigabytes have been laid out.
+        GgufConvert.RequireCheckpoint(layers.BundleFiles, sourceName);
+        string configJson = await ReadBundleFileTextAsync(
+            layers.BundleFiles, GgufConvert.ConfigFileName, cancellationToken).ConfigureAwait(false);
+        GgufConvert.RequireSupportedArchitecture(configJson, effective.Architecture, sourceName);
+
+        string tokenizerConfigJson = await ReadBundleFileTextAsync(
+            layers.BundleFiles, GgufConvert.TokenizerConfigFileName, cancellationToken).ConfigureAwait(false);
+        string licenseText = await ReadBundleLicenseTextAsync(layers.BundleFiles, cancellationToken)
+            .ConfigureAwait(false);
+
+        //The model identifier the general metadata is derived from is the last segment of the stored name,
+        //which is the publisher's own model name; the engine's converter takes the same string from the
+        //directory it is pointed at, and the two agree because the store knows the name and the folder does not.
+        string modelId = string.IsNullOrWhiteSpace(effective.ModelId)
+            ? stored.Name.Model
+            : effective.ModelId.Trim();
+
+        string work = Path.Combine(
+            Path.GetTempPath(), "codebrix-ollama-convert-" + Guid.NewGuid().ToString("N"));
+        string input = Path.Combine(work, "source");
+        string output = Path.Combine(work, "gguf");
+
+        try
+        {
+            Directory.CreateDirectory(input);
+            Directory.CreateDirectory(output);
+
+            Report(progress, "materializing source");
+            await BundleMaterializer.WriteAsync(
+                layers.BundleFiles,
+                input,
+                new MaterializeOptions { Link = MaterializeLink.Hardlink, Overwrite = true },
+                cancellationToken).ConfigureAwait(false);
+
+            var conversion = new ConvertOptions
+            {
+                OutputType = effective.OutputType,
+                Architecture = effective.Architecture,
+                ModelId = modelId,
+                AddedSpecialTokens = effective.AddedSpecialTokens
+            };
+
+            string file = Path.Combine(output, GgufConvert.OutputFileName);
+            ConvertResult written = await GgufConversion
+                .ConvertAsync(input, file, conversion, progress, cancellationToken).ConfigureAwait(false);
+
+            Report(progress, GgufConvert.CreatingStatus);
+            var provenance = new DerivedProvenance(
+                sourceName,
+                written.Tool,
+                written.ToolVersion,
+                GgufConvert.SettingsFor(effective, modelId, written),
+                BundleFormatDetector.Derived,
+                license);
+
+            await CreateAsync(
+                outputName,
+                GgufConvert.BuildModelfile(file, tokenizerConfigJson, licenseText),
+                null,
+                provenance,
+                effective.Overwrite,
+                cancellationToken).ConfigureAwait(false);
+
+            Report(progress, "success");
+            return new ConvertResult(outputName, written.Architecture, written.TensorCount, written.OutputBytes,
+                written.SourceBytes, written.TypeWritten, written.Tool, written.ToolVersion);
+        }
+        finally
+        {
+            TryDeleteDirectory(work);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<QuantizeGgufResult> QuantizeGgufAsync(
+        string name,
+        QuantizeGgufOptions options,
+        IProgress<PullProgress> progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        ModelName parsed = ParseModelName(name, nameof(name));
+        if (options == null)
+        {
+            throw new ArgumentNullException(nameof(options));
+        }
+
+        if (options.Quantizer == null)
+        {
+            throw new ArgumentException(
+                "A quantization needs a quantizer: this library has none of its own. Set Quantizer in the"
+                    + " options to something that reads a GGUF file and writes a quantized copy of it -"
+                    + " CodeBrix.Ollama.ModelRunner's QuantizeAsync is one.",
+                nameof(options));
+        }
+
+        string type;
+        try
+        {
+            type = GgufQuantize.NormalizeType(options.Type);
+        }
+        catch (ArgumentException error)
+        {
+            //The type arrives on the options, so the refusal names the parameter the caller actually passed.
+            throw new ArgumentException(error.Message, nameof(options), error);
+        }
+
+        StoredManifest stored = await RequireManifestAsync(parsed, name, cancellationToken).ConfigureAwait(false);
+        ModelLayerReader layers = await ModelLayerReader
+            .ReadAsync(_paths, stored.Manifest, cancellationToken).ConfigureAwait(false);
+
+        string sourceName = stored.Name.DisplayShortest();
+        GgufQuantize.RequireGgufModel(layers, sourceName);
+
+        LicenseRecord license = ReadLicenseRecord(layers.Config);
+        string outputName = string.IsNullOrWhiteSpace(options.OutputName)
+            ? DeriveName(stored.Name, OnnxReduce.AppendTag(stored.Name.Tag, GgufQuantize.TagFor(type)))
+            : options.OutputName.Trim();
+
+        //The stored blob is read where it lies: a quantization reads a file and writes another, and copying
+        //gigabytes into a working folder first would buy nothing at all.
+        string input = layers.ModelPath;
+        long sourceBytes = new FileInfo(input).Length;
+
+        string work = Path.Combine(
+            Path.GetTempPath(), "codebrix-ollama-quantize-" + Guid.NewGuid().ToString("N"));
+
+        try
+        {
+            Directory.CreateDirectory(work);
+            string file = Path.Combine(work, GgufQuantize.OutputFileName);
+
+            Report(progress, GgufQuantize.QuantizingStatus);
+            await options.Quantizer(input, file, cancellationToken).ConfigureAwait(false);
+
+            if (!File.Exists(file))
+            {
+                throw new ModelManagerException(
+                    "the quantizer returned without writing " + file + ", so there is nothing to store");
+            }
+
+            long outputBytes = new FileInfo(file).Length;
+
+            Report(progress, GgufConvert.CreatingStatus);
+            var provenance = new DerivedProvenance(
+                sourceName,
+                options.Tool,
+                options.ToolVersion,
+                GgufQuantize.SettingsFor(type),
+                BundleFormatDetector.Derived,
+                license);
+
+            await CreateAsync(
+                outputName,
+                new Modelfile(BuildModelfileCommands(layers, file)),
+                null,
+                provenance,
+                options.Overwrite,
+                cancellationToken).ConfigureAwait(false);
+
+            Report(progress, "success");
+            return new QuantizeGgufResult(
+                outputName, sourceName, type, sourceBytes, outputBytes, options.Tool, options.ToolVersion);
+        }
+        finally
+        {
+            TryDeleteDirectory(work);
+        }
+    }
+
+    /// <summary>
+    /// Reads the licence TEXT a bundle ships, when it ships one, so that a model derived from it carries
+    /// the same text rather than only the identifier its config records.
+    /// </summary>
+    /// <param name="files">The source bundle's files.</param>
+    /// <param name="cancellationToken">A token that cancels the read.</param>
+    /// <returns>The text, or <see langword="null"/> when the bundle ships no licence file.</returns>
+    private async Task<string> ReadBundleLicenseTextAsync(
+        IReadOnlyList<ResolvedFile> files, CancellationToken cancellationToken)
+    {
+        foreach (ResolvedFile file in files)
+        {
+            if (!IsLicenseFileName(file.Name))
+            {
+                continue;
+            }
+
+            try
+            {
+                string text = await LayerFactory
+                    .ReadBlobTextAsync(_paths, file.Digest, cancellationToken).ConfigureAwait(false);
+                if (!string.IsNullOrWhiteSpace(text))
+                {
+                    return text;
+                }
+            }
+            catch (ModelManagerException)
+            {
+                //A file the manifest names but the store no longer holds states no licence.
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -919,13 +1159,21 @@ public sealed class ModelStore : IModelStore, IDisposable
         StoredManifest existing = await TryReadManifestAsync(parsed, cancellationToken).ConfigureAwait(false);
         if (existing != null && !overwrite)
         {
-            throw new ModelManagerException(
-                "the model " + parsed.DisplayShortest() + " is already in the store; set Overwrite in the"
-                    + " options to replace it, or choose another name with OutputName");
+            throw NameIsTaken(parsed);
         }
 
         return CollectDeleteMap(existing);
     }
+
+    /// <summary>
+    /// The refusal a derived artifact gives when its name is taken and nobody asked for a replacement.
+    /// </summary>
+    /// <param name="parsed">The name the artifact would have been stored under.</param>
+    /// <returns>The exception to throw.</returns>
+    private static ModelManagerException NameIsTaken(ModelName parsed)
+        => new ModelManagerException(
+            "the model " + parsed.DisplayShortest() + " is already in the store; set Overwrite in the"
+                + " options to replace it, or choose another name with OutputName");
 
     /// <summary>
     /// Builds the config layer of a derived bundle: its files, where they came from and what made them.
@@ -936,28 +1184,38 @@ public sealed class ModelStore : IModelStore, IDisposable
     /// <returns>The config.</returns>
     private static ModelConfig BuildDerivedConfig(
         ModelName name, IReadOnlyList<string> paths, DerivedProvenance provenance)
+        => new ModelConfig
+        {
+            ModelFormat = BundleFormatDetector.Detect(paths, provenance.Format),
+            ModelFamily = name.Model,
+            AdditionalProperties = BuildDerivedProperties(provenance)
+        };
+
+    /// <summary>
+    /// The config properties that say a model was derived: where its source came from, what is known about
+    /// the licence, and what produced it. They are the same for a derived BUNDLE and for a model this
+    /// library created from a file it wrote itself, so that one reader reads both.
+    /// </summary>
+    /// <param name="provenance">What produced the files, and from what.</param>
+    /// <returns>The properties, in the order they are written.</returns>
+    private static Dictionary<string, JsonElement> BuildDerivedProperties(DerivedProvenance provenance)
     {
         LicenseRecord stated = provenance.License;
         string timestamp = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture);
 
-        return new ModelConfig
+        return new Dictionary<string, JsonElement>(StringComparer.Ordinal)
         {
-            ModelFormat = BundleFormatDetector.Detect(paths, provenance.Format),
-            ModelFamily = name.Model,
-            AdditionalProperties = new Dictionary<string, JsonElement>(StringComparer.Ordinal)
-            {
-                [ModelConfigKeys.Source] = ToJsonElement(DerivedSource),
-                [ModelConfigKeys.Repository] = ToJsonElement(provenance.SourceName),
-                [ModelConfigKeys.Revision] = ToJsonElement(null),
-                [ModelConfigKeys.LicenseId] = ToJsonElement(stated.LicenseId),
-                [ModelConfigKeys.LicenseSource] = ToJsonElement(stated.LicenseSource),
-                [ModelConfigKeys.PulledAt] = ToJsonElement(timestamp),
-                [ModelConfigKeys.DerivedFrom] = ToJsonElement(provenance.SourceName),
-                [ModelConfigKeys.Tool] = ToJsonElement(provenance.Tool),
-                [ModelConfigKeys.ToolVersion] = ToJsonElement(provenance.ToolVersion),
-                [ModelConfigKeys.DerivedAt] = ToJsonElement(timestamp),
-                [ModelConfigKeys.Settings] = ToSettingsElement(provenance.Settings)
-            }
+            [ModelConfigKeys.Source] = ToJsonElement(DerivedSource),
+            [ModelConfigKeys.Repository] = ToJsonElement(provenance.SourceName),
+            [ModelConfigKeys.Revision] = ToJsonElement(null),
+            [ModelConfigKeys.LicenseId] = ToJsonElement(stated.LicenseId),
+            [ModelConfigKeys.LicenseSource] = ToJsonElement(stated.LicenseSource),
+            [ModelConfigKeys.PulledAt] = ToJsonElement(timestamp),
+            [ModelConfigKeys.DerivedFrom] = ToJsonElement(provenance.SourceName),
+            [ModelConfigKeys.Tool] = ToJsonElement(provenance.Tool),
+            [ModelConfigKeys.ToolVersion] = ToJsonElement(provenance.ToolVersion),
+            [ModelConfigKeys.DerivedAt] = ToJsonElement(timestamp),
+            [ModelConfigKeys.Settings] = ToSettingsElement(provenance.Settings)
         };
     }
 
@@ -1062,11 +1320,40 @@ public sealed class ModelStore : IModelStore, IDisposable
     }
 
     /// <inheritdoc />
-    public async Task CreateAsync(
+    public Task CreateAsync(
         string name,
         Modelfile modelfile,
         CreateOptions options = null,
         CancellationToken cancellationToken = default)
+        => CreateAsync(name, modelfile, options, null, true, cancellationToken);
+
+    /// <summary>
+    /// Creates a model from a Modelfile and records that THIS LIBRARY produced it, which is what a
+    /// conversion is: a file this library wrote, stored through the same create path a person's own
+    /// Modelfile takes, with the provenance keys a derived artifact carries written into its config.
+    /// </summary>
+    /// <remarks>
+    /// It is internal for the reason <see cref="DerivedProvenance"/> is: provenance is a statement about
+    /// work this library did, so the only way to write one is to have this library do that work.
+    /// </remarks>
+    /// <param name="name">The name to give the new model.</param>
+    /// <param name="modelfile">The synthesized Modelfile.</param>
+    /// <param name="options">Options, or <see langword="null"/> for the defaults.</param>
+    /// <param name="provenance">What produced the file, and from what, or <see langword="null"/> for none.</param>
+    /// <param name="overwrite">
+    /// Whether a model already stored under the name may be replaced. It is honoured only when a
+    /// provenance is given; the public create has always replaced what was there.
+    /// </param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>A task that completes when the manifest has been written.</returns>
+    /// <exception cref="ModelManagerException">The name is taken and <paramref name="overwrite"/> is false.</exception>
+    internal async Task CreateAsync(
+        string name,
+        Modelfile modelfile,
+        CreateOptions options,
+        DerivedProvenance provenance,
+        bool overwrite,
+        CancellationToken cancellationToken)
     {
         ThrowIfDisposed();
         if (modelfile == null)
@@ -1092,9 +1379,18 @@ public sealed class ModelStore : IModelStore, IDisposable
             : Environment.CurrentDirectory;
 
         StoredManifest oldManifest = await TryReadManifestAsync(parsed, cancellationToken).ConfigureAwait(false);
+        if (provenance != null && oldManifest != null && !overwrite)
+        {
+            throw NameIsTaken(parsed);
+        }
 
         var layers = new List<ModelLayer>();
         var config = new ModelConfig();
+
+        // What a layer records as its source: the FROM argument for a model a person created, and the model
+        // it was derived FROM for one this library made, because the file that one names is a temporary
+        // file that was deleted before anybody could read the manifest.
+        string sourceLabel = provenance == null ? null : provenance.SourceName;
 
         // The first FROM argument decides where everything else comes from: a file on disk is imported
         // as a new blob, a name already in the store has its layers and config inherited.
@@ -1102,7 +1398,8 @@ public sealed class ModelStore : IModelStore, IDisposable
         string firstPath = ResolveArgumentPath(baseDirectory, firstArgument);
         if (File.Exists(firstPath))
         {
-            layers.Add(await ImportGgufFileAsync(firstPath, firstArgument, config, cancellationToken)
+            layers.Add(await ImportGgufFileAsync(
+                    firstPath, sourceLabel ?? firstArgument, config, cancellationToken)
                 .ConfigureAwait(false));
         }
         else
@@ -1119,7 +1416,9 @@ public sealed class ModelStore : IModelStore, IDisposable
             {
                 throw new ModelNotFoundException(argument, $"'{argument}' is neither a file nor a model in the store");
             }
-            layers.Add(await ImportGgufFileAsync(path, argument, config, cancellationToken).ConfigureAwait(false));
+            layers.Add(await ImportGgufFileAsync(
+                    path, sourceLabel ?? argument, config, cancellationToken)
+                .ConfigureAwait(false));
         }
 
         foreach (string adapterArgument in modelfile.Adapters)
@@ -1155,6 +1454,15 @@ public sealed class ModelStore : IModelStore, IDisposable
         if (!string.IsNullOrEmpty(modelfile.Requires))
         {
             config.Requires = modelfile.Requires;
+        }
+
+        if (provenance != null)
+        {
+            config.AdditionalProperties ??= new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+            foreach (KeyValuePair<string, JsonElement> property in BuildDerivedProperties(provenance))
+            {
+                config.AdditionalProperties[property.Key] = property.Value;
+            }
         }
 
         ModelLayer configLayer = await LayerFactory.CreateFromBytesAsync(
@@ -1885,14 +2193,17 @@ public sealed class ModelStore : IModelStore, IDisposable
     /// config assignments of <c>createModel</c>.
     /// </summary>
     /// <param name="filePath">The resolved path of the file.</param>
-    /// <param name="argument">The FROM argument, as the Modelfile wrote it, recorded on the layer.</param>
+    /// <param name="sourceLabel">
+    /// What the layer records as its source: the FROM argument as the Modelfile wrote it, or the model a
+    /// derived file came from.
+    /// </param>
     /// <param name="config">The config being built.</param>
     /// <param name="cancellationToken">A token that cancels the work.</param>
     /// <returns>The layer that names the imported file.</returns>
     /// <exception cref="GgufFormatException">The file is a LoRA adapter, which FROM cannot take.</exception>
     private async Task<ModelLayer> ImportGgufFileAsync(
         string filePath,
-        string argument,
+        string sourceLabel,
         ModelConfig config,
         CancellationToken cancellationToken)
     {
@@ -1906,7 +2217,7 @@ public sealed class ModelStore : IModelStore, IDisposable
 
         string mediaType = IsProjectorGguf(metadata) ? MediaTypes.Projector : MediaTypes.Model;
         ModelLayer layer = await LayerFactory
-            .CreateFromFileAsync(_paths, filePath, mediaType, argument, cancellationToken).ConfigureAwait(false);
+            .CreateFromFileAsync(_paths, filePath, mediaType, sourceLabel, cancellationToken).ConfigureAwait(false);
 
         if (string.Equals(mediaType, MediaTypes.Model, StringComparison.Ordinal))
         {
@@ -2030,11 +2341,38 @@ public sealed class ModelStore : IModelStore, IDisposable
     /// <returns>The Modelfile text.</returns>
     private static string BuildModelfileText(ModelLayerReader layers)
     {
+        var builder = new StringBuilder();
+        foreach (ModelfileCommand command in BuildModelfileCommands(layers, layers.ModelPath))
+        {
+            builder.Append(command.ToString());
+            builder.Append('\n');
+        }
+        return builder.ToString();
+    }
+
+    /// <summary>
+    /// Every command that describes a model: its weights, its companions and everything a Modelfile says
+    /// about how it is used.
+    /// </summary>
+    /// <param name="layers">The decoded layers of the model.</param>
+    /// <param name="modelPath">
+    /// The path the FROM line names. It is the model's own blob when a model is being rendered back to text,
+    /// and a file just written when a derived model is being created from it.
+    /// </param>
+    /// <returns>The commands, in the order Ollama writes them.</returns>
+    /// <remarks>
+    /// Rendering a model as text and deriving a new model from it ask the same question - what does this
+    /// model consist of - so they ask it in one place. A derived model that answered it differently would be
+    /// a model that quietly lost its template or its stop parameters.
+    /// </remarks>
+    private static IReadOnlyList<ModelfileCommand> BuildModelfileCommands(
+        ModelLayerReader layers, string modelPath)
+    {
         var commands = new List<ModelfileCommand>();
 
-        if (layers.ModelPath != null)
+        if (modelPath != null)
         {
-            commands.Add(new ModelfileCommand("model", layers.ModelPath));
+            commands.Add(new ModelfileCommand("model", modelPath));
         }
         foreach (string adapter in layers.AdapterPaths)
         {
@@ -2095,13 +2433,7 @@ public sealed class ModelStore : IModelStore, IDisposable
             commands.Add(new ModelfileCommand("message", message.Role + ": " + message.Content));
         }
 
-        var builder = new StringBuilder();
-        foreach (ModelfileCommand command in commands)
-        {
-            builder.Append(command.ToString());
-            builder.Append('\n');
-        }
-        return builder.ToString();
+        return commands;
     }
 
     /// <summary>
@@ -2335,4 +2667,12 @@ public sealed class ModelStore : IModelStore, IDisposable
             ObjectDisposedException.ThrowIf(_disposed, this);
         }
     }
+
+    //The two operations below are the doors through which this library reaches CodeBrix.Ollama.Core - the
+    //reduction drives the ONNX codec and the conversion reads a SentencePiece model through the protobuf
+    //reader - so they are where an application that installed mismatched CodeBrix.Ollama packages is told
+    //so, in a sentence of its own rather than through a missing member somewhere further in. The check is
+    //an integer comparison, and CoreContract.Revision is a constant this assembly's compiler baked in.
+    private static void RequireCoreContract() =>
+        CoreContract.Require(CoreContract.Revision, "CodeBrix.Ollama.ModelManager");
 }

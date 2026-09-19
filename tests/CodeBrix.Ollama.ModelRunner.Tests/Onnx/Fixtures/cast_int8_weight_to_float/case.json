@@ -1,0 +1,24 @@
+{
+  "name": "cast_int8_weight_to_float",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        6
+      ],
+      "file": "in_a.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "z",
+      "type": "float",
+      "shape": [
+        6
+      ],
+      "file": "out_z.bin"
+    }
+  ]
+}

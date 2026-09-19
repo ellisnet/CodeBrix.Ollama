@@ -1,0 +1,26 @@
+{
+  "name": "sin_float",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        5,
+        9
+      ],
+      "file": "in_a.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        5,
+        9
+      ],
+      "file": "out_y.bin"
+    }
+  ]
+}

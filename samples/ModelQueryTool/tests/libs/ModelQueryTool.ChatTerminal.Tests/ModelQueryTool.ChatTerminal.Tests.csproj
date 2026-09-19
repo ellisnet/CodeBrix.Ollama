@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <!-- xUnit.net v3 test projects are self-executing binaries and
+         must build as Exe; run via Microsoft.Testing.Platform,
+         matching the CodeBrix family test convention. -->
+    <OutputType>Exe</OutputType>
+    <UseMicrosoftTestingPlatformRunner>true</UseMicrosoftTestingPlatformRunner>
+    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\libs\ModelQueryTool.ChatTerminal\ModelQueryTool.ChatTerminal.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- TEST ONLY. The headless terminal engine the TerminalView control renders: the tests
+         feed it what the line editor emits and read the screen back, which is the only way to
+         show that the bytes are RIGHT and not merely unchanged. The library itself keeps its
+         zero references. -->
+    <PackageReference Include="CodeBrix.Terminal.MitLicenseForever" Version="1.0.250.30" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.12" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+    <PackageReference Include="SilverAssertions.ApacheLicenseForever" Version="1.0.248.1071" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="xunit.v3" Version="4.0.1" />
+  </ItemGroup>
+
+</Project>

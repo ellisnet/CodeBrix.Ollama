@@ -1,0 +1,88 @@
+{
+  "name": "gqa_decode_longer_cache",
+  "opset": 21,
+  "inputs": [
+    {
+      "name": "query",
+      "type": "float",
+      "shape": [
+        1,
+        1,
+        96
+      ],
+      "file": "in_query.bin"
+    },
+    {
+      "name": "past_key",
+      "type": "float",
+      "shape": [
+        1,
+        2,
+        6,
+        16
+      ],
+      "file": "in_past_key.bin"
+    },
+    {
+      "name": "past_value",
+      "type": "float",
+      "shape": [
+        1,
+        2,
+        6,
+        16
+      ],
+      "file": "in_past_value.bin"
+    },
+    {
+      "name": "seqlens_k",
+      "type": "int32",
+      "shape": [
+        1
+      ],
+      "file": "in_seqlens_k.bin"
+    },
+    {
+      "name": "total_sequence_length",
+      "type": "int32",
+      "shape": [
+        1
+      ],
+      "file": "in_total_sequence_length.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "output",
+      "type": "float",
+      "shape": [
+        1,
+        1,
+        32
+      ],
+      "file": "out_output.bin"
+    },
+    {
+      "name": "present_key",
+      "type": "float",
+      "shape": [
+        1,
+        2,
+        7,
+        16
+      ],
+      "file": "out_present_key.bin"
+    },
+    {
+      "name": "present_value",
+      "type": "float",
+      "shape": [
+        1,
+        2,
+        7,
+        16
+      ],
+      "file": "out_present_value.bin"
+    }
+  ]
+}

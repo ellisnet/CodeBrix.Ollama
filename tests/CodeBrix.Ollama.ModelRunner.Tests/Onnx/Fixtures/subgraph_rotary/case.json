@@ -1,0 +1,53 @@
+{
+  "name": "subgraph_rotary",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "x",
+      "type": "float",
+      "shape": [
+        1,
+        4,
+        5,
+        16
+      ],
+      "file": "in_x.bin"
+    },
+    {
+      "name": "cos",
+      "type": "float",
+      "shape": [
+        1,
+        1,
+        5,
+        16
+      ],
+      "file": "in_cos.bin"
+    },
+    {
+      "name": "sin",
+      "type": "float",
+      "shape": [
+        1,
+        1,
+        5,
+        16
+      ],
+      "file": "in_sin.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        1,
+        4,
+        5,
+        16
+      ],
+      "file": "out_y.bin"
+    }
+  ],
+  "note": "A rotary position embedding, decomposed into slices, a negation and a concatenation."
+}

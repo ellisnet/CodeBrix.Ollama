@@ -1,0 +1,36 @@
+{
+  "name": "matmul_integer_no_zero_points",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        2,
+        6
+      ],
+      "file": "in_a.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "product",
+      "type": "int32",
+      "shape": [
+        2,
+        3
+      ],
+      "file": "out_product.bin"
+    },
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        2,
+        3
+      ],
+      "file": "out_y.bin"
+    }
+  ],
+  "note": "The zero points left out, where the specification says they are nought."
+}

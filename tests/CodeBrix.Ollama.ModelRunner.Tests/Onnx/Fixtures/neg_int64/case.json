@@ -1,0 +1,26 @@
+{
+  "name": "neg_int64",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "int64",
+      "shape": [
+        3,
+        5
+      ],
+      "file": "in_a.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "int64",
+      "shape": [
+        3,
+        5
+      ],
+      "file": "out_y.bin"
+    }
+  ]
+}

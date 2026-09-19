@@ -1,3 +1,4 @@
+using CodeBrix.Ollama.Core;
 using SilverAssertions;
 using Xunit;
 

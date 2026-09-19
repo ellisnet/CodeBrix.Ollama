@@ -1,0 +1,34 @@
+{
+  "name": "range_float",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "start",
+      "type": "float",
+      "shape": [],
+      "file": "in_start.bin"
+    },
+    {
+      "name": "limit",
+      "type": "float",
+      "shape": [],
+      "file": "in_limit.bin"
+    },
+    {
+      "name": "delta",
+      "type": "float",
+      "shape": [],
+      "file": "in_delta.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        4
+      ],
+      "file": "out_y.bin"
+    }
+  ]
+}

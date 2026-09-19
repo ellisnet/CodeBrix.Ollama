@@ -1,0 +1,24 @@
+{
+  "name": "cast_float_to_int8",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        6
+      ],
+      "file": "in_a.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "int32",
+      "shape": [
+        6
+      ],
+      "file": "out_y.bin"
+    }
+  ]
+}

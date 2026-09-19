@@ -1,3 +1,5 @@
+using CodeBrix.Ollama.Core;
+
 namespace CodeBrix.Ollama.ModelManager.Tests;
 
 /// <summary>

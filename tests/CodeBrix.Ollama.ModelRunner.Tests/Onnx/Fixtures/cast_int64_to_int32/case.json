@@ -1,0 +1,24 @@
+{
+  "name": "cast_int64_to_int32",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "int64",
+      "shape": [
+        4
+      ],
+      "file": "in_a.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "int32",
+      "shape": [
+        4
+      ],
+      "file": "out_y.bin"
+    }
+  ]
+}

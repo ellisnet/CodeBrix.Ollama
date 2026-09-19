@@ -1,0 +1,29 @@
+{
+  "name": "subgraph_feed_forward",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "x",
+      "type": "float",
+      "shape": [
+        1,
+        5,
+        32
+      ],
+      "file": "in_x.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        1,
+        5,
+        32
+      ],
+      "file": "out_y.bin"
+    }
+  ],
+  "note": "A gated feed-forward block: two constant weights and a sigmoid-weighted gate."
+}

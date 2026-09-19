@@ -1,0 +1,27 @@
+{
+  "name": "reducemean_drop",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        2,
+        3,
+        16
+      ],
+      "file": "in_a.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        2,
+        3
+      ],
+      "file": "out_y.bin"
+    }
+  ]
+}

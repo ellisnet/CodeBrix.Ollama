@@ -8,6 +8,7 @@ using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using CodeBrix.Ollama.Core;
 
 namespace CodeBrix.Ollama.ModelManager; //was previously: onnxruntime/python/tools/quantization/quant_utils.py@v1.30.0
 

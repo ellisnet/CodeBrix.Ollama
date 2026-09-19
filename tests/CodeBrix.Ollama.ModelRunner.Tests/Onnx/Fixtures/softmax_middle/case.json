@@ -1,0 +1,28 @@
+{
+  "name": "softmax_middle",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        2,
+        5,
+        3
+      ],
+      "file": "in_a.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        2,
+        5,
+        3
+      ],
+      "file": "out_y.bin"
+    }
+  ]
+}

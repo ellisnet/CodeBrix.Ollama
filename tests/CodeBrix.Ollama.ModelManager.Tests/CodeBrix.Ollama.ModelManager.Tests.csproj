@@ -26,6 +26,12 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\CodeBrix.Ollama.ModelManager\CodeBrix.Ollama.ModelManager.csproj" />
     <!--
+      The shared project, named here as well as by the library. The library keeps it private, so it does not
+      reach this project on its own; the ONNX quantizer tests build graphs out of the codec's own message
+      classes, so this project compiles against it directly.
+    -->
+    <ProjectReference Include="..\..\src\CodeBrix.Ollama.Core\CodeBrix.Ollama.Core.csproj" />
+    <!--
       The probe is a console application, not a library: it is referenced only so that it is built before
       these tests run, and its output is copied below rather than linked. The inert-dependency fence runs
       it as a child process, because whether an assembly was loaded is a fact about a whole process.
@@ -59,12 +65,32 @@
   </ItemGroup>
 
   <!--
-    The ONNX oracle fixtures: the inputs the managed codec and quantizer read and the outputs ONNX Runtime's own
-    Python tools produced from them, compared byte for byte. generate_fixtures.py records how they were made and is
-    not run by the tests.
+    The ONNX oracle fixtures: the inputs the managed quantizer reads and the outputs ONNX Runtime's own Python
+    tools produced from them, compared byte for byte. generate_fixtures.py records how they were made and is not
+    run by the tests; README.txt beside it says what they are and who owns them. The CODEC's tests moved to
+    CodeBrix.Ollama.Core.Tests with a COPY of this same set, because a test project does not read another test
+    project's assets.
   -->
   <ItemGroup>
     <None Update="Onnx\Fixtures\*.onnx;Onnx\Fixtures\*.data;Onnx\Fixtures\*.py" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!--
+    The model comparison, linked from the codec's own test project rather than copied: two copies of the rules for
+    "these are the same model" would be two things to keep true, and the whole point of the comparison is that
+    there is one. It is the only file this project takes from another test project.
+  -->
+  <ItemGroup>
+    <Compile Include="..\CodeBrix.Ollama.Core.Tests\Onnx\OnnxModelComparison.cs" Link="Onnx\OnnxModelComparison.cs" />
+  </ItemGroup>
+
+  <!--
+    The conversion oracle fixtures: one folder per synthetic checkpoint, and beside each of them the GGUF the
+    inference engine's own converter produced from it, compared with ours byte for byte. generate_fixtures.py and
+    oracle-converter.patch record how they were made and are never run by the tests.
+  -->
+  <ItemGroup>
+    <None Update="Convert\Fixtures\**\*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

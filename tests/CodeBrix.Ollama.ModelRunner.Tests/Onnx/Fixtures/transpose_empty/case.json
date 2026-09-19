@@ -1,0 +1,26 @@
+{
+  "name": "transpose_empty",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        0,
+        4
+      ],
+      "file": "in_a.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        4,
+        0
+      ],
+      "file": "out_y.bin"
+    }
+  ]
+}

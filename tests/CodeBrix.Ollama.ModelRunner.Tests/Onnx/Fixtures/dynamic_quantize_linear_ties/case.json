@@ -1,0 +1,39 @@
+{
+  "name": "dynamic_quantize_linear_ties",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        2,
+        5
+      ],
+      "file": "in_a.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "int32",
+      "shape": [
+        2,
+        5
+      ],
+      "file": "out_y.bin"
+    },
+    {
+      "name": "scale",
+      "type": "float",
+      "shape": [],
+      "file": "out_scale.bin"
+    },
+    {
+      "name": "zp",
+      "type": "int32",
+      "shape": [],
+      "file": "out_zp.bin"
+    }
+  ],
+  "note": "Values that land halfway between two integers, where rounding to even is the answer."
+}

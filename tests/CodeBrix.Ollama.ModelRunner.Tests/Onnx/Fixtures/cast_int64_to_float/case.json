@@ -1,0 +1,26 @@
+{
+  "name": "cast_int64_to_float",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "int64",
+      "shape": [
+        3,
+        4
+      ],
+      "file": "in_a.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        3,
+        4
+      ],
+      "file": "out_y.bin"
+    }
+  ]
+}

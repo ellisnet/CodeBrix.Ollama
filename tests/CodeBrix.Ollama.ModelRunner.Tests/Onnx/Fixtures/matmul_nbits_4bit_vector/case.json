@@ -1,0 +1,27 @@
+{
+  "name": "matmul_nbits_4bit_vector",
+  "opset": 21,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        1,
+        128
+      ],
+      "file": "in_a.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        1,
+        9
+      ],
+      "file": "out_y.bin"
+    }
+  ],
+  "note": "One row of input, which is the shape a decode step really runs."
+}

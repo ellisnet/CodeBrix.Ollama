@@ -1,0 +1,25 @@
+{
+  "name": "cast_float_to_uint8",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        7
+      ],
+      "file": "in_a.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "int32",
+      "shape": [
+        7
+      ],
+      "file": "out_y.bin"
+    }
+  ],
+  "note": "Cast to an unsigned byte and back, which is how the quantized types are seen from outside."
+}

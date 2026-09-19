@@ -1,0 +1,63 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    THE ONLY PROJECT IN THIS REPOSITORY THAT REFERENCES BOTH LIBRARIES. The store and the runner must not
+    depend on each other - not through a project reference, a package reference or a public signature - so the
+    place where a model made by one is run by the other is a TEST project, which is allowed to know both. Every
+    test here is gated: with CODEBRIX_OLLAMA_RUN_LIVE_TESTS unset the whole assembly skips in a moment and
+    nothing is downloaded, converted or loaded.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>CodeBrix.Ollama.EndToEnd.Tests</AssemblyName>
+    <RootNamespace>CodeBrix.Ollama.EndToEnd.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="xunit.v3" Version="4.0.1" />
+    <PackageReference Include="SilverAssertions.ApacheLicenseForever" Version="1.0.248.1071" />
+  </ItemGroup>
+
+  <!--
+    xunit.runner.json configures the runner. It only takes effect when it sits beside the test assembly, so it
+    is copied explicitly. Serial is not a convenience here: a test loads a model through the native library and
+    converts gigabytes through the temporary directory.
+  -->
+  <ItemGroup>
+    <None Update="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!--
+    The TEST-SIDE Python script. Neither library ever reads it: the tests spawn the virtual environment's own
+    interpreter over it, which is how the reference numbers this suite compares against are the ones the
+    checkpoint's own framework produces rather than anything of ours.
+  -->
+  <ItemGroup>
+    <None Update="Python\*.py" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\CodeBrix.Ollama.ModelManager\CodeBrix.Ollama.ModelManager.csproj" />
+    <ProjectReference Include="..\..\src\CodeBrix.Ollama.ModelRunner\CodeBrix.Ollama.ModelRunner.csproj" />
+  </ItemGroup>
+
+  <!--
+    The music-model DEFINITIONS are LINKED from the ModelManager test project rather than copied, for the
+    reason the Python test project links them: they are pinned publisher DATA - sizes, sha256 values and a
+    commit - generated from one spike record, and two copies of that would be two things to keep true instead
+    of one. Everything else this project needs is a copy, because no test project references another.
+  -->
+  <ItemGroup>
+    <Compile Include="..\CodeBrix.Ollama.ModelManager.Tests\Infrastructure\MusicModelDefinitions.cs" Link="Infrastructure\MusicModelDefinitions.cs" />
+    <Compile Include="..\CodeBrix.Ollama.ModelManager.Tests\Infrastructure\MusicModel.cs" Link="Infrastructure\MusicModel.cs" />
+    <Compile Include="..\CodeBrix.Ollama.ModelManager.Tests\Infrastructure\ExpectedBundleFile.cs" Link="Infrastructure\ExpectedBundleFile.cs" />
+  </ItemGroup>
+
+</Project>

@@ -62,7 +62,7 @@
     <Product>CodeBrix.Ollama.ModelRunner</Product>
     <Title>CodeBrix.Ollama.ModelRunner</Title>
     <Authors>Jeremy Ellis</Authors>
-    <Description>A cross-platform, zero-dependency .NET library that runs a GGUF LLM model in-process and exposes it to the application through an interface contract: completion, streaming chat, embeddings, tool calling, grammar-constrained output, tokenization and model metadata. Binds a self-built native inference engine through hand-written P/Invoke, with native libraries for Windows x64 and ARM64, macOS Intel and Apple Silicon, and Linux x64, ARM64 and RISC-V 64. No server and no external Ollama installation; pair with CodeBrix.Ollama.ModelManager to resolve model names to files.</Description>
+    <Description>A cross-platform, zero-dependency .NET library that runs a GGUF LLM model in-process and exposes it to the application through an interface contract: completion, streaming chat, embeddings, tool calling, grammar-constrained output, tokenization, model metadata and quantizing a model file to a smaller one. Binds a self-built native inference engine through hand-written P/Invoke, with native libraries for Windows x64 and ARM64, macOS Intel and Apple Silicon, and Linux x64, ARM64 and RISC-V 64. It also runs ONNX models on a pure-managed interpreter inside the package - no ONNX runtime, no Python, no native library and no NuGet dependency, so a graph runs wherever .NET runs: tensors in by name and tensors out by name for a graph of your own, MIDI music generated from a MIDI model and streamed event by event as it is written, and text generated from an ONNX bundle through the same interface contract, with a managed byte-level byte-pair tokenizer read from the bundle's own files. No server and no external Ollama installation; pair with CodeBrix.Ollama.ModelManager to resolve model names to files, and install both packages at the same version.</Description>
     <Copyright>Copyright (c) 2026 Jeremy Ellis and contributors</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/ellisnet/CodeBrix.Ollama</PackageProjectUrl>
@@ -73,7 +73,7 @@
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
     <IsPackable>true</IsPackable>
-    <PackageTags>ollama;llm;gguf;inference;chat;embeddings;ai;local-ai;native;CodeBrix</PackageTags>
+    <PackageTags>ollama;llm;gguf;inference;chat;embeddings;quantize;onnx;midi;music-generation;text-generation;ai;local-ai;native;CodeBrix</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
@@ -83,6 +83,38 @@
     <None Include="..\..\THIRD-PARTY-NOTICES.txt" Pack="true" PackagePath="" />
     <None Include="..\..\LICENSE" Pack="true" PackagePath="" />
   </ItemGroup>
+
+  <!--
+    THE SHARED PROJECT, WHICH TRAVELS INSIDE THIS PACKAGE RATHER THAN BESIDE IT.
+
+    CodeBrix.Ollama.Core holds the code this library and CodeBrix.Ollama.ModelManager both need - the ONNX
+    codec and its protobuf reader and writer, and the tokenizer primitives. The two libraries must never
+    depend on each other, in either direction and at either level, so the shared code cannot live in one of
+    them; and there is no third NuGet package, so it cannot be a dependency either. PrivateAssets="all"
+    keeps it out of the generated .nuspec - this package still declares NO dependencies at all - and the
+    target below puts its DLL into this package's own lib/net10.0/ folder beside this assembly. The
+    ModelManager package carries its own identical copy, and an application that installs both packages at
+    the same version ends up with exactly one of them.
+
+    The family versions every package to the minute it was built and publishes them together, so the two
+    copies match. When an application mixes versions anyway, the SDK silently keeps the higher-versioned
+    copy and the older library would otherwise die deep inside an unrelated call; CoreContract.Require, at
+    the entry points of this library that reach the shared code, turns that into a sentence that says what
+    to do. See MAINTAINER-README.txt, "THE Core PROJECT".
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\CodeBrix.Ollama.Core\CodeBrix.Ollama.Core.csproj" PrivateAssets="all" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetsForTfmSpecificBuildOutput>$(TargetsForTfmSpecificBuildOutput);IncludeCoreInPackage</TargetsForTfmSpecificBuildOutput>
+  </PropertyGroup>
+
+  <Target Name="IncludeCoreInPackage" DependsOnTargets="ResolveReferences">
+    <ItemGroup>
+      <BuildOutputInPackage Include="@(ReferenceCopyLocalPaths->WithMetadataValue('ReferenceSourceTarget', 'ProjectReference'))" />
+    </ItemGroup>
+  </Target>
 
   <!--
     The native llama.cpp libraries (one per RID), each beside a copy of the llama.cpp LICENSE file as

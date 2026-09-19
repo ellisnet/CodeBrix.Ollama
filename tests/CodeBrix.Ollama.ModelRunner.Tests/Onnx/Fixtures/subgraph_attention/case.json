@@ -1,0 +1,52 @@
+{
+  "name": "subgraph_attention",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "q",
+      "type": "float",
+      "shape": [
+        1,
+        6,
+        4,
+        8
+      ],
+      "file": "in_q.bin"
+    },
+    {
+      "name": "k",
+      "type": "float",
+      "shape": [
+        1,
+        6,
+        4,
+        8
+      ],
+      "file": "in_k.bin"
+    },
+    {
+      "name": "v",
+      "type": "float",
+      "shape": [
+        1,
+        6,
+        4,
+        8
+      ],
+      "file": "in_v.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        1,
+        6,
+        32
+      ],
+      "file": "out_y.bin"
+    }
+  ],
+  "note": "Causal multi-head attention, decomposed the way the decoder graphs decompose it."
+}

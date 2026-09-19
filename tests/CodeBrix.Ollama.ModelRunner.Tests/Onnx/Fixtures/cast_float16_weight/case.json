@@ -1,0 +1,27 @@
+{
+  "name": "cast_float16_weight",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        3,
+        4
+      ],
+      "file": "in_a.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        3,
+        4
+      ],
+      "file": "out_y.bin"
+    }
+  ],
+  "note": "A 16-bit float weight, which the engine widens as it reads it."
+}

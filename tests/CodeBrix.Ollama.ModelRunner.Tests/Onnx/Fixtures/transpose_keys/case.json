@@ -1,0 +1,30 @@
+{
+  "name": "transpose_keys",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        2,
+        4,
+        5,
+        3
+      ],
+      "file": "in_a.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        2,
+        4,
+        3,
+        5
+      ],
+      "file": "out_y.bin"
+    }
+  ]
+}

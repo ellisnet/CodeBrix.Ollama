@@ -50,9 +50,35 @@ ModelRunner loads a GGUF file and runs it in-process over a self-built
 llama.cpp engine bound through hand-written P/Invoke. An application uses the
 first to get a path and hands that path to the second.
 
-THE STATE OF THINGS, 2026-09-17
+THE STATE OF THINGS, 2026-09-18
 -------------------------------
   * ModelManager is written and tested.
+  * ModelManager NOW CONVERTS A CHECKPOINT TO GGUF, as of 2026-09-18, and does
+    it with NOTHING INSTALLED: ConvertToGgufAsync reads the weights a publisher
+    ships - safetensors or a PyTorch zip pickle, one file or several shards -
+    with this library's own readers (the pickle through a RESTRICTED
+    interpreter that never imports and never evaluates), maps the tensors on to
+    the names the inference engine expects, reads a GPT-2 byte-level or
+    SentencePiece tokenizer out of the publisher's files, and writes an
+    ordinary GGUF model into the same store. No CPython and no publisher
+    tooling take any part in it. The port is byte-for-byte: every checked-in
+    fixture is compared with what the inference engine's OWN converter produced
+    from the same folder, over the whole file, and a real 190M checkpoint
+    converted through the store matched the engine's output in all
+    381,878,656 bytes on 2026-09-18. The plan is
+    ~/ClaudeHome/PLAN_codebrix_ollama_pytorch_to_gguf_2026-09-17.md; phases G0
+    to G5 are done.
+  * BOTH PACKAGES NOW QUANTIZE, as of 2026-09-18, and THIS IS THE FIRST CHANGE
+    TO ModelRunner SINCE IT WAS WRITTEN. ModelRunner.QuantizeAsync rewrites a
+    GGUF file at a smaller type over the native llama_model_quantize call that
+    was already bound and already in the package - no new dependency, nothing
+    new to install - and the file it writes is byte for byte what the inference
+    engine's OWN command-line quantizer writes, measured over fifteen
+    comparisons on 2026-09-18 (see QUANTIZING (maintainer) below).
+    ModelManager.QuantizeGgufAsync stores the result as a model of its own and
+    takes the quantizer as a CONSUMER-SUPPLIED DELEGATE, so the two libraries
+    still do not reference each other in any direction or at any level; they
+    meet in the consumer's code and in tests/CodeBrix.Ollama.EndToEnd.Tests.
   * ModelManager NOW MANIPULATES WHAT IT OBTAINED, as of 2026-09-17: it exports
     a bundle to ONNX - passing a publisher's own graphs through, or running the
     ONNX Runtime GenAI model builder or Hugging Face Optimum in a CPython the
@@ -84,8 +110,24 @@ THE STATE OF THINGS, 2026-09-17
     a port of Go's text/template carrying Ollama's template package), the
     thinking and tool-call parsers, the JSON-schema-to-GBNF converter, and the
     inference engine behind ModelRunner.LoadAsync and IRunningModel. Its suite
-    is 44 test classes and 1,258 test cases. Its AGENT-README.txt at the
-    repository root is a full consumer guide and no longer a placeholder.
+    is 46 test classes and 1,286 test cases as of 2026-09-18. Its
+    AGENT-README.txt at the repository root is a full consumer guide and no
+    longer a placeholder.
+  * ModelRunner NOW RUNS ONNX MODELS WITH NOTHING INSTALLED, and as of
+    2026-09-18 it GENERATES TEXT from one as well as music. The managed
+    interpreter under Onnx/ runs 37 operators, contributed and quantized ones
+    included, and two DRIVERS sit on it: Drivers/SkyTnt/ for the two-graph MIDI
+    model (MidiGenerationModel) and Drivers/CausalLm/ for a single-graph decoder
+    described by a genai_config.json (OnnxCausalLmModel, which hands back an
+    IRunningModel, so the same calls that complete a prompt against a checkpoint
+    work against a bundle). The tokenizer is managed too - a GPT-2 byte-level
+    byte-pair encoder read out of the bundle's own vocab.json and merges.txt -
+    so no runtime, no Python and no other package take any part in it. Neither
+    driver knows anything about any particular model: what to do is read out of
+    the bundle. Proved on 2026-09-18 against the bundle's own runtime: greedy
+    generation from a 190M model, token for token identical over three prompts.
+    The plan is ~/ClaudeHome/PLAN_codebrix_ollama_modelrunner_onnx_2026-09-17.md;
+    phases O0 to O4 are done.
   * The native build tooling under llama-native-tools/ is complete, and all
     SEVEN runtime identifiers are adopted. Six were built and fully gated:
     osx-x64, osx-arm64, linux-x64, linux-arm64, linux-riscv64 and win-x64.
@@ -103,6 +145,34 @@ THE STATE OF THINGS, 2026-09-17
 
 REPOSITORY LAYOUT
 =================
+    src/CodeBrix.Ollama.Core/          THE SHARED PROJECT, never packed on its
+                                 own. Both libraries reference it and both pack
+                                 its DLL inside their own package; it
+                                 references neither of them, no other project
+                                 and no NuGet package. Everything in it is
+                                 internal. See THE Core PROJECT below
+      CoreContract.cs            the PERMANENT compatibility guard: the
+                                 revision constant, the revision of the loaded
+                                 copy, and Require, which turns a mixture of
+                                 package versions into one clear sentence
+      Onnx/                      the hand-written ONNX codec: the message
+                                 classes, OnnxModel (reading, writing, external
+                                 data), OnnxSaveOptions and OnnxMetadataProbe,
+                                 which answers whether a graph records having
+                                 been through shape inference by walking the
+                                 outermost message alone. Protobuf/ is a
+                                 forward-only reader, an append-only writer and
+                                 the carrier that re-emits every field the
+                                 codec does not model, so a file read and
+                                 written back is byte for byte what it was
+      Tokenizers/                the tokenizer PRIMITIVES both sides need:
+                                 Gpt2MergeTable, which reads a GPT-2
+                                 byte-level BPE merges.txt
+      InternalsVisibleTo.cs      grants the two libraries, this project's own
+                                 test suite, and the two ModelManager test
+                                 assemblies that build graphs out of the
+                                 codec's message classes
+
     src/CodeBrix.Ollama.ModelManager/   the managed library
       Bundles/                   the vocabulary a bundle is described in and
                                  pulled with: BundleDefinition, BundleFile,
@@ -118,11 +188,58 @@ REPOSITORY LAYOUT
                                  the shared JsonSerializerOptions that makes
                                  what this library writes byte-compatible with
                                  what Ollama reads
+      Checkpoints/               reading what a training framework wrote:
+                                 ICheckpointReader and CheckpointTensor,
+                                 CheckpointDataType / CheckpointDataTypes,
+                                 CheckpointRegionStream, SafetensorsReader,
+                                 PyTorchZipReader with the RestrictedUnpickler
+                                 and the four values it is allowed to build
+                                 (PickleStorage, PickleTensor, PickleGlobal,
+                                 PickleGlobalReference), CheckpointShardIndex
+                                 and CheckpointWeights - the composite reader
+                                 over one part or many, which is also where the
+                                 order the parts are visited in lives. All
+                                 internal
+      Convert/                   turning a checkpoint into a GGUF file: the
+                                 public ConvertOptions, ConvertResult,
+                                 GgufOutputType and CheckpointArchitecture, and
+                                 the internal GgufConversion (the conversion
+                                 itself), GgufConvert (what the STORE needs to
+                                 know about one - the tag, the refusals, the
+                                 synthesized Modelfile, the provenance
+                                 settings) and TensorDataConverter (widening,
+                                 narrowing and the rotary permutation).
+                                 Architectures/ holds LlamaArchitecture, the
+                                 ported LlamaTensorNameMap and
+                                 HuggingFaceConfig; Metadata/ holds ModelCard
+                                 (a front-matter reader of our own),
+                                 ModelIdComponents and ModelMetadata;
+                                 Tokenizers/ holds VocabularyExport (the ROUTE
+                                 order), Gpt2BpeTokenizerExport,
+                                 SentencePieceTokenizerExport with
+                                 SentencePieceModel / SentencePiecePiece /
+                                 SentencePieceTokenType, TokenizerConfig,
+                                 TokenizerExport, SpecialVocabulary, AddedToken
+                                 and GgufTokenType. Most of it is the subject
+                                 of entry 1 of THIRD-PARTY-NOTICES.txt
+      Quantize/                  storing a quantized copy of a GGUF model the
+                                 CONSUMER's own quantizer writes: the public
+                                 QuantizeGgufOptions, QuantizeGgufResult and the
+                                 GgufQuantizer delegate, and the internal
+                                 GgufQuantize (what the STORE needs to know
+                                 about one - the type-to-tag rule, the
+                                 refusals, the provenance settings). Nothing
+                                 here quantizes anything; see QUANTIZING
+                                 (maintainer) below for why
       Gguf/                      the GGUF reader: GgufMetadata (the public
                                  entry point), the internal GgufReader,
                                  GgufValue / GgufValueType, GgufTensorInfo /
                                  GgufTensorType / GgufTensorTypes,
-                                 GgufFileType / GgufFileTypes, GgufReadOptions
+                                 GgufFileType / GgufFileTypes, GgufReadOptions;
+                                 and the GGUF WRITER the conversion writes
+                                 through - GgufWriter, GgufWriterTensor and
+                                 GgufTensorDataWriter, all three INTERNAL (see
+                                 the design note below for why)
       Modelfile/                 the Modelfile parser: Modelfile,
                                  ModelfileCommand, the internal
                                  ModelfileParserState and GoBool
@@ -165,22 +282,22 @@ REPOSITORY LAYOUT
                                  OnnxReduceRun for what a script reported.
                                  Nothing here names a CodeBrix.Python type
                                  either
-      Onnx/                      THE MANAGED ENGINE, and the reason a
-                                 reduction can need nothing installed: a
-                                 hand-written ONNX codec and a port of ONNX
-                                 Runtime's quantizers. Protobuf/ is a
-                                 forward-only reader, an append-only writer and
-                                 the carrier that re-emits every field the
-                                 codec does not model, so a file read and
-                                 written back is byte for byte what it was;
-                                 beside it are the ONNX message classes,
-                                 OnnxModel (reading, writing, external data),
-                                 OnnxSaveOptions and OnnxMetadataProbe, which
-                                 answers whether a graph records having been
-                                 through shape inference by walking the
-                                 outermost message alone. Quantization/ is the
-                                 ported code and is the subject of entry 15 of
-                                 THIRD-PARTY-NOTICES.txt. All internal
+      Onnx/Quantization/         HALF OF THE MANAGED ENGINE, and with the codec
+                                 in CodeBrix.Ollama.Core the reason a reduction
+                                 can need nothing installed: a port of ONNX
+                                 Runtime's quantizers -
+                                 OnnxBlockwiseQuantizer,
+                                 OnnxMatMulNBitsQuantizer,
+                                 OnnxDynamicQuantizer with
+                                 OnnxDynamicQuantizationOptions and
+                                 OnnxWeightOnlyQuantizationOptions,
+                                 OnnxGraphEditor, OnnxQuantizationUtilities and
+                                 OnnxQuantizedValue. It is the subject of entry
+                                 15 of THIRD-PARTY-NOTICES.txt. The CODEC it
+                                 reads and writes graphs with is the one in
+                                 CodeBrix.Ollama.Core, because the ModelRunner
+                                 side needs it too; nothing quantizes anything
+                                 there. All internal
       Registry/                  the HTTP side of a pull: RegistryClient,
                                  RegistryChallenge, RegistryManifestResponse,
                                  the resumable ranged downloader BlobDownload
@@ -214,7 +331,7 @@ REPOSITORY LAYOUT
       InternalsVisibleTo.cs      grants CodeBrix.Ollama.ModelManager.Tests and
                                  CodeBrix.Ollama.ModelManager.Python.Tests
 
-    src/CodeBrix.Ollama.ModelRunner/    the managed library (240 .cs files)
+    src/CodeBrix.Ollama.ModelRunner/    the managed library (378 .cs files)
       Contracts/                 the public surface the engine implements: the
                                  static entry point ModelRunner, IRunningModel,
                                  ModelDetails, the chat types (ChatMessage,
@@ -223,13 +340,29 @@ REPOSITORY LAYOUT
                                  ResponseFormat), the completion types
                                  (GenerationUpdate, GenerationResult,
                                  GenerationStatistics, FinishReason),
-                                 EmbeddingResult, NativeRuntimeInfo /
-                                 NativeDeviceInfo and ModelRunnerLogLevel
+                                 EmbeddingResult, QuantizeResult,
+                                 NativeRuntimeInfo /
+                                 NativeDeviceInfo and ModelRunnerLogLevel; and
+                                 the ONNX surface - the static entry point
+                                 OnnxModel, IOnnxModel, OnnxTensor,
+                                 OnnxElementType, OnnxModelMetadata,
+                                 OnnxValueMetadata, OnnxDimension and
+                                 OnnxOpsetImport; and the MIDI surface - the
+                                 static entry point MidiGenerationModel,
+                                 IMidiGenerationModel, MidiGenerationMetadata,
+                                 MidiEvent, MidiEventKind, MidiScore and the
+                                 static MidiFile; and the TEXT surface - the
+                                 static entry point OnnxCausalLmModel,
+                                 IOnnxCausalLmModel (which IS an IRunningModel)
+                                 and CausalLmMetadata
       Options/                   ModelRunnerOptions, SamplingOptions,
-                                 GenerationOptions, LoraAdapterOptions and the
+                                 GenerationOptions, LoraAdapterOptions,
+                                 QuantizeOptions and the
                                  enums ModelLoadMode, FlashAttentionMode,
-                                 KvCacheType, EmbeddingPooling and
-                                 ChatTemplateDialect
+                                 KvCacheType, EmbeddingPooling,
+                                 ChatTemplateDialect and GgufQuantizationType,
+                                 plus OnnxRunnerOptions, OnnxKernelPath and
+                                 MidiGenerationOptions
       Common/                    the exception hierarchy: ModelRunnerException
                                  and its five subclasses
                                  NativeLibraryException, ModelLoadException,
@@ -261,13 +394,57 @@ REPOSITORY LAYOUT
                                  ToolCallParserState / ToolCallFormat, the
                                  structural GoTemplateOutline used to read a
                                  template's shape, and CompactJson
+      Onnx/                      THE MANAGED ONNX ENGINE, 75 files: the graph
+                                 loader and its execution plan, the tensor and
+                                 buffer types, the arena, the broadcasting and
+                                 shape arithmetic, the matrix kernels in their
+                                 three arithmetic paths, and OnnxSession, which
+                                 is what IOnnxModel is. All internal; it reads
+                                 graphs through the codec in
+                                 CodeBrix.Ollama.Core. See THE MANAGED ONNX
+                                 ENGINE below
+      Onnx/Kernels/              one file per operator, 37 of them, each a
+                                 small class that says what it will accept when
+                                 the model is loaded and what it computes when
+                                 it runs. Six of the 37 are the CONTRIBUTED and
+                                 QUANTIZED operators the model builders and the
+                                 store's own reductions write - see THE
+                                 CONTRIBUTED AND QUANTIZED OPERATORS below
+      Drivers/SkyTnt/            18 files, all internal: the MIDI generation
+                                 driver over the managed engine - the two-graph
+                                 loop, both key-value caches, the MIDI
+                                 tokenizer, the sampling and its masks, and the
+                                 bundle reader that decides this driver applies
+                                 at all. Every file carries its upstream
+                                 provenance. See THE MIDI GENERATION DRIVER
+                                 below
+      Drivers/CausalLm/          9 files, all internal: the TEXT generation
+                                 driver over the managed engine - the prefill
+                                 and decode loop, the key-value cache, the
+                                 managed sampler and its stream of random
+                                 numbers, and the bundle reader that decides
+                                 this driver applies at all. Nothing in it
+                                 knows about any particular model. See THE
+                                 TEXT GENERATION DRIVER below
+      Tokenizers/                6 files, all internal: the managed GPT-2
+                                 byte-level byte-pair encoder - the byte
+                                 table, the pre-tokenizer, the encoder itself,
+                                 what a bundle says about it, and the reader
+                                 that builds one out of a bundle's files. See
+                                 THE MANAGED BYTE-LEVEL TOKENIZER below
+      Midi/                      5 files, all internal: a Standard MIDI File
+                                 writer and reader written against the
+                                 published format. NOT a port - see
+                                 THIRD-PARTY-NOTICES entry 16
       Grammar/                   the JSON-schema-to-GBNF converter:
                                  JsonSchemaGrammar (public),
                                  JsonSchemaConverter, GrammarBuiltinRule and
                                  GrammarTrieNode
-      Engine/                    25 files, all internal: RunningModel (the
+      Engine/                    26 files, all internal: RunningModel (the
                                  IRunningModel implementation), ModelEngine
                                  (the bodies behind LoadAsync / ProbeAsync),
+                                 ModelQuantizer (the body behind
+                                 QuantizeAsync),
                                  EngineWorker (the one thread every native call
                                  for a model runs on), EngineAbortFlag,
                                  ParameterMapper, ModelDetailsBuilder,
@@ -284,12 +461,35 @@ REPOSITORY LAYOUT
                                  seven RIDs
       InternalsVisibleTo.cs      grants CodeBrix.Ollama.ModelRunner.Tests
 
+    tests/CodeBrix.Ollama.Core.Tests/   the xunit.v3 suite of the shared
+                                 project. Offline throughout, with no gate: the
+                                 codec reads files and nothing more. It
+                                 references the shared project and nothing else
+                                 of this repository's
+      Onnx/                      the codec's own tests: OnnxModelTests (the
+                                 round trip of every fixture, byte for byte,
+                                 the unmodelled fields, the side files),
+                                 OnnxSaveOptionsTests, OnnxFixtureFiles and
+                                 OnnxModelComparison, which the two ModelManager
+                                 test projects LINK
+      Onnx/Fixtures/             this project's OWN COPY of the ONNX ORACLE
+                                 FIXTURES, with generate_fixtures.py and
+                                 README.txt - see THE TEST INFRASTRUCTURE
+      Tokenizers/                Gpt2MergeTableTests
+      Infrastructure/            CoreSurface, which writes the whole non-private
+                                 surface out in a canonical form and hashes it
+      CoreContractTests.cs       the guard: the matching case and the message
+                                 the mismatched case produces
+      CoreSurfaceTests.cs        THE FENCE'S FENCE - the recorded
+                                 (revision, hash) pair
+
     tests/CodeBrix.Ollama.ModelManager.Tests/   the xunit.v3 suite, offline
                                  by default, and needing no CPython
       Bundles/ Export/ Gguf/ Modelfile/ Names/ Onnx/ Python/ Reduce/ Registry/
       Sources/ Store/
-      Onnx/Fixtures/             the ONNX ORACLE FIXTURES and the script that
-                                 writes them - see THE TEST INFRASTRUCTURE
+      Onnx/Fixtures/             the QUANTIZER's copy of the ONNX ORACLE
+                                 FIXTURES and the script that writes them - see
+                                 THE TEST INFRASTRUCTURE
       Infrastructure/            EnvGatedFactAttribute, FakeHttpHandlerBase
                                  and the three service doubles built on it
                                  (FakeRegistryHandler, FakeHubHandler,
@@ -360,8 +560,10 @@ REPOSITORY LAYOUT
                                  one spike record, and two copies of that would
                                  be two things to keep true instead of one.
                                  Onnx/OnnxModelComparison.cs is linked for the
-                                 same reason: the rules for "these two files
-                                 are the same model" are one set of rules, used
+                                 same reason, from CodeBrix.Ollama.Core.Tests,
+                                 where the codec's own tests live: the rules for
+                                 "these two files are the same model" are one
+                                 set of rules, used by the codec's round trip,
                                  by the fixture comparison offline and by the
                                  two-engine comparison here
       Python/                    TEST-SIDE scripts, copied beside the test
@@ -410,9 +612,10 @@ REPOSITORY LAYOUT
                                  icon-codebrix-128.png, LICENSE,
                                  MAINTAINER-README.txt, README-INDEX.txt,
                                  README.md and THIRD-PARTY-NOTICES.txt; its
-                                 Tests folder carries the two test projects and
-                                 the probe console application; the two
-                                 packable projects sit at the top level
+                                 Tests folder carries every test project and the
+                                 probe console application; the two packable
+                                 projects and the shared project sit at the top
+                                 level
 
 THE FLAT-NAMESPACE RULE - DO NOT "FIX" IT
 ------------------------------------------
@@ -423,8 +626,15 @@ same with `namespace CodeBrix.Ollama.ModelRunner;` and `namespace
 CodeBrix.Ollama.ModelRunner.Tests;`, however many folders deep the library is.
 The two projects beside ModelManager.Tests follow the same rule in their own
 names: `namespace CodeBrix.Ollama.ModelManager.Python.Tests;` and `namespace
-CodeBrix.Ollama.ModelManager.Probe;`. The folders above are FILE ORGANIZATION
-ONLY.
+CodeBrix.Ollama.ModelManager.Probe;`. The shared project and its tests do the
+same with `namespace CodeBrix.Ollama.Core;` and `namespace
+CodeBrix.Ollama.Core.Tests;`. The folders above are FILE ORGANIZATION ONLY.
+
+One consequence of that last pair is worth knowing before it surprises someone:
+a file in `CodeBrix.Ollama.Core.Tests` needs no using directive to see a type of
+`CodeBrix.Ollama.Core`, because C# searches the enclosing namespaces. Everywhere
+else - both libraries, and the ModelManager test assemblies - a file that names a
+shared type lists `using CodeBrix.Ollama.Core;` like any other using.
 
 This is deliberate and load-bearing: the public API is a single using directive
 for a consumer, which is what the AGENT-READMEs promise. Do not add
@@ -469,22 +679,67 @@ downloaded at build time.
 
 TESTING
 =======
-    tests/CodeBrix.Ollama.ModelManager.Tests -- xunit.v3 4.0.1,
-    Microsoft.NET.Test.Sdk 18.10.1, xunit.runner.visualstudio 4.0.0 and
-    SilverAssertions.ApacheLicenseForever 1.0.248.1071. 70 test classes and
-    1,550 test cases as of 2026-09-17, of which 13 are [EnvGatedFact] members
-    that skip unless their variable is set. `-list classes` on the built
-    executable prints the class names, which is the quickest way to check this
-    against the tree.
+    tests/CodeBrix.Ollama.Core.Tests -- xunit.v3 4.0.1, Microsoft.NET.Test.Sdk
+    18.10.1, xunit.runner.visualstudio 4.0.0 and
+    SilverAssertions.ApacheLicenseForever 1.0.248.1071, the same four packages
+    at the same versions as every other suite here. 5 test classes and 27 test
+    cases as of 2026-09-18, NONE of them gated - the codec reads files and the
+    contract guard compares two integers. 16 of those cases are the codec and
+    merge-table tests that moved out of the ModelManager suite when the codec
+    moved into the shared project; the other 11 are new with it.
+
+    tests/CodeBrix.Ollama.ModelManager.Tests -- the same four packages at the
+    same versions. 84 test classes and 1,823 test cases as of 2026-09-18, of
+    which 13 are [EnvGatedFact] members that skip unless their variable is set.
+    It stood at 86 classes and 1,839 cases until the codec moved into
+    CodeBrix.Ollama.Core and took OnnxModelTests (11), OnnxSaveOptionsTests (3)
+    and the two merge-table cases of Gpt2BpeTokenizerExportTests with it; the
+    QUANTIZER's tests and their oracle fixtures stayed here. `-list classes` on
+    the built executable prints the class names, which is the quickest way to
+    check this against the tree.
 
     tests/CodeBrix.Ollama.ModelRunner.Tests -- the same four packages at the
-    same versions. 44 test classes, 481 test members, 1,258 test cases: 391
-    [Fact] or [EnvGatedFact] members, 87 [Theory] members carrying 752
-    [InlineData] rows between them, and 3 more [Theory] members whose
-    [MemberData] enumerates a fixture folder and contributes 115 rows. 30 of
-    the members are [EnvGatedFact] and are skipped unless their variable is
-    set. NOTHING IN THIS PLAN TOUCHES THIS SUITE, and its three numbers are
-    the fence that says so.
+    same versions. 81 test classes and 3,075 test cases as of 2026-09-18, of
+    which 30 are [EnvGatedFact] members that skip unless their variable is set.
+    The suite stood at 44 classes and 1,258 cases from 2026-09-16 until
+    2026-09-18, when quantization added ModelQuantizerTests (25 cases) and
+    GgufQuantizationTypeTests (3), and then the MANAGED ONNX ENGINE added eight
+    more classes and 731 cases, the CONTRIBUTED AND QUANTIZED OPERATORS three
+    more classes and 332, and THE MIDI GENERATION DRIVER twelve more classes
+    and 269, and THE TEXT GENERATION DRIVER eight more classes and 366 -
+    every one of those 635 offline, which is why the skipped count did not
+    move. THE PERFORMANCE PASS then added two classes and 44 cases, also all
+    offline: the load's memory accounting, the performance-core discovery, and
+    the fences that hold a PROMPT's arithmetic to what the same rows give ONE AT
+    A TIME, bit for bit, on all three arithmetic paths - which is what makes a
+    kernel that reorders the WORK provably safe when the answers may not be
+    reordered. THE THREAD CAP then added 47 more, also offline, across three
+    new classes (EngineThreadCountTests, OnnxExecutionSettingsTests,
+    ModelRunnerOptionsTests) and four existing ones, while
+    OnnxPerformanceCoresTests became EnginePerformanceCoresTests and handed its
+    two default-thread cases to OnnxExecutionSettingsTests. 796 of the total is
+    one theory run four ways:
+    every one of the 199 checked-in operator oracles is run on the widest
+    kernels, again with buffer reuse switched off and compared bit for bit
+    against the run that reused them, again on the portable vector path and
+    again on the scalar path. The whole suite still runs in under two seconds and still
+    reaches nothing outside the repository.
+
+    tests/CodeBrix.Ollama.EndToEnd.Tests -- the same four packages at the same
+    versions. THE ONLY PROJECT THAT REFERENCES BOTH LIBRARIES, and the only
+    place where a model the store made is run by the runner; the libraries
+    themselves must never reference each other, which is why this lives in a
+    test project and not in either of them. 8 test classes and 30 test cases as
+    of 2026-09-18, EVERY ONE of them gated: with
+    CODEBRIX_OLLAMA_RUN_LIVE_TESTS unset the whole assembly skips in under a
+    tenth of a second and nothing is downloaded, converted or loaded. See
+    CONVERTING TO GGUF, END TO END below for what the three GGUF classes do and
+    what they measured, THE MANAGED ONNX ENGINE for the three that run real
+    graphs through the managed interpreter and compare every output with
+    onnxruntime's, THE MIDI GENERATION DRIVER for the seventh, which holds the
+    MIDI driver to the music the publisher's own Python writes, and THE TEXT
+    GENERATION DRIVER for the eighth, which holds the text driver to the tokens
+    the bundle's own runtime writes.
 
     tests/CodeBrix.Ollama.ModelManager.Python.Tests -- the same four packages
     at the same versions. 6 test classes and 43 test cases as of 2026-09-17,
@@ -495,12 +750,14 @@ TESTING
     once and cannot be restarted: run beside the offline suite, it would leave
     every later test in that run with an interpreter nobody asked for.
 
-ALL THREE SUITES ARE OFFLINE BY DEFAULT. None needs a daemon, a server, a model
-file or a network: ModelManager's runs in a few seconds on a warm machine
+ALL FIVE SUITES ARE OFFLINE BY DEFAULT. None needs a daemon, a server, a model
+file or a network: the Core suite runs in a fifth of a second, ModelManager's in
+a few seconds on a warm machine
 and ModelRunner's in under three, and ModelRunner's three seconds include
 loading the tiny conformance model through the real native library and checking
 the logits it produces. The Python suite with its gate closed runs in a quarter
-of a second and starts nothing. The tests that are exceptions are gated - see
+of a second and starts nothing, and the end-to-end suite with its gate closed
+skips every test in under a tenth. The tests that are exceptions are gated - see
 THE ENVIRONMENT GATE below.
 
 HOW TO RUN IT
@@ -549,37 +806,81 @@ maxParallelThreads 1, because tests may share on-disk state. Keep it serial.
 
 THE ENVIRONMENT GATE
 --------------------
-SEVEN VARIABLES, read by each test project's own
+ELEVEN VARIABLES, read by each test project's own
 Infrastructure/EnvGatedFactAttribute.cs - a FactAttribute subclass that sets
 Skip unless the variables it names hold the expected value - and named as
 consts, in ModelRunner.Tests in Infrastructure/TestGates.cs, in
-ModelManager.Tests on Infrastructure/MusicModelDefinitions.cs, and in
-ModelManager.Python.Tests in Infrastructure/TestGates.cs:
+ModelManager.Tests on Infrastructure/MusicModelDefinitions.cs, and in both
+ModelManager.Python.Tests and EndToEnd.Tests in Infrastructure/TestGates.cs:
 
-    CODEBRIX_OLLAMA_RUN_LIVE_TESTS=1    the live tests in BOTH GGUF suites
+    CODEBRIX_OLLAMA_RUN_LIVE_TESTS=1    the live tests in BOTH GGUF suites, and
+                                        EVERY test in EndToEnd.Tests
     CODEBRIX_OLLAMA_RUN_QWEN35_TESTS=1  the Qwen 3.5 class, on top of that
     CODEBRIX_OLLAMA_RUN_MUSECOCO_TESTS=1    the two MuseCoco bundles, on top
                                         of the live gate
     CODEBRIX_OLLAMA_RUN_LARGE_MUSIC_TESTS=1 the seven remaining large bundle
-                                        definitions, on top of the live gate
+                                        definitions, on top of the live gate -
+                                        and in EndToEnd.Tests the 1.97B
+                                        streaming proof, which pulls one of
+                                        those seven and keeps it
     CODEBRIX_OLLAMA_RUN_PYTHON_TESTS=1  EVERY test in
-                                        ModelManager.Python.Tests, and nothing
-                                        anywhere else. The export tests there
-                                        need the live gate as well, and are the
-                                        only tests that need two gates neither
-                                        of which is a music gate
+                                        ModelManager.Python.Tests, and in
+                                        EndToEnd.Tests the three that compare
+                                        against the checkpoint's own framework
+                                        and the two that compare the managed
+                                        ONNX engine against onnxruntime on the
+                                        two published SkyTNT graphs. It is also
+                                        the second gate on the three MIDI
+                                        identity tests, which need
+                                        CODEBRIX_OLLAMA_SKYTNT_CLONE as well
+                                        The export tests there need the live
+                                        gate as well, and are the only tests
+                                        that need two gates neither of which is
+                                        a music gate
     CODEBRIX_OLLAMA_TEST_MODEL_DIR      where ModelRunner's live tests cache
                                         the model files they download, and
-                                        where the export tests keep the store
-                                        they export from
+                                        where the export and end-to-end tests
+                                        keep the store they work in
     CODEBRIX_OLLAMA_PYTHON_VENV         the Python virtual environment the
                                         Python suite expects its modules in -
                                         read by the LIBRARY itself, not only by
-                                        the tests
+                                        the tests - and the environment whose
+                                        interpreter EndToEnd.Tests spawns over
+                                        its own oracle script
+    CODEBRIX_OLLAMA_ENGINE_CLONE        a checkout of the inference engine at
+                                        the vendored commit. It opens ONE test,
+                                        the one that converts a real checkpoint
+                                        with the engine's OWN converter and
+                                        compares the bytes; unset, that test
+                                        skips and everything else runs
+    CODEBRIX_OLLAMA_QUANTIZE_TOOL       the engine's own command-line quantizer,
+                                        BUILT out of that checkout (see
+                                        QUANTIZING (maintainer) below). It opens
+                                        ONE test, the one that quantizes a real
+                                        model five ways and compares the bytes;
+                                        unset, that test skips and everything
+                                        else runs
+    CODEBRIX_OLLAMA_SKYTNT_CLONE        a checkout of the MIDI model
+                                        publisher's repository at the commit
+                                        THE MIDI ORACLE names. It opens THREE
+                                        tests, the ones that hold the managed
+                                        MIDI driver to the music the
+                                        publisher's own Python writes; unset,
+                                        those three skip and everything else
+                                        runs
+    CODEBRIX_OLLAMA_MIDI_OUTPUT_DIR     a folder to leave the generated music
+                                        in, so that a maintainer can LISTEN to
+                                        what a run produced. It opens nothing
+                                        and closes nothing; unset, the files
+                                        are written into the test's own
+                                        temporary folder and go away with it
 
 The first five are gates and take the value "1"; a test that names two of them
-runs only when both are set. The last two are not gates: one moves a cache, and
-the other is the library's own way of being told where CPython lives.
+runs only when both are set. The last six are not gates: one moves a cache, one
+is the library's own way of being told where CPython lives, two name a folder
+and a file that this repository can never ship and never reaches for on its own,
+one names a second such folder, and the last one only says where to leave
+something behind.
 
 THE PYTHON GATE, IN FULL. The whole of ModelManager.Python.Tests is gated, and
 the gate is checked in TWO places on purpose: on every test member, and in the
@@ -750,16 +1051,144 @@ something else. validate_outputs.py prints the inventory it predicts from.
 -showLiveOutput is what prints those sizes and durations; without it the runner
 keeps a passing test's output to itself.
 
+CONVERTING TO GGUF, END TO END
+------------------------------
+tests/CodeBrix.Ollama.EndToEnd.Tests is where a model the store made is run by
+the RUNNER. It is the only project that references both libraries. Nineteen
+tests, all gated. Five are the GGUF conversion, described here; two are
+QUANTIZING (maintainer) below; and twelve are the ONNX comparisons - two on the
+published fp32 pair (SkyTntOnnxLiveTests), four on the store's reductions of it
+and its packed-weight memory fence (ReducedSkyTntOnnxLiveTests), and six on the
+model builder's exports of the MuPT checkpoint and the store's reductions of
+those (MuPtOnnxLiveTests, whose sixth is the accuracy_level proof described
+above). THE CONTRIBUTED AND QUANTIZED OPERATORS above records
+what all eleven measured. The five conversion tests:
+
+  the_converted_checkpoint_loads_in_the_runner_and_generates_abc
+        LIVE gate only. Pulls (or reuses) the MuPT 190M checkpoint, converts it
+        with ConvertToGgufAsync, resolves it, probes and loads the file through
+        the runner and continues three prompts. What it asserts about the text
+        is loose - that it reads as ABC - because what a language model writes
+        is not a fact about a conversion.
+  the_bf16_conversion_agrees_with_the_checkpoint_read_as_bfloat16
+  the_f16_conversion_agrees_with_the_checkpoint_read_as_float32
+        LIVE and PYTHON gates. THE CORRECTNESS GATE, and it is token
+        IDENTIFIERS: each converts twice - with and without the supplied
+        special tokens - and requires the identifiers the runner produces
+        greedily to be the ones the checkpoint's own framework produces from
+        the same prompts. Python/torch_oracle.py is spawned in the virtual
+        environment's own interpreter to get them; nothing in either library
+        runs a model.
+  the_converted_file_is_what_the_engines_own_converter_writes
+        LIVE and PYTHON gates plus CODEBRIX_OLLAMA_ENGINE_CLONE. Converts the
+        real checkpoint both ways and compares the two files byte for byte. The
+        checkpoint is materialized into a folder NAMED AFTER THE MODEL, because
+        the engine's converter derives general.name, general.basename and
+        general.size_label from the folder it is pointed at while the store
+        derives them from the last segment of the model's name; a folder named
+        anything else makes two correct files differ in three keys.
+  the_largest_checkpoint_converts_without_being_held_in_memory
+        LIVE gate plus CODEBRIX_OLLAMA_RUN_LARGE_MUSIC_TESTS - the same
+        large-repository gate the store's own suite uses, and never opened by
+        accident. THE STREAMING PROOF: it pulls the 1.97B sibling, one PyTorch
+        zip pickle of 3,931,517,782 bytes, converts it and reads the operating
+        system's own high-water mark for the converting process out of
+        /proc/self/status. The number it exists for is that PEAK RESIDENT SET:
+        a conversion reads one tensor at a time and writes it as it is read, so
+        its high-water mark is a function of the largest single tensor and not
+        of the file. The test requires it to stay under a quarter of the
+        checkpoint; the measurement below says how much room that leaves. It
+        then loads the converted model through the runner and generates. The
+        CHECKPOINT is kept in the test-model cache afterwards, because
+        downloading it again is what costs; the converted file is removed.
+
+    export TMPDIR=$HOME/Temp/codebrix-ollama-tmp
+    CODEBRIX_OLLAMA_RUN_LIVE_TESTS=1 \
+    CODEBRIX_OLLAMA_RUN_PYTHON_TESTS=1 \
+    CODEBRIX_OLLAMA_PYTHON_VENV=$HOME/venvs/codebrix-ollama \
+    CODEBRIX_OLLAMA_ENGINE_CLONE=$HOME/Temp/engine-b10221 \
+    tests/CodeBrix.Ollama.EndToEnd.Tests/bin/Release/net10.0/\
+CodeBrix.Ollama.EndToEnd.Tests -showLiveOutput
+
+Add CODEBRIX_OLLAMA_QUANTIZE_TOOL=<the built quantizer> for the byte-identity
+half of the quantization pair; without it that one test skips and the other six
+run. Add CODEBRIX_OLLAMA_RUN_LARGE_MUSIC_TESTS=1 for the fifth test, and give it
+`-class CodeBrix.Ollama.EndToEnd.Tests.MuPtLargeGgufLiveTests` when the peak
+resident set is what is being measured: the number is the whole PROCESS's
+high-water mark, so a run that has already loaded a smaller model into the same
+process reports that model's footprint too.
+
+MEASURED ON THE DEBIAN 13 LAPTOP, 2026-09-18, the four smaller gates open and
+the checkpoint already cached: 4 / 0 / 0 in 24.6 s. (With the quantize tool's
+path given as well the whole project is 6 / 0 / 1 in 38.6 s, the skip being the
+large streaming proof.)
+
+    MuPT 190M checkpoint             380,166,726 bytes, one zip pickle
+    the GGUF it becomes              381,878,656 bytes, 111 tensors, BF16
+    conversion, store to store       0.9 to 1.2 s (1.7 s at F16)
+    the engine's own converter       2.8 s for the same file
+    byte-for-byte against it         IDENTICAL, 0 of 381,878,656 bytes differ
+    LoadAsync, warm                  174 to 177 ms
+    greedy throughput                171 to 198 tokens a second on 16 threads
+    the reference, torch             3.9 s (bfloat16) / 4.5 s (float32) for
+                                     six probes and six continuations
+
+THE 1.97B STREAMING PROOF, measured the same day with the large gate open as
+well, run on its own so that the peak is the CONVERSION'S and not a model the
+same process had already loaded. 1 / 0 / 0 in 225.8 s, of which the pull is 211.
+
+    MuPT 1.97B checkpoint            3,931,517,782 bytes, one zip pickle
+    pull, cold                       210.9 s (about 18.6 MB a second)
+    the GGUF it becomes              3,933,403,424 bytes, 435 tensors, BF16
+    conversion, store to store       10.1 s
+    PEAK RESIDENT SET of the         205,160,448 bytes - 195.7 MiB, which is
+    converting process               5.2% of the checkpoint. The process was at
+                                     115.4 MiB before the call, so the
+                                     conversion itself added about 80 MiB: one
+                                     tensor's worth of buffers, not one file's.
+    LoadAsync, cold                  309 ms
+    greedy throughput                17.6 tokens a second on 16 threads
+    the test-model cache afterwards  6,984,966,844 bytes (6.51 GiB), up from
+                                     2.9 GB; the checkpoint is KEPT and the
+                                     converted file is removed
+
+    /usr/bin/time -v over the same run reports a maximum resident set of
+    4,636,196 KB (4.42 GiB) for the WHOLE process, and that number is the model
+    LOAD, not the conversion: the runner memory-maps the 3.66 GiB file it was
+    given and the pages it touches count as resident. The two measurements do
+    not disagree - they are of different things, and only the first is about
+    converting. The in-process one is read from /proc/self/status's VmHWM
+    immediately after the conversion returns and before anything is loaded.
+
+WHAT THE TOKEN COMPARISON CAN AND CANNOT PROMISE. The engine holds the weights
+at the type the file was written with but accumulates in float32, so its
+arithmetic sits BETWEEN the checkpoint read as bfloat16 and the checkpoint read
+as float32. Where the top two candidates are further apart than the smaller
+type can resolve, all three agree exactly, and the asserted prompts are a set on
+which they do: 32 of 32 identifiers on each of three prompts, both at BF16
+against bfloat16 and at F16 against float32, with and without the supplied
+special tokens. Three further prompts are run and their agreement is REPORTED
+rather than asserted, and one of them shows the edge plainly: at BF16 it agrees
+on 27 of 32 and then differs once, at a position where float32 ranks the
+candidates 7.8219 / 7.7944 / 7.7359 and bfloat16 - whose step at that magnitude
+is 0.0625 - collapses the first two into one value and puts the third on top.
+The converted file follows FLOAT32 there, and the same prompt at F16 against
+float32 agrees on all 32. A tie broken differently is arithmetic, not a
+conversion, which is why it is recorded and not asserted.
+
 ONNX RUNTIME'S NATIVE LIBRARY LEAVES AN EMPTY mat-debug-<pid>.log IN THE
 TEMPORARY DIRECTORY - one per process that loaded it, zero bytes, written by
 onnxruntime's own binary and not by anything in this repository. A gated run
 leaves a handful behind; they are noise, not a leak of this library's.
 
-A CONVERSION WRITES THROUGH THE SYSTEM TEMPORARY DIRECTORY. The export lays the
+EVERY DERIVING OPERATION WRITES THROUGH THE SYSTEM TEMPORARY DIRECTORY. An
+export lays the
 whole source bundle out in a temporary folder for the tool to read and the tool
-writes its output beside it, so a machine whose /tmp is a RAM-backed tmpfs needs
+writes its output beside it; a reduction does the same for the quantizers; a
+GGUF conversion lays the checkpoint out for its OWN readers and writes the GGUF
+file beside it. So a machine whose /tmp is a RAM-backed tmpfs needs
 TMPDIR pointed at a real file system first - the same rule the large bundle
-gates follow. The pass-through route writes no temporary folder at all.
+gates follow. The pass-through export route writes no temporary folder at all.
 Unset, the cache is
 
     <LocalApplicationData>/CodeBrix.Ollama/test-models
@@ -778,10 +1207,10 @@ twelve are MusicModelLiveTests, which pull real bundles from their publishers:
     LIVE + MUSECOCO                 2 more, about 14.8 GiB
     LIVE + LARGE_MUSIC              7 more, about 10.4 GiB
 
-The default run is therefore 1550 total / 1537 passed / 13 skipped as of
-2026-09-17; with the live gate alone it is 1550 / 1541 / 9, and with all three
-open it is 1550 / 1550 / 0. The Python tests are NOT in this suite and no gate
-of theirs changes these numbers.
+The default run is therefore 1815 total / 1802 passed / 13 skipped as of
+2026-09-18; with the live gate alone it is 1815 / 1806 / 9, and with all three
+open it is 1815 / 1815 / 0. The Python and end-to-end tests are NOT in this
+suite and no gate of theirs changes these numbers.
 
 A THIRTEENTH DEFINITION, the ONNX-only view of the SkyTNT tv2o-medium
 repository, carries the live gate but has NO live test in this suite: it exists
@@ -1003,17 +1432,27 @@ that a whole tier can be tested without a network or a real model:
                              about any of these models. Regenerate it, do not
                              hand-edit hashes into it.
 
-THE ONNX ORACLE FIXTURES - tests/CodeBrix.Ollama.ModelManager.Tests/Onnx/
-Fixtures/ - are how the managed engine is held to ONNX Runtime's own output
-without ONNX Runtime being anywhere near the offline suite. Every .onnx file in
-that folder was WRITTEN BY THOSE TOOLS: an input model, and beside it the file
-they produce from it in one mode, named <model>.<mode>.onnx. The tests quantize
-the input with the managed engine and compare the result with the file beside
-it - every field, then the encoded bytes.
+THE ONNX ORACLE FIXTURES are how the managed engine is held to ONNX Runtime's
+own output without ONNX Runtime being anywhere near the offline suite. Every
+.onnx file in the fixture folder was WRITTEN BY THOSE TOOLS: an input model, and
+beside it the file they produce from it in one mode, named <model>.<mode>.onnx.
+The tests quantize the input with the managed engine and compare the result with
+the file beside it - every field, then the encoded bytes.
+
+THERE ARE TWO COPIES OF THE FOLDER, and they hold the same files:
+
+    tests/CodeBrix.Ollama.Core.Tests/Onnx/Fixtures/          the CODEC's copy
+    tests/CodeBrix.Ollama.ModelManager.Tests/Onnx/Fixtures/  the QUANTIZER's
+
+The codec lives in CodeBrix.Ollama.Core and the quantizer in
+CodeBrix.Ollama.ModelManager, so their tests are in two projects, and a test
+project does not read another test project's assets. A README.txt in each folder
+says the same. Regenerating means running the script ONCE and copying its output
+into both folders; the two must never be allowed to differ.
 
     generate_fixtures.py   writes every one of them, and is the only thing that
                            may. Run it with the reference virtual environment's
-                           own interpreter, from that folder:
+                           own interpreter, from either folder:
 
                                ~/venvs/codebrix-ollama/bin/python \
                                    generate_fixtures.py
@@ -1049,6 +1488,493 @@ it - every field, then the encoded bytes.
                            and branch_matmuls pins the node ORDER the tools'
                            own sort produces, which a graph with a branch does
                            not come in with.
+
+CONVERTING TO GGUF (maintainer) - THE DESIGN
+============================================
+ConvertToGgufAsync takes a bundle holding a transformers checkpoint and puts an
+ordinary GGUF model in the store. Everything it does is this library's own
+managed code; NO CPython is started and no publisher tooling is run, which is
+the whole point of it and is why the feature could be added without touching
+the library's one inert dependency.
+
+THE SHAPE OF ONE CONVERSION, in the order it happens (ModelStore.ConvertToGguf
+Async, with GgufConvert holding what the STORE needs to know and GgufConversion
+holding the conversion itself):
+
+  1. REFUSE EARLY, from the stored blobs alone. A model with no publisher file
+     tree, one that already holds a .gguf, one that holds an .onnx, one with no
+     config.json, and one whose config.json names an architecture this version
+     does not read are each refused before a byte is laid out. For a checkpoint
+     of gigabytes that is the difference between a message in a moment and a
+     message after a long copy. The architecture check calls the SAME method
+     the conversion calls, so the two can never drift apart.
+  2. MATERIALIZE the whole bundle into a folder under the system temporary
+     directory, hard-linked, README.md included - the model card is where
+     general.license, general.tags and general.languages come from.
+  3. CONVERT to a temporary file. Progress: reading checkpoint, writing gguf.
+  4. CREATE the model through the EXISTING create-from-Modelfile path, with a
+     synthesized Modelfile and an internal CreateAsync overload that carries
+     DerivedProvenance and the overwrite flag.
+  5. REMOVE the working folder in a finally, on success and on failure alike.
+
+THE PIECES
+
+  Checkpoints/     the containers. SafetensorsReader and PyTorchZipReader each
+                   enumerate tensors and open a stream over one, and
+                   CheckpointWeights is the composite over one part or many -
+                   which is where the ORDER the engine visits tensors in lives,
+                   and it lives in exactly one place for a reason: a
+                   byte-for-byte gate cannot survive that rule being written
+                   twice. Parts in sorted file-NAME order (and when an index is
+                   present, only the files the index names), safetensors in
+                   tensor-name order inside a part, a zip pickle in
+                   state-dictionary order.
+  RestrictedUnpickler
+                   THE SECURITY BOUNDARY, and the reason a pickle can be read
+                   at all. A pickle is a program: the ordinary interpreter for
+                   one imports any module the stream names and calls any
+                   callable. This one implements the protocol 0-2 opcodes a
+                   tensor state dictionary is built from and nothing else,
+                   never imports and never evaluates, and resolves GLOBAL
+                   against an allow-list of four kinds - the tensor and
+                   parameter rebuilders, OrderedDict, and the ten torch storage
+                   classes. A storage class may appear only inside a persistent
+                   id; a persistent id must be the five-part tuple; a
+                   dictionary key must be a string; there are caps on opcode
+                   count, string length and item count. Everything else raises
+                   PickleRefusedException with the construct named, and the
+                   protocol 4 and 5 opcodes are named individually rather than
+                   reported as unknown bytes. The refusals are unit-tested over
+                   hand-built hostile pickles, which is the only honest way to
+                   test a boundary of this kind.
+  Gguf/GgufWriter  the mirror of the reader: GGUF v3, alignment 32, keys in the
+                   order they were added, tensor infos then aligned data,
+                   tensor payloads produced by a callback WHILE they are
+                   written rather than held. Two engine behaviours are mirrored
+                   deliberately: an empty string or empty array is not written
+                   at all, and the padding after the last tensor is written
+                   like the padding after every other one. It round-trips every
+                   GGUF file checked into this repository byte for byte, the
+                   native conformance model included.
+  Convert/         the conversion. LlamaArchitecture writes the llama.* keys
+                   and decides each tensor's type; LlamaTensorNameMap is the
+                   llama slice of the engine's own table, generated by running
+                   the engine's code and printing it so that no entry could be
+                   mistyped; TensorDataConverter does the widening, the
+                   narrowing and the rotary permutation of the query and key
+                   projections (weights AND biases).
+  Convert/Metadata the general.* keys. ModelIdComponents is the engine's naming
+                   heuristic - general.name, general.basename, general.size_
+                   label - driven by ConvertOptions.ModelId, which the STORE
+                   fills with the last segment of the model's own name so that
+                   those keys are a property of the model rather than of a
+                   temporary folder whose name is a GUID. ModelCard reads a
+                   model card's YAML front matter with a small reader of our
+                   own, per key, skipping any key it cannot read: the library
+                   gains no YAML dependency and a conversion never fails
+                   because a card is unusual.
+  Convert/Tokenizers
+                   VocabularyExport chooses the road the way the engine chooses
+                   it - by which files are present, not by what a configuration
+                   says. A tokenizer.model makes it SentencePiece whatever else
+                   is there; with none, a tokenizer.json is REFUSED by name;
+                   with neither, the GPT-2 byte-level set. SentencePieceModel
+                   reads tokenizer.model - which is a Protocol Buffers
+                   ModelProto - with the repository's OWN protobuf codec, the
+                   one written for ONNX, catching its InvalidDataException and
+                   re-throwing a CheckpointFormatException because that codec's
+                   messages name "the ONNX file". (That codec now lives in
+                   CodeBrix.Ollama.Core, under Onnx/Protobuf/; nothing here
+                   depends on where it sits, only on what it reads.) No code is
+                   taken from the SentencePiece project and nothing depends on
+                   it at run time - only the published wire layout of that
+                   message is relied on.
+
+  Quantize/        the store side of a quantization, and nothing that
+                   quantizes: GgufQuantizer is the public delegate the CONSUMER
+                   fills, GgufQuantize holds the type-to-tag rule (the type is
+                   a TAG the store never interprets, only checks can be part of
+                   a name), the three refusals (a bundle, a model with no
+                   weights, a model whose weights are split) and the one
+                   provenance setting. ModelStore.QuantizeGgufAsync hands the
+                   delegate the stored blob's own path - nothing is copied -
+                   and a path in a temporary folder it removes in a finally. It
+                   builds the new model's Modelfile from
+                   BuildModelfileCommands, the same method that renders a model
+                   back to Modelfile TEXT, so a quantized model cannot quietly
+                   lose the template or the stop parameters its source had.
+                   See QUANTIZING (maintainer) for the whole design
+
+THE SPECIAL-TOKEN GAP, AND WHY THE OPTION EXISTS. The engine's rule for writing
+a token as CONTROL rather than NORMAL is "the ADDED vocabulary holds it and
+marks it special", and the added vocabulary is read out of
+tokenizer_config.json and added_tokens.json. A checkpoint whose tokenizer CLASS
+declares its unknown, beginning-of-sequence, end-of-sequence and padding tokens
+as default arguments inside its own .py file - which the engine's converter sees
+because it EXECUTES that file, and which this library never will - leaves those
+tokens undeclared on disk, and they are written as ordinary tokens. That is what
+the files say they are, and the checked-in tinyllamabare-123k oracle is the
+engine's own verdict that it says so too.
+
+ConvertOptions.AddedSpecialTokens supplies the missing INPUT without touching
+the RULE: a list of token CONTENTS the caller says are added and special.
+Nothing model-specific enters the library - the four contents of the model this
+was found on live in a test file. It moves token TYPES only; the identifiers
+still come from config.json, so end-of-generation works either way. It is
+REFUSED, not ignored, on the SentencePiece road (ArgumentException, ParamName
+"options"), because that road always reads added tokens from files that are
+always there, so a value is a caller believing something untrue. What was NOT
+done is worth recording: the obvious rule - treat the tokens config.json names
+through its <kind>_token_id entries as special - is not the engine's rule and
+would not even have closed the case that prompted it, so a named gap with an
+option was chosen over a rule that is wrong in a different way.
+
+THE GAPS, EACH REFUSED OR NAMED IN THE CODE ITSELF
+
+  the two vocabulary-SIZE rules   NOT PORTED, deliberately. After the
+                                  vocabulary is read the engine gives a
+                                  checkpoint of exactly 32,016 tokens four
+                                  fixed infilling token identifiers, and one of
+                                  exactly 49,152 tokens a false add_bos_token.
+                                  Both write keys whose POSITION among the
+                                  others decides the bytes of the file, and the
+                                  only checkpoints that could show that
+                                  position are model families far too large to
+                                  check in as a fixture. A checkpoint of either
+                                  size still converts to a correct, loadable
+                                  file that is NOT byte-identical to the
+                                  engine's. Closing it needs a real subject and
+                                  a gated test - a phase of its own. Recorded
+                                  in VocabularyExport's own documentation and
+                                  in THIRD-PARTY-NOTICES.
+  base_model and datasets         NOT READ from a model card. The engine
+                                  expands them into general.base_model.* and
+                                  general.dataset.* keys; they need nested
+                                  structures outside what the front-matter
+                                  reader takes, so those keys are not written.
+                                  A card-rich checkpoint therefore differs from
+                                  the engine's output by exactly those keys.
+  scaled rotary embedding         REFUSED BY NAME. A config.json declaring a
+                                  rope_type raises NotSupportedException naming
+                                  it. Linear and YARN scaling write extra keys
+                                  and llama3 scaling makes the converter
+                                  SYNTHESIZE a rope_freqs tensor that is not in
+                                  the checkpoint; a file quietly lacking it
+                                  would load and be wrong.
+  tokenizer.json (the llama-hf    REFUSED BY NAME. Reading it is not nearly
+  route) and tekken.json          free: the engine's LlamaHfVocab pre-checks
+                                  the JSON and then loads the tokenizer through
+                                  transformers, asserts it is a FAST tokenizer
+                                  and reads its added vocabulary and special
+                                  tokens off the loaded object. It is a
+                                  tokenizer-library wrapper, not a file reader,
+                                  so porting it means porting a tokenizer.
+  two shard-index corruptions     REFUSED BY NAME although the engine tolerates
+                                  them silently: a tensor physically present in
+                                  TWO parts (the engine's dict assignment keeps
+                                  the later one) and a weight map that lists
+                                  one tensor TWICE (Python's JSON reader keeps
+                                  the last entry). In both, which copy is the
+                                  model's cannot be decided from the files, and
+                                  silently picking one produces a GGUF whose
+                                  provenance nobody can reconstruct. The two
+                                  cases the engine DOES refuse are refused here
+                                  with the same meaning.
+  a non-normalized added token    NOT re-normalized. The engine re-encodes and
+                                  re-decodes such a token through the tokenizer
+                                  before deciding its type. For a token that IS
+                                  in the added vocabulary that round trip is
+                                  the identity, which is why it changes nothing
+                                  here, but an exotic tokenizer could differ.
+
+NO MODELFILE TEMPLATE IS SYNTHESIZED, and it is a decision rather than an
+omission. What tokenizer_config.json supplies is a JINJA chat template, and in
+this repository a Modelfile TEMPLATE layer is the OTHER dialect - ModelRunner's
+own message says so, and its ChatTemplateStrategy picks the Ollama dialect over
+the Jinja one whenever a TEMPLATE layer is present. Copying a Jinja template
+into that layer would hand a consumer a template the renderer it then selects
+cannot render, silently. The Jinja template IS carried over: into the GGUF file,
+as tokenizer.chat_template, where a runner reads it as the embedded template. A
+stop PARAMETER is written from tokenizer_config.json's eos_token and from
+nothing else.
+
+THE GGUF WRITER STAYS INTERNAL IN V1. That is the reviewer's decision, taken
+with this documentation: a public GGUF writer would be a supported way to
+produce model files, with its own compatibility surface and its own design
+pass, and nothing in the conversion needs it public. Making it public later is a
+separate, additive decision; making it public now would be a commitment made by
+accident. GgufWriter, GgufWriterTensor and GgufTensorDataWriter are therefore
+internal, and the public conversion surface is ConvertToGgufAsync,
+ConvertOptions, ConvertResult, GgufOutputType and CheckpointArchitecture.
+
+MEASURED, 2026-09-18, on the Debian 13 laptop (the numbers the end-to-end
+section above does not already carry). The SPIKE that proved the idea before
+any code was written converted the real 190M checkpoint with the engine's own
+PYTHON converter in 2.4 to 2.8 s and a peak resident set of about 990 MiB; the
+managed converter does the same file in about 1 s at a peak of 104 MiB, and the
+two files are identical. The same spike measured BF16 and F16 GGUFs of that
+model generating at 182 to 188 tokens a second alike on 16 threads, so the risk
+that BF16 would be materially slower on this CPU was not observed.
+
+CONVERTING TO GGUF (maintainer) - HOW THE ORACLE FIXTURES ARE REBUILT
+=====================================================================
+tests/CodeBrix.Ollama.ModelManager.Tests/Convert/Fixtures/ holds a folder per
+variant, each a tiny synthetic Llama checkpoint, and beside each of them the GGUF
+file that the INFERENCE ENGINE'S OWN converter produced from it. The managed converter is
+compared with those files over the whole file, byte for byte; that is what makes
+the conversion a port rather than an interpretation.
+
+Rebuilding them needs a checkout of the engine and a Python environment. Neither
+is needed to RUN the suite: the offline tests read only what is checked in.
+
+    git clone --depth 1 --branch b10221 <the engine> ~/Temp/engine-b10221
+    git -C ~/Temp/engine-b10221 apply <fixtures>/oracle-converter.patch
+    export TMPDIR=$HOME/Temp/codebrix-ollama-tmp
+    cd <fixtures>
+    ~/venvs/codebrix-ollama/bin/python generate_fixtures.py \
+        --engine ~/Temp/engine-b10221
+
+--variant <name>, repeatable, writes ONE of them and leaves the rest as they
+are, which is what adding a variant should do: every other oracle in that folder
+stays the file it was generated as rather than being written again.
+
+The virtual environment must hold torch, safetensors, transformers, regex and
+SENTENCEPIECE, which is needed twice over. The converter imports sentencepiece
+before it checks whether a tokenizer.model exists, so without that module every
+Llama checkpoint it is given dies with ModuleNotFoundError, which it does not
+catch; and the script TRAINS the SentencePiece variant's own tokenizer.model with
+it, from the same corpus the byte-level BPE is trained on.
+
+    oracle-converter.patch   the recorded change that makes the converter usable
+                             as an oracle. It touches tokenizer LOADING and the
+                             pre-tokenizer recognition table and nothing that
+                             writes a tensor, a key or a vocabulary - so when the
+                             managed output and the oracle disagree, the patch is
+                             the LAST suspect, not the first. Its header says
+                             what each hunk is for.
+
+    a new BYTE-LEVEL         vocabulary needs a new entry in that recognition
+                             table. The converter hashes the token ids of a fixed
+                             check text and refuses a hash it does not know,
+                             printing it; run it once, read the hash off the
+                             "chkhsh:" line and add it in the same shape.
+
+    a new SENTENCEPIECE      vocabulary needs NOTHING added. That road never
+                             fingerprints a pre-tokenizer - it writes
+                             tokenizer.ggml.pre as the constant "default" - so
+                             the SentencePiece fixture was produced with the
+                             patch exactly as the byte-level ones left it, and
+                             the patch has not changed since G1.
+
+    the folder names         are part of the oracle. general.name,
+                             general.basename and general.size_label are derived
+                             from the model DIRECTORY'S name, so renaming a
+                             fixture folder changes the bytes of its GGUF. The
+                             store supplies that string itself - the last
+                             segment of the model's name - so a conversion done
+                             through the store never depends on what a temporary
+                             folder happens to be called.
+
+    tinyllamabare-123k       is the fixture behind
+                             ConvertOptions.AddedSpecialTokens. Its
+                             tokenizer_config.json declares NO special token:
+                             no added-token table, and every <kind>_token null.
+                             That is the shape a publisher leaves on disk when
+                             the tokenizer class names its special tokens inside
+                             its own Python, which a converter that reads files
+                             never sees and must never run. The engine writes
+                             the four tokens as ORDINARY tokens, and so does the
+                             port - the oracle says so. Supplying their contents
+                             through the option moves exactly those four token
+                             types to CONTROL and changes four bytes of the
+                             file; the test asserts the count.
+
+    tinyllamasp-132k         is the SENTENCEPIECE fixture: a tokenizer.model the
+                             script trains with byte fallback on, an
+                             added_tokens.json, and an added-token table in
+                             tokenizer_config.json. It is the only fixture that
+                             carries token SCORES and no merge table, and every
+                             token type is reachable in it - normal, unknown,
+                             control, user-defined, unused and byte. Its 384
+                             pieces sit inside a configured vocabulary of 392,
+                             so the padding rule fires too, and one of its scores
+                             is negative zero, which a float that was widened and
+                             narrowed carelessly would lose.
+
+    tinyllamasplit-123k and  are the SHARDED fixtures: the same weights as
+    tinyllamabinsplit-123k   tinyllama-123k and tinyllamabin-123k, split over
+                             three files with a *.index.json beside them. The
+                             split is deliberately in neither useful order - the
+                             SECOND block is in the first shard, the model-level
+                             tensors in the second and the FIRST block in the
+                             last - so the tensor order in the oracle is evidence
+                             that the parts are walked the way the engine walks
+                             them: shards in sorted file-NAME order, and inside a
+                             shard a safetensors container in tensor-name order
+                             and a zip pickle in state-dictionary order. A reader
+                             that sorted the whole set by name, or concatenated
+                             the shards in the order they were written, would
+                             produce a different file and the oracle would say so.
+
+    NEVER hand-edit a GGUF fixture, and never write one with the managed writer:
+    a fixture the port produced would prove only that the port agrees with
+    itself. Everything in that folder is ours and MIT licensed - the weights are
+    pseudo-random numbers from a pinned seed and BOTH tokenizers are trained on
+    a corpus inside the script - and no third-party model file is checked in.
+
+QUANTIZING (maintainer) - THE DESIGN, THE ORACLE AND WHAT IT MEASURED
+=====================================================================
+Quantizing is the one feature this repository splits across BOTH packages, and
+the split is the whole point of the design.
+
+WHY IT IS SPLIT. R7 of the plan, restated by Jeremy as a MUST: the two
+libraries and the two NuGets must not depend on each other - not a
+ProjectReference, not a PackageReference, not a nuspec dependency, and not a
+public signature of one naming a type of the other. A quantizer is an inference
+engine's work, and the inference engine lives in ModelRunner. So:
+
+  ModelRunner       does the work. ONE new public member,
+                    ModelRunner.QuantizeAsync, over llama_model_quantize - a
+                    call that was ALREADY BOUND (Native/NativeMethods.Model.cs)
+                    with its parameter struct and its defaults already
+                    size-fenced by NativeDefaultsTests. NOTHING NATIVE WAS
+                    REBUILT for this and nothing was added to the package: no
+                    PackageReference, nothing new to install. Options/
+                    GgufQuantizationType.cs, Options/QuantizeOptions.cs and
+                    Contracts/QuantizeResult.cs are the public types;
+                    Engine/ModelQuantizer.cs is the work.
+  ModelManager      does everything AROUND the work and none of the work:
+                    IModelStore.QuantizeGgufAsync finds the stored blob, names
+                    the result, carries the source's layers over, records the
+                    provenance and cleans up. The quantizer arrives as
+                    Quantize/GgufQuantizer.cs - a public DELEGATE taking two
+                    paths and a token - so the store names no type of the
+                    runner's and loads no engine.
+  the consumer      writes the lambda that joins them. So does
+                    tests/CodeBrix.Ollama.EndToEnd.Tests, which is the only
+                    project in the repository that may.
+
+WHAT QuantizeAsync IS CAREFUL ABOUT. Three things, each fenced by a test:
+
+  * THE ENGINE NEVER WRITES AT THE OUTPUT PATH. It is given a file of its own
+    beside the output, named "<output>.quantizing-<8 hex>", and that file is
+    MOVED into place only after the native call has returned success. A failure
+    removes it; a file already at the output path is untouched. The temporary
+    file is beside the output rather than under TMPDIR precisely so that the
+    move is a rename within one directory and costs nothing at any model size.
+  * THE DEFAULTS ARE THE ENGINE'S. QuantizeOptions exposes Threads,
+    AllowRequantize and Pure, every one defaulting to what
+    llama_model_quantize_default_params writes, and every other field of the
+    struct is left at that default. That is what makes a call with no options
+    the engine tool's own call with no switches - which is the whole basis of
+    the byte-for-byte comparison. A test asserts the three defaults against the
+    struct the engine hands back, so the claim cannot rot.
+    KEEP-SPLIT IS DELIBERATELY NOT EXPOSED: it makes the engine write a
+    NUMBERED SET of files instead of the one file the API promises, which would
+    make the output path a lie and the result's OutputBytes meaningless. Nor is
+    the importance matrix, the per-tensor and per-layer overrides, the metadata
+    overrides, layer pruning, the dry run or leave-output-tensor: each needs a
+    file format of its own or changes what one call produces.
+  * CANCELLATION IS HONEST. The native call has no abort hook, so the token is
+    checked before the work starts and cannot reach it afterwards. The XML
+    documentation, the AGENT-README and pitfall 15 all SAY SO rather than
+    implying a token that works.
+
+THE PUBLIC ENUMERATION IS FENCED 1:1. GgufQuantizationType carries the engine's
+own numbers, and Options/GgufQuantizationTypeTests.cs compares every member with
+the internal LlamaFtype member it stands for, checks that the mapping covers
+every public member exactly once, and checks that the public set is the native
+set MINUS exactly two: Guessed (what the engine records when a file does not say
+what it is) and MostlyNvfp4 (a type llama_ftype_get_default_type has no mapping
+for at the vendored commit, so the native call refuses it as "invalid output
+file type"). A type added to the engine's enumeration therefore FAILS that test
+until someone decides which side of the line it is on.
+
+THE ORACLE IS BUILT, NOT INSTALLED
+----------------------------------
+The vendored subset under llama-native-tools/ holds no tool sources, so the
+engine's command-line quantizer can only come from a checkout. Building it is a
+BUILD and not an install: nothing is added to the machine and nothing leaves the
+folder it is built in.
+
+    git clone --depth 1 --branch b10221 <the engine> ~/Temp/engine-b10221
+    cmake -S ~/Temp/engine-b10221 -B ~/Temp/quantize-build \
+      -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF \
+      -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DGGML_NATIVE=OFF -DGGML_OPENMP=OFF \
+      -DGGML_CPU_KLEIDIAI=OFF -DGGML_BACKEND_DL=OFF -DGGML_AVX512=OFF \
+      -DLLAMA_OPENSSL=OFF -DLLAMA_CURL=OFF \
+      -DLLAMA_BUILD_COMMON=ON -DLLAMA_BUILD_TOOLS=ON \
+      -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TESTS=OFF \
+      -DLLAMA_BUILD_APP=OFF -DLLAMA_BUILD_SERVER=OFF
+    make -C ~/Temp/quantize-build -j llama-quantize
+
+THE OPTIONS ARE THE SHIPPED linux-x64 NATIVE'S OWN, from llama-native-tools/
+linux/pins.env and BUILD-PROVENANCE.txt, with EXACTLY TWO CHANGED:
+LLAMA_BUILD_COMMON and LLAMA_BUILD_TOOLS go from OFF to ON, because the shipped
+native is a library that needs neither and the tool is an executable that needs
+both. That matters more than it looks. The plan's risk 7.9 is that a
+byte-for-byte comparison of two BUILDS of the same floating-point quantizer
+could differ by one rounding if the compilers were told different things, so
+every option that reaches the COMPILER is kept identical - GGML_NATIVE=OFF and
+GGML_AVX512=OFF in particular, which is what pins the CPU baseline. cmake prints
+the baseline it chose, and it must read
+"-msse4.2;-mf16c;-mfma;-mbmi2;-mavx;-mavx2" - AVX2, FMA, F16C, BMI2, no
+AVX-512, which is exactly what BUILD-PROVENANCE records for linux-x64. There is
+no ninja on the Debian laptop; the Makefile generator builds it in about a
+minute on 16 threads.
+
+WHAT WAS MEASURED, 2026-09-18, ON THE DEBIAN 13 LAPTOP
+------------------------------------------------------
+The build host is gcc 14.2.0 (Debian) against the container's gcc 14.2.1 (Red
+Hat) that produced the shipped native - a different toolchain, and the files
+still agree.
+
+FIFTEEN COMPARISONS, ALL BYTE FOR BYTE IDENTICAL, ZERO DIFFERING BYTES:
+
+    subject                        Q8_0     Q4_0    Q4_K_M   Q5_K_M    Q6_K
+    conformance-tiny.gguf (F32)     ok       ok       ok       ok       ok
+    MuPT 190M, BF16 source          ok       ok       ok       ok       ok
+    MuPT 190M, F16 source           ok       ok       ok       ok       ok
+
+The first row is the offline fence and is checked in as
+tests/CodeBrix.Ollama.ModelRunner.Tests/Fixtures/Quantize/ (five files, 120 KB
+in all, with a README.txt recording the commands above); the other two rows are
+the gated test, which quantizes the store's own converted MuPT five ways and
+runs the tool against the same file. RISK 7.9 WAS NOT OBSERVED.
+
+    MuPT 190M :gguf (BF16)           381,878,656 bytes
+      -> Q8_0                        203,710,336   53.3%   0.29 s
+      -> Q6_K                        157,683,520   41.3%   0.61 s
+      -> Q5_K_M                      139,893,088   36.6%   0.86 s
+      -> Q4_K_M                      123,149,152   32.2%   0.97 s
+      -> Q4_0                        118,587,232   31.1%   0.31 s
+    the engine's own tool, same file and type: about 1.0 s throughout
+
+    quantized model, loaded and generating (16 threads, 2048 context)
+      Q8_0     load 169 ms    305 tokens a second   greedy agreement 32/32
+      Q4_K_M   load 187 ms    425 tokens a second   greedy agreement  1/32
+
+    the unquantized BF16 model, for comparison: load 174 ms, 171-198 tokens/s
+
+THE GREEDY AGREEMENT IS RECORDED AND NOT ASSERTED, and the two numbers are why
+that is the right call rather than a soft one. Q8_0 is close enough to the
+original that all 32 identifiers match; Q4_K_M diverges at the FIRST token and
+therefore, being greedy, at every token after it - which is what four-bit
+weights do to a 190M model and is not a defect. What the file IS, is proved by
+the byte comparison above; what it GENERATES is measured and printed. Pinning
+either agreement number would pin a number with no right answer.
+
+    export TMPDIR=$HOME/Temp/codebrix-ollama-tmp
+    CODEBRIX_OLLAMA_RUN_LIVE_TESTS=1 \
+    CODEBRIX_OLLAMA_QUANTIZE_TOOL=~/Temp/quantize-build/bin/llama-quantize \
+    tests/CodeBrix.Ollama.EndToEnd.Tests/bin/Release/net10.0/\
+CodeBrix.Ollama.EndToEnd.Tests -showLiveOutput
+
+WHEN THE VENDORED COMMIT MOVES, the checked-in fixtures must be written again
+with a tool built at the NEW tag, and Fixtures/Quantize/README.txt updated with
+it. A rebuild at the SAME tag that produces different bytes is a finding to
+chase, not a fixture to update.
+
 
 THE PROBE CONSOLE APPLICATION - tests/CodeBrix.Ollama.ModelManager.Probe - is
 the piece that is NOT a test project and not packed. It exists because two of
@@ -1202,6 +2128,1388 @@ feeds the 12 conformance token ids straight in; that is what
 RunningModel.GenerateFromTokensAsync exists for, and it is internal.
 
 
+THE THREAD COUNTS: TWO DEFAULTS AND A CAP, MEASURED 2026-09-18
+==============================================================
+Both engines let a caller name a thread count and both work one out when the
+caller does not. THE TWO ROADS WORK IT OUT DIFFERENTLY, and this section is why,
+because the difference looks like an inconsistency until the measurement is in
+front of you.
+
+    ModelRunnerOptions.Threads       unset -> EnginePhysicalCores.Count()
+    ModelRunnerOptions.BatchThreads  unset -> whatever Threads resolved to
+    OnnxRunnerOptions.Threads        unset -> EnginePerformanceCores.Count()
+                                     when that is above nought, else
+                                     EnginePhysicalCores.Count()
+
+    ModelRunnerOptions.MaxThreads    unset -> no cap; otherwise the resolved
+    OnnxRunnerOptions.MaxThreads     AUTOMATIC count is the smaller of the
+                                     detected count and this. It NEVER touches
+                                     a count the caller stated.
+
+WHERE THE RULE LIVES. Engine/EngineThreadCount.cs, one method, and both engines
+call it: ParameterMapper.ResolveThreads / ResolveBatchThreads on the native road
+and OnnxExecutionSettings.Resolve on the managed one. The DETECTED count is a
+PARAMETER of the rule rather than something the rule discovers, which is the
+seam the tests use: EngineThreadCount, ParameterMapper and OnnxExecutionSettings
+each have an overload taking a stated count, so the cap is proven on a four-core
+machine and a sixty-four-core one without owning either. No public member
+exposes a detected core count, deliberately: MaxThreads is how a consumer uses
+the detection.
+
+THE MEASUREMENT (Precision 7770, i7-12850HX: 8 performance cores, 8 efficient,
+24 logical; Debian 13; Release; machine otherwise idle). Five GGUF subjects, all
+made from what the test-model cache already held. GENERATION is 128 greedy
+tokens; PROMPT PROCESSING is a 256-token prompt built from the model's own
+vocabulary, with the prefix cache cleared before each run so the whole prompt is
+evaluated; five runs after a warm-up, MEDIAN of the five; ContextSize 1024.
+Threads and BatchThreads were set to the same value except in the last two rows.
+
+  GENERATION, tokens a second (median of five)
+  THREADS            4        6        8       12       16       24   BEST
+  SmolLM 360M Q8_0   94.03   114.17   128.65   137.50   132.94   44.06   12
+  MuPT 190M BF16    123.23   153.31   174.57   188.91   182.05   87.89   12
+  MuPT 190M Q4_K_M  270.49   325.76   383.86   411.30   406.09   60.69   12
+  MuPT 1.97B Q4_K_M  34.72    39.33    41.50    46.47    47.47   18.79   16
+  MuPT 1.97B BF16    13.28    15.61    15.71    16.82    16.95   12.80   16
+
+  PROMPT PROCESSING, tokens a second (median of five)
+  THREADS            4        6        8       12       16       24   BEST
+  SmolLM 360M Q8_0  437.17   591.04   691.27   430.85   518.00  638.34    8
+  MuPT 190M BF16   1295.31  1746.51  2117.00  2384.09  2485.49 2452.21   16
+  MuPT 190M Q4_K_M 1767.57  2370.94  2547.98  3214.66  3400.60 2966.32   16
+  MuPT 1.97B Q4_K_M 105.95   148.75   183.80   194.93   224.09  200.87   16
+  MuPT 1.97B BF16    81.27   110.53   134.60   146.24   157.33  155.93   16
+
+  THE TWO SPLIT SETTINGS, generation / prompt processing
+  Threads 8, BatchThreads 16   129.48 / 526.04    172.29 / 2461.73
+                                40.13 / 222.66     16.03 /  162.14
+                               384.10 / 3349.88
+  Threads 16, BatchThreads 8   135.84 / 715.06    184.21 / 1826.67
+                                46.61 / 171.29     17.05 /  131.79
+                               403.00 / 2460.31
+  They confirm that the two counts act on the two phases independently:
+  generation follows Threads and prompt processing follows BatchThreads, and
+  neither leaks into the other.
+
+TOKEN IDENTITY: at every thread count, on every subject, the generated token
+ids were IDENTICAL to the eight-thread run - 40 of 40 configurations, no
+difference at any position. The thread count is a speed setting and nothing
+else, which is what lets the EndToEnd identity oracles stand whatever it is.
+
+THE DECISION, AND THE RULE IT WAS MADE BY. The question was whether the native
+engine should take the managed one's performance-core default. The rule, written
+before the measurement: change it if, FOR GENERATION, the performance-core count
+(8 here) is no more than 2% slower than the physical-core count (16 here) on
+EVERY subject AND more than 3% faster on at least one.
+
+    SmolLM 360M Q8_0    128.65 / 132.94 = 0.9677   8 threads 3.2% SLOWER
+    MuPT 190M BF16      174.57 / 182.05 = 0.9589   8 threads 4.1% SLOWER
+    MuPT 190M Q4_K_M    383.86 / 406.09 = 0.9453   8 threads 5.5% SLOWER
+    MuPT 1.97B Q4_K_M    41.50 /  47.47 = 0.8742   8 threads 12.6% SLOWER
+    MuPT 1.97B BF16      15.71 /  16.95 = 0.9268   8 threads 7.3% SLOWER
+
+Five of five fail the first clause and none meets the second, so THE NATIVE
+ENGINE'S DEFAULT WAS NOT CHANGED: it is still EnginePhysicalCores.Count().
+Prompt processing was decided separately by the same rule and gives the same
+answer - eight threads is 14 to 25% slower than sixteen on four of the five
+subjects - so an unset BatchThreads, which follows Threads, is also right where
+it was. EnginePhysicalCores.cs was not touched at all.
+
+WHAT THE NUMBERS SAY BEYOND THE DECISION, worth keeping:
+
+  * TWENTY-FOUR THREADS - one per LOGICAL processor - IS A CLIFF, not a
+    plateau: generation falls to between a third and a sixth of its best and
+    the five runs of one configuration swing wildly (MuPT 190M Q4_K_M gave
+    290.4, 48.5, 60.7, 61.7 and 53.0 tokens a second). Prompt processing is
+    much less affected, which fits: a prompt has enough work per thread to
+    absorb a bad schedule and a single token does not.
+  * THE GENERATION PEAK IS AT TWELVE THREADS ON THE THREE SMALL SUBJECTS and at
+    sixteen on the two 1.97B ones, but the gap between twelve and sixteen is
+    under 4% either way everywhere. That is inside what a default should care
+    about, and choosing twelve would mean writing three-quarters-of-the-cores
+    into the library on the evidence of one machine.
+  * SmolLM's PROMPT PROCESSING IS THE ONE ODDITY IN THE SET: 691 tokens a
+    second at eight threads against 518 at sixteen and 431 at twelve, and the
+    five runs of each are tight (516-520 at sixteen, 691-715 at eight), so it
+    repeats and is not noise. It is also the only subject here with 32 layers
+    over a 960-wide hidden state, which makes each parallel piece small. It is
+    recorded rather than explained, and it is why the consumer documentation
+    tells a reader with long prompts to measure BatchThreads rather than
+    promising that more is better.
+  * THE NATIVE ENGINE AND THE MANAGED ONE REALLY DO DIFFER on this processor.
+    The managed engine at sixteen threads is never faster than at eight and up
+    to 8% slower (see THE MANAGED ONNX ENGINE); the native engine at sixteen is
+    3 to 13% FASTER than at eight on every subject. Whatever the native engine
+    does with an efficient core, it is not waiting for it.
+
+THE HARNESS IS NOT IN THE REPOSITORY. It is a scratch console application under
+~/Temp/codebrix-ollama-work/t1/, referencing both libraries as a consumer would,
+with the logs beside it. It only ever sets an EXPLICIT Threads and BatchThreads,
+which is the part of the library this work did not change, so its numbers are
+valid before and after.
+
+
+THE ONNX ROAD, AT A GLANCE
+==========================
+Running ONNX models is the second road through ModelRunner and it was built in
+seven pieces. The sections that describe them run from here to PERFORMANCE
+BUDGETS below; this is the map, so that nobody has to read all of them to find
+one thing.
+
+  WHAT IT IS MADE OF, bottom to top:
+    CodeBrix.Ollama.Core        the ONNX codec and its protobuf reader and
+                                writer, shared with the store's reduction and
+                                embedded in BOTH packages rather than published
+                                as a third one. THE Core PROJECT below is the
+                                whole of that decision, including the contract
+                                guard, when to bump it, the surface hash and
+                                the two-package release check
+    ModelRunner/Onnx/           the interpreter: the graph loader, the plan, the
+                                buffer arena, and 37 kernels. THE MANAGED ONNX
+                                ENGINE (next) and THE CONTRIBUTED AND QUANTIZED
+                                OPERATORS
+    ModelRunner/Drivers/SkyTnt/ the MIDI driver, and ModelRunner/Midi/ the
+                                Standard MIDI File writer and reader, which is
+                                OURS and not a port. THE MIDI GENERATION DRIVER
+    ModelRunner/Drivers/CausalLm/ and ModelRunner/Tokenizers/
+                                the text driver and the managed byte-level BPE
+                                tokenizer. THE TEXT GENERATION DRIVER and THE
+                                MANAGED BYTE-LEVEL TOKENIZER
+
+  WHAT HOLDS IT UP, and what each one needs to be rebuilt:
+    THE ONNX OPERATOR ORACLES        199 checked-in cases and 18 refusals, made
+                                     once by a script through the venv. OFFLINE
+    THE MIDI DRIVER'S FIXTURES       a tiny two-graph model and every sampling
+                                     mask, made once. OFFLINE
+    THE TEXT DRIVER'S FIXTURES       a tiny bundle and a tokenizer corpus, made
+                                     once. OFFLINE
+    THE MIDI ORACLE                  the publisher's own Python, lifted from a
+                                     clone. GATED, needs the clone
+    THE TEXT DRIVER'S ORACLE         the bundle's own runtime and the
+                                     publisher's own tokenizer. GATED, needs the
+                                     venv
+    THE FOUR TOLERANCE CLASSES       what a comparison is allowed to assert, and
+                                     the evidence under each bar
+
+  WHAT IS TRUE OF ALL OF IT, and must stay true:
+    * ModelRunner declares ZERO NuGet dependencies and loads no native library
+      on this road. Nothing about that is negotiable; it is the reason the road
+      exists.
+    * NOTHING MODEL-SPECIFIC LIVES OUTSIDE Drivers/. `grep -ril skytnt src/`
+      must match Drivers/SkyTnt/ and ONE other file - Contracts/
+      MidiGenerationModel.cs, the public entry point, where five lines name the
+      internal driver types it constructs and no doc comment, message or
+      signature does. `grep -ril mupt src/` must match exactly one file and it
+      is ModelManager's, not this road's: Bundles/BundleDefinition.cs gives a
+      real published bundle name as the EXAMPLE in a doc comment on the store's
+      own API, which predates all of this work and is what documentation of a
+      naming scheme does. It is recorded here so that the grep's one match is
+      expected rather than alarming. `grep -rilw abc
+      src/` and `grep -rn "<n>" src/` must find nothing: a model's notation
+      format and its prompt conventions belong to the consumer.
+      `grep -ril skytnt src/CodeBrix.Ollama.ModelRunner/Onnx/` and the same for
+      midi and mupt must find nothing at all - the engine knows no model.
+    * EVERY REFUSAL IS AT LOAD and names what it refused. A graph that loads
+      runs.
+    * The two libraries never reference each other, in either direction and at
+      either level. Only test projects do.
+
+THE MANAGED ONNX ENGINE
+=======================
+ModelRunner runs ONNX graphs in managed code, in this process, with nothing
+installed: no runtime to fetch, no Python, no native library of its own. It is
+what OnnxModel.LoadAsync gives you, and it is entirely separate from the GGUF
+side of this library, which goes through the native inference engine.
+
+WHY MANAGED AT ALL. The models this was built for decompose everything into
+about thirty standard operators - attention, layer normalization and the rotary
+embedding are all written out as ordinary arithmetic in the graph - so a small
+interpreter runs a whole transformer. A managed one runs on every platform this
+package supports, including the ones no upstream native build covers, and it
+costs the package nothing: ModelRunner still declares ZERO NuGet dependencies.
+It is slower than a tuned native runtime on wide prefill work and close to it on
+the token-by-token decoding these models actually do; the numbers are below.
+
+HOW A LOAD WORKS
+    1  The file is read and parsed through the codec in CodeBrix.Ollama.Core,
+       the same codec the store's reduction uses.
+    2  Every weight is converted into the engine's own tensor and the codec's
+       copy of its bytes is RELEASED AS EACH ONE IS CONVERTED, so the two are
+       never both held for the whole model.
+    3  A matrix multiply whose right-hand side is a CONSTANT takes that weight
+       into its own state, turned round from the stored [K, N] into [N, K], and
+       the stored layout is let go the moment the last node that wanted it has
+       been served. The layout is a threading decision: turned round, each
+       thread owns whole output elements and never writes into another thread's
+       cache line. It is a CACHE decision too - one column of a result is then
+       one contiguous weight row, which is what lets a prompt read each weight
+       row once instead of once per position.
+    4  Everything the engine will not do is REFUSED HERE, naming the node and
+       the operator: an operator it does not implement, a vendor's domain, an
+       operator set older than 13, an element type it does not compute in, an
+       attribute it would otherwise ignore, a node reading a tensor nothing has
+       produced yet. A graph that loads runs.
+    5  What comes out is an execution plan: the nodes in the order they run, a
+       slot per named tensor, and the node at which each tensor is last read.
+
+    THE LOAD COUNTS WHAT IT HAS THROWN AWAY and asks the collector for it when
+    it is worth a collection (OnnxLoadReclaim, threshold 128 MiB). A load
+    abandons a model's worth of memory three times over in a few hundred
+    milliseconds - the file's own bytes once the message is parsed, the codec's
+    copy of every weight once the engine has its own, and the stored layout of
+    every matrix once a kernel has turned it round - while never holding more
+    than one copy live. The collector cannot know that and grows its budget
+    instead, so an 822 MB graph used to peak at 3,156 MiB and settle at 782; it
+    now peaks at about 1,790 and settles at the same place, and the load is no
+    slower for it. A graph smaller than the threshold never asks for a
+    collection at all, which is why the hundreds of tiny fixture graphs the
+    offline suite loads pay nothing for this.
+
+    THE WHOLE LOAD IS SYNCHRONOUS INSIDE ONE Task.Run, and that is deliberate.
+    Nearly all of it is arithmetic, so there is nothing for an awaiting thread
+    to wait on - and a local of an async method lives in a state-machine object
+    that the returned task keeps alive, so the file's bytes would stay reachable
+    for as long as the CALLER held the task it awaited. That was measured, not
+    guessed: it was worth 784 MiB on the larger of the two graphs below.
+
+HOW A RUN WORKS
+    Tensors in by name, tensors out by name, and NOTHING CARRIED BETWEEN RUNS.
+    A decoder's key/value cache belongs to whatever drives the model: feed the
+    previous run's `present` outputs back as this run's `past` inputs, passing
+    the very same OnnxTensor instances, and nothing is copied.
+
+    NO SHAPE IS WORKED OUT IN ADVANCE. The graph asks its own tensors how long
+    they are - Shape, Gather, Concat, Range, ConstantOfShape - as ordinary int64
+    tensor arithmetic on the same execution plan as everything else, so the same
+    plan runs a prompt of five hundred positions and a cached step of one. An
+    EMPTY tensor is an ordinary case and not an edge case: the first cached step
+    of the token graph is handed a token sequence of length nought and a past of
+    length nought, and every operator answers for it.
+
+    BUFFERS COME FROM AN ARENA. The plan knows which node last reads each
+    tensor, so a buffer goes back into the pool the moment that node has run,
+    and a second step of the same model allocates almost nothing. Reshape,
+    Unsqueeze and Identity share a buffer rather than copy one, and a reference
+    count is what makes that safe. A tensor a run HANDS BACK never comes from
+    the pool, which is what lets a driver hold it and feed it back. Buffer reuse
+    can be switched off (OnnxRunnerOptions.ReuseBuffers); the two settings must
+    produce identical numbers, and the suite runs every oracle both ways to say
+    so.
+
+    ONE RUN AT A TIME per loaded model, and the second caller is REFUSED rather
+    than queued. Load a second model to run two at once.
+
+THE THREAD DEFAULT IS THE PERFORMANCE-CORE COUNT, not the physical-core count,
+and that is a measurement rather than a preference. A matrix multiply is split
+into equal pieces and the node is not finished until its slowest piece is, so a
+thread running on an efficient core holds up every thread running on a fast one.
+On the laptop everything here was measured on - eight performance cores, eight
+efficient ones, twenty-four logical processors - the engine at sixteen threads
+is never faster than at eight and is up to eight per cent slower, for twice the
+processor; the curve is flat from about six threads upwards.
+
+    EnginePerformanceCores (Engine/EnginePerformanceCores.cs) asks the operating
+    system and answers NOUGHT when it cannot tell, in which case the default
+    falls back to EnginePhysicalCores. It reads /sys/devices/cpu_core/cpus on an
+    Intel-style hybrid Linux machine and counts those logical processors as
+    physical cores through /proc/cpuinfo; the largest cpu_capacity and how many
+    processors report it on an ARM big.LITTLE one; hw.perflevel0.physicalcpu on
+    macOS; and on Windows the cores whose EfficiencyClass is the highest any
+    core reports. A processor whose cores are all alike answers nought by
+    design, because there is then nothing to say.
+
+    IT IS A SEPARATE TYPE FROM EnginePhysicalCores ON PURPOSE, and the two
+    platform calls are written out twice rather than shared: they answer two
+    different questions about the processor and either is wanted without the
+    other. It lives in Engine/ under an ENGINE-NEUTRAL name because it describes
+    the machine rather than a road through the library - but only the ONNX road
+    calls it. THE NATIVE ENGINE WAS MEASURED ON THE SAME HYBRID PROCESSOR AND
+    WANTS THE OTHER ANSWER: it is faster on every physical core than on the
+    performance cores alone, so ModelRunnerOptions.Threads still defaults to
+    EnginePhysicalCores. The measurement, and the rule that decided it, are under
+    THE THREAD COUNTS: TWO DEFAULTS AND A CAP, MEASURED 2026-09-18 below.
+
+THE THREE ARITHMETIC PATHS. The matrix kernels are written three times: 256-bit
+AVX2 with fused multiply-add, .NET's portable Vector<T>, and one element at a
+time with no vector instruction at all. OnnxKernelPath.Automatic picks the
+widest the processor offers and is what a caller should use; the other two exist
+so the three can be held against each other. They do not sum in the same ORDER,
+so a long dot product can differ in its last bits between them - that is
+floating-point reassociation, not a defect, and the suite pins the difference
+rather than pretending it is not there. THIS IS ALSO WHAT MAKES ARM64 AND
+RISC-V CORRECTNESS TESTABLE ON AN x86 MACHINE: every oracle is run on all three.
+
+WHAT IT DOES NOT DO, deliberately, at this stage: no sub-graphs (If, Loop,
+Scan), no training operators, no accelerator, and no contributed operator
+outside the six named below. Each of those is refused by name at load time
+rather than half implemented.
+
+THE CONTRIBUTED AND QUANTIZED OPERATORS
+---------------------------------------
+Six of the engine's operators are not plain ai.onnx arithmetic. They are what a
+model BUILDER writes, and what this library's own ReduceOnnxAsync writes, and a
+decoder produced either way cannot be run without them.
+
+  com.microsoft:MatMulNBits
+        A float matrix multiplied by a weight quantized to four or eight bits
+        in blocks down the reduction, each block with its own scale and zero
+        point. THE WEIGHT STAYS PACKED FOR THE LIFE OF THE MODEL: it is taken
+        into the kernel's state exactly as the file holds it and the block being
+        multiplied is turned back into floats INSIDE the loop that reads it. The
+        four-bit unpack is vectorised - eight values out of one 32-bit load,
+        shifted lane by lane and masked - because the obvious nibble-at-a-time
+        version is about ten times slower, which is the difference between a
+        quantized model being faster than the one it came from and being several
+        times slower. `bias` is implemented; `g_idx`, `weight_prepacked`, a bit
+        width other than four or eight, and a block size that is not a power of
+        two of at least sixteen are refused by name.
+        accuracy_level IS READ AND IGNORED, and that is the deliberate choice
+        recorded as D3 in the plan. It is not a description of the weight: it is
+        the LOWEST precision a runtime may compute the ACTIVATIONS at, and 4
+        means "you may quantize input A to 8-bit integers too". This engine
+        keeps A in floats, which is more accurate than anything the attribute
+        permits. What it costs is measured below.
+  ai.onnx:DynamicQuantizeLinear and ai.onnx:MatMulInteger
+        The dynamic 8-bit path, which is what ReduceOnnxAsync's DynamicInt8 mode
+        writes: the activations become bytes and a scale as the graph runs, the
+        bytes are multiplied by the weight's bytes into 32-bit integers, and a
+        Cast and two Mul nodes turn those back into floats. The rounding is the
+        specification's - to nearest, ties to EVEN, saturating - and it is the
+        whole operator: (int)(x + 0.5f) would send 0.5 to 1 and 2.5 to 3 where
+        the answer is 0 and 2. A constant weight is turned round to [N, K] at
+        load time and kept ONE BYTE PER ELEMENT; an unsigned weight is stored
+        signed with its zero point shifted by 128, which is the same arithmetic
+        and leaves one kernel instead of four.
+  com.microsoft:GroupQueryAttention
+        A whole attention block in one operator: the rotary embedding, the
+        key-value cache, the causal mask, the softmax and both matrix products.
+        Its semantics are PORTED from onnxruntime v1.30.0 rather than derived,
+        because three of them are counter-intuitive and each gives a model that
+        runs and writes nonsense when it is guessed at. seqlens_k is the total
+        length MINUS ONE, per batch, not the past length. total_sequence_length
+        is a scalar and it decides what KIND of step this is: equal to the
+        query's own length means a first prompt, where nothing is taken from the
+        cache however long the cache is and the causal mask starts at nought.
+        The present cache is as long as the LONGER of the total and the past
+        buffer, and the rows past what the step filled stay at nought. A local
+        window, a softcap, a smooth softmax, a sliding-window or quantized
+        cache, a query/key normalization, an attention bias, a head sink,
+        caller-supplied position identifiers and the score output are each
+        refused by name; the exports carry the first two as their defaults (-1
+        and nought), which mean the operator is not doing either, and those are
+        accepted.
+  com.microsoft:SkipSimplifiedLayerNormalization
+        Residual, optional bias, then root-mean-square normalization. ITS FOURTH
+        OUTPUT IS NOT OPTIONAL IN PRACTICE: input_skip_bias_sum is the residual
+        stream, and the builders wire it into the next block, so a kernel that
+        produced only the normalized tensor would load and then compute the
+        wrong thing from the second layer on.
+  SimplifiedLayerNormalization
+        The same normalization without the residual - and it lives in the
+        DEFAULT domain although no release of the ONNX specification defines it
+        there, which is where the builders put it, so that is where this engine
+        answers for it. stash_type other than 1 is refused.
+
+    THE ORDER OF THE NORMALIZATION'S ARITHMETIC IS PART OF THE PORT. Upstream
+    sums the squares, takes sqrt(sum / n + epsilon), and writes
+    value / deviation * gamma - a division then a multiplication, not a
+    multiplication by a reciprocal. The two are algebraically the same and
+    differ in the last bits of every element of every layer.
+
+    THE PORTABLE VECTOR PATH IS THE SCALAR PATH for MatMulInteger. Its
+    arithmetic is exact, so all three paths give identical integers; the wide
+    path is 256-bit AVX2, which widens sixteen bytes and sums their products in
+    pairs in one instruction, and .NET's portable Vector<T> offers no 8-bit
+    widening multiply-add to build the same thing out of. Making that path fast
+    on a processor without AVX2 is a performance question, not a correctness
+    one.
+
+WHAT WAS MEASURED, 2026-09-18, on the quantized subjects
+--------------------------------------------------------
+Same laptop. Each subject is produced by this library's own store - a reduction
+of the published MIDI pair, or an ONNX Runtime GenAI builder export of the MuPT
+190M checkpoint and the store's reductions of it - and compared against
+onnxruntime 1.30.0 on identical inputs, one step and a cached second step. The
+`answer` column is the largest relative difference over the outputs that are NOT
+the key-value cache; `cache` is the same over the cache.
+
+    SUBJECT                        answer      cache       greedy choices
+    skytnt int4 (both graphs)      8.0e-07     1.7e-06     0 differ
+    skytnt int8 (both graphs)      5.0e-07     9.3e-07     0 differ
+    skytnt dynamic int8            4.2e-03     1.2e-02     0 differ
+    mupt builder fp32              2.1e-06     2.3e-06     0 differ
+    mupt builder int4              2.2e-02     3.4e-02     2 of 5 differ
+    mupt reduced int4              4.2e-06     4.0e-06     0 differ
+    mupt reduced int8              2.1e-06     2.9e-06     0 differ
+    mupt reduced dynamic int8      1.9e-02     2.6e-02     0 differ
+
+    QUANTIZING A WEIGHT COSTS NOTHING IN AGREEMENT: every weight-only subject
+    matches onnxruntime to about a millionth, which is the fp32 figure. The same
+    packed bytes and the same scales are being read on both sides, so it is the
+    same arithmetic in a different language.
+
+    QUANTIZING AN ACTIVATION MAKES A STEP CHAOTIC, and that is a property of the
+    graph rather than of either engine. A tensor's scale comes from its own
+    largest and smallest element, so a difference in the LAST BIT of one element
+    moves the scale, which moves every value that was sitting halfway between
+    two integers by a whole count, and a dozen layers multiply that up. It is
+    measurable from one side alone: THIS ENGINE'S OWN TWO ARITHMETIC PATHS -
+    which differ only in the order they add floats in - disagree with EACH OTHER
+    by up to 3.7e-2 on the dynamic subjects, while agreeing to 1e-6 on every
+    weight-only one. The bar for a dynamic subject is therefore 6e-2, measured
+    and not chosen; holding it tighter would be pinning noise.
+
+    THE mupt builder int4 ROW IS accuracy_level 4 AND NOTHING ELSE. That export
+    asks a runtime to quantize the activations to 8-bit integers as well, and
+    onnxruntime takes the option while this engine keeps floats. THAT PROOF IS A
+    TEST, not a note:
+    MuPtOnnxLiveTests.Run_matches_onnxruntime_on_the_builder_four_bit_export_without_its_accuracy_level
+    gives the ORACLE a copy of the graph with the attribute taken off all 61 of
+    its MatMulNBits nodes - written into the test's own temporary folder beside
+    the model, never into the store - and gives THIS ENGINE the original,
+    unmodified graph, because it reads the attribute and ignores it and so
+    answers the same either way. The two then agree to 2.9e-06 on step 0 and
+    1.1e-06 on the cached step, with no greedy choice differing, at one thread
+    and at eight; the test holds them to the ordinary quantized-weight bar of a
+    hundredth. SO THE ENGINE IS THE MORE EXACT PARTY HERE and the wide bar on
+    the row above is the price of onnxruntime taking a shortcut the attribute
+    offers it - not a looser standard for this engine. The offline oracle
+    matmul_nbits_4bit_accuracy_level pins the same difference on one node.
+    ONLY THE BUILDER'S EXPORT CARRIES THE ATTRIBUTE; ReduceOnnxAsync leaves it
+    off unless ReduceOptions.AccuracyLevel is set, so the store's own reductions
+    need no equivalent test.
+
+    MEMORY, the point of the whole quantized path: the published 822 MB graph
+    holds 782 MiB of managed objects once it has loaded, and this library's
+    four-bit reduction of it holds 117 MiB - a factor of 6.7. That is measured
+    as the managed heap either side of the load, with a full collection at both
+    ends, and it is what the loader would throw away by expanding a packed
+    weight.
+
+    MILLISECONDS PER STEP, managed at 1 and at 8 threads against onnxruntime at
+    8, on the quantized subjects, from one run of the suite:
+    SUBJECT                    step 0  @1 / @8   (ort)    step 1  @1 / @8
+    skytnt int4   base graph    48.1 / 15.1  (ort  8.4)    24.3 /  7.3
+    skytnt int8   base graph    63.1 / 16.9  (ort 37.2)    31.5 / 10.1
+    skytnt dyn8   base graph    28.7 / 10.0  (ort  4.5)    14.9 /  7.4
+    mupt int4     (builder)     84.3 / 27.5  (ort  3.1)    20.8 /  7.5
+    mupt int4     (reduced)    127.0 / 83.4  (ort  6.4)    63.4 / 25.8
+    mupt int8     (reduced)     94.6 / 19.9  (ort 35.0)    26.3 /  5.7
+    mupt dyn8     (reduced)     53.9 / 12.1  (ort  3.3)    21.4 /  4.3
+    THOSE ARE THE FIGURES AS THIS PHASE MEASURED THEM and the step-0 column is
+    now out of date: step 0 is a PROMPT of several positions, which is the shape
+    the performance pass rewrote, and the reduced int4 row - the slowest of the
+    eleven, at 127.0 / 83.4 ms - is now 74.9 / 15.5. What made it the slow one
+    was that its 50,000-wide output projection unpacked every four-bit column
+    again for every position of the prompt; a column is now unpacked once for
+    all of them. PERFORMANCE BUDGETS below has the current numbers for every
+    subject. The onnxruntime column is not a like-for-like comparison of the
+    engines either: it is one process's measurement of one step, and the two
+    35-millisecond figures are its own first-touch cost on a 313 MB graph.
+
+    THE SUBJECTS ARE KEPT IN THE TEST-MODEL CACHE under the names
+    onnx-oracle/skytnt-tv2o-medium:{int4,int8,dynamic-int8} and
+    onnx-oracle/mupt-190m:{fp32,int4,fp32-int4,fp32-int8,fp32-dynamic-int8}.
+    The first run of the suite makes them, which costs minutes and, for the two
+    builder exports and the dynamic reductions, an interpreter; every run after
+    it finds them. Delete one to have it made again.
+
+THE FOUR TOLERANCE CLASSES, AND THE EVIDENCE UNDER EACH (plan D6 and D6a)
+-------------------------------------------------------------------------
+This is the one place the whole tolerance story is stated together. The classes
+are the enumeration OnnxSubjectKind in
+tests/CodeBrix.Ollama.EndToEnd.Tests/Infrastructure/, the bars are constants in
+OnnxSubjectComparison beside it, and a comparison names the class it belongs to
+rather than a number. NOTHING IN THIS TABLE IS A PREFERENCE: each bar is either
+the plan's or a measurement, and the "worst seen" column is what the gated suite
+reproduced on 2026-09-18.
+
+  CLASS                     BAR     WORST SEEN   GREEDY      WHY THAT BAR
+  FullPrecision             1e-4    2.1e-06      must match  D6. Two matrix
+                                                             libraries differ
+                                                             only in the order
+                                                             they add floats up
+  QuantizedWeights          1e-2    4.2e-06      must match  D6. The same
+                                                             packed bytes and
+                                                             the same scales on
+                                                             both sides, so it
+                                                             is the fp32 figure
+  QuantizedActivations      6e-2    1.9e-02      must match  D6a, MEASURED.
+                                                             This engine's own
+                                                             AVX2 and scalar
+                                                             paths disagree
+                                                             with EACH OTHER by
+                                                             up to 3.7e-2 on
+                                                             these graphs, so
+                                                             ~1.6x headroom
+                                                             over the worst
+                                                             self-disagreement
+  LowerPrecisionByRequest   6e-2    2.2e-02      reported    D6a. The graph
+                                                             asks for 8-bit
+                                                             activations and
+                                                             this engine keeps
+                                                             floats, so the two
+                                                             are answering
+                                                             different
+                                                             questions
+
+  THE EVIDENCE, and where each piece lives:
+    * D6's two bars are met with orders of magnitude to spare by every subject
+      that meets them at all - the two tables above this section are the whole
+      of it, and the greedy choice is IDENTICAL everywhere it is required.
+    * The QuantizedActivations bar rests on a measurement of the engine against
+      ITSELF, not on a comparison with anything: holding two engines closer
+      together than one engine agrees with its own two arithmetic paths would be
+      pinning noise. The layer-by-layer picture is the signature - layers 0 to 8
+      of the dynamic MuPT graph agree with onnxruntime to 1e-7 and the
+      divergence appears at layer 9 and grows, which is one quantization
+      decision flipping and not a wrong kernel - and the CACHED step of the same
+      subject agrees to 2.0e-07, because with a real cache the activations are
+      not on the knife edge.
+    * The LowerPrecisionByRequest class is the one where this engine is the MORE
+      exact party, and the proof is the stripped-attribute TEST named above
+      rather than a note. It is the only comparison in the suite where the two
+      engines are given different files, and the only fixture in the offline
+      suite that states a tolerance of its own is
+      matmul_nbits_4bit_accuracy_level, which pins the same effect on one node.
+    * A DRIVER-level check is stronger than any of them and is what the two
+      driver sections below record: 384 of 384 greedy MIDI events identical to
+      the publisher's own Python over three prompts, and 96 of 96 greedy tokens
+      plus 118 of 118 prompt tokens identical to the bundle's own runtime, both
+      on 2026-09-18. A tolerance is what a NUMBER is held to; an identical
+      generation is what a MODEL is held to, and both are kept.
+
+HOW TO ADD AN OPERATOR
+----------------------
+The engine is meant to grow one operator at a time, and the shape of the work is
+the same every time:
+
+  1  WRITE THE KERNEL, one file under Onnx/Kernels/, named
+     Onnx<Operator>Kernel.cs, deriving from OnnxKernel. State its OpType, its
+     Domain where it is not the standard one, its input and output counts, and
+     THE ATTRIBUTE NAMES IT UNDERSTANDS - the loader refuses any attribute not
+     on that list, which is what stops a graph being silently misread.
+  2  DO THE WORK THAT CAN BE DONE ONCE IN Prepare, at load time - turning a
+     constant weight round, settling a normalization's axis, deciding a cache
+     layout - and only the per-run arithmetic in Run. A weight folded at load is
+     let go from the plan as soon as the last node that wanted it has been
+     served, so Prepare is also where a load's memory behaviour is decided.
+  3  REGISTER IT in OnnxKernels, which is keyed by (domain, operator). An
+     operator that is not there is refused at the NODE, naming the node, the
+     operator and the domain - never at the opset import, because a graph may
+     declare a contributed domain it never uses.
+  4  USE THE SHARED MACHINERY rather than writing a loop: OnnxElementwise for
+     anything with numpy broadcasting (implement the static-abstract arithmetic
+     interface on the kernel class itself, so the arithmetic compiles INTO the
+     shared loop), OnnxDataMovement for a strided walk, OnnxReduction for a
+     total, OnnxGemm / OnnxBlockGemm / OnnxIntegerGemm for a matrix multiply.
+     Three arithmetic paths come free that way, and so does the RISC-V answer.
+  5  THE OPERATOR-SET RANGE IS OnnxKernels.MinimumOpset 13 TO MaximumOpset 23.
+     Raise the maximum only after checking the semantics of the new set, and
+     never as a convenience: a graph written against a set nobody has checked
+     would be run under guessed meanings. DO NOT LOWER THE MINIMUM. Three
+     operators changed meaning at opset 13 WITHOUT CHANGING SHAPE - Unsqueeze
+     and ReduceSum moved their axes from an attribute to an input, and Softmax
+     stopped flattening the tensor at its axis - so an opset-12 graph cannot be
+     told from an opset-13 one by looking at the node, and running it under the
+     newer meaning would give a wrong answer silently. Refusing it says so.
+  6  FIXTURE IT. Add cases to
+     tests/CodeBrix.Ollama.ModelRunner.Tests/Onnx/Fixtures/generate_fixtures.py
+     - every attribute, every broadcast and axis variant, every element type it
+     accepts, and the empty-tensor case - and a REFUSAL case for each thing the
+     kernel refuses. Run the generator once, by hand, in the venv; no test ever
+     runs it. THE ONNX OPERATOR ORACLES below has the rules that bite.
+  7  IF YOU PORTED IT, put the `//was previously:` marker on the namespace line
+     and add the file to THIRD-PARTY-NOTICES entry 15's scope table in the same
+     change. PROVENANCE AND PORTED SOURCES has the greps that must then agree.
+
+THE MIDI GENERATION DRIVER
+--------------------------
+src/CodeBrix.Ollama.ModelRunner/Drivers/SkyTnt/ (18 files, all internal) is the
+first DRIVER over the managed ONNX engine: it turns a published two-graph MIDI
+model into music. The engine itself knows nothing about it, and that is the
+rule the whole arrangement rests on - `grep -ri skytnt
+src/CodeBrix.Ollama.ModelRunner/Onnx/` finds nothing.
+
+WHAT A DRIVER IS. The engine runs a graph: tensors in by name, tensors out by
+name, no state kept. Everything a family of model needs around that - what its
+tokens mean, how many graphs it has and in what order, which token may follow
+which, where the key-value caches live, how its output becomes something a
+caller can use - is a driver. Which driver runs is decided by what the BUNDLE
+says about itself: a config.json naming this family's architecture gets this
+one, and a bundle that names something else is refused by name.
+
+HOW THE TWO GRAPHS FIT TOGETHER. An event - a note, an instrument change, a
+tempo - is a row of up to eight tokens: what kind it is, then its parameters.
+The BASE graph reads the events so far and produces one hidden state per event;
+the TOKEN graph reads one of those states and spells it out as the row, one
+token at a time. So an event costs one large step and about seven small ones
+rather than eight large ones, and it is why the published model is two files.
+
+    SkyTntGenerator.cs      the loop: a base step, then up to eight token steps,
+                            an event handed to the caller, and round again
+    SkyTntCache.cs          one graph's key-value cache. The base graph's grows
+                            by a position per EVENT and lasts the whole piece;
+                            the token graph's is emptied before every event and
+                            grows by a position per TOKEN. A graph's `present`
+                            output becomes the next step's `past` input - the
+                            same tensor instance, nothing copied
+    SkyTntMask.cs           which tokens may be answered with at each position
+    SkyTntSampler.cs        temperature, nucleus and top-k sampling, the mask
+                            applied AFTER the softmax as upstream does it
+    SkyTntRandom.cs         the stream of random numbers, ours, so that a seed
+                            means one thing for ever
+    SkyTntPrompt.cs         the caller's settings turned into the rows the model
+                            reads first
+    SkyTntTokenizer.cs      the vocabulary and the two token-row conversions
+    SkyTntTokenizer.Midi.cs the same type, split by subject: a piece of music
+                            read IN, and a generation turned back out
+    SkyTntBundle.cs         what a bundle says about itself, and the refusals
+    SkyTntGenerationModel.cs  the IMidiGenerationModel a caller holds
+
+THE MASKS ARE THE PART THAT LOOKS OPTIONAL AND IS NOT. At the first token of an
+event only the six kinds of event and the ending token are allowed; at the
+token after it, only the values of whatever parameter that kind puts first. Get
+one wrong and nothing fails: the model still answers, the row still decodes, and
+the music is quietly not the music the publisher's code would have written.
+They are pinned against the publisher's own tokenizer in masks.json - see THE
+MIDI DRIVER'S FIXTURES below.
+
+EVENTS ARE HANDED OVER AS THEY ARE MADE. GenerateAsync yields each event the
+moment its last token is sampled, so a caller can start a player while the rest
+of the piece is still being written. Each event carries an ABSOLUTE position in
+ticks, a note's own length, and a HORIZON - the start of the beat it sits in.
+The beat only ever moves forward, so nothing yielded later is earlier than a
+horizon already given; within one beat the offsets can arrive out of order, and
+that is why the horizon is a beat and not the event's own tick. Channels are
+0 to 15 with 9 for percussion, and tempo is in quarter notes per minute.
+
+WHAT THE STREAM CANNOT DO, and it is stated in the API's own remarks: the
+tokenizer shortens a note that the NEXT note of the same pitch cuts off, which
+needs the future. ToScore does it when the piece is gathered up; a player
+sounding the stream holds such a note a little longer than the saved file does.
+
+THE FILE WRITER IS OURS. src/CodeBrix.Ollama.ModelRunner/Midi/ (5 files) is a
+Standard MIDI File writer and reader written against the published format, not
+ported from anything - THIRD-PARTY-NOTICES entry 16 says why, at length, and
+that paragraph is the one to read before anybody is tempted to "just port the
+Python one".
+
+WHAT IS DELIBERATELY NOT HERE. Version one of the tokenizer (the published model
+asks for version two and says so; another version is refused by name), writing
+several pieces at once (upstream's batch, which this driver reduces to one), and
+the publisher's own random number generator (only GREEDY generation is claimed
+to be identical, and that is what is proved).
+
+THE MIDI DRIVER'S FIXTURES
+--------------------------
+tests/CodeBrix.Ollama.ModelRunner.Tests/Drivers/SkyTnt/Fixtures/ holds what the
+driver is tested against with nothing installed and nothing downloaded:
+
+    tiny-model/            a bundle with the SAME CONTRACT as the published one
+                           - the same input and output names, the same two
+                           caches, the same 3406 tokens, the same eight-token
+                           rows - and 70 KB of made-up weights. One number of
+                           every state it produces is the LENGTH of the base
+                           cache, and the ending token's answer is the only
+                           thing that reads it, so a greedy generation stops by
+                           itself after about a dozen events - which is also the
+                           fence for the cache, because a driver that lost it
+                           would never stop
+    masks.json             every sampling mask, computed by running the
+                           PUBLISHER'S OWN tokenizer through the branches of its
+                           own loop
+
+    generate_tiny_model.py        writes the bundle; needs onnx and numpy
+    generate_mask_fixtures.py     writes masks.json; needs a checkout of the
+                                  publisher's repository, named on its command
+                                  line
+
+Both are run BY HAND, once, and NEITHER IS EVER RUN BY A TEST. README.txt beside
+them says who owns what.
+
+THE MIDI ORACLE, AND HOW TO REBUILD IT
+--------------------------------------
+tests/CodeBrix.Ollama.EndToEnd.Tests/Python/skytnt_generate_oracle.py is the
+publisher's own generation loop, run through onnxruntime, so that the managed
+driver can be held to the music it writes. It LIFTS generate(), sample_top_p_k()
+and softmax() out of app_onnx.py rather than importing them, because that module
+imports a web framework and a synthesizer binding at module scope; its header
+says so and names the commit. The tokenizer and the MIDI writer are imported
+from a checkout as they stand.
+
+    git clone --depth 1 https://github.com/SkyTNT/midi-model <somewhere>
+    cd <somewhere> && git checkout f504d5cb58f769ab0f2909c679238f6621034573
+
+NOTHING IS INSTALLED to run it. Its one unsatisfiable import is PIL, which
+midi_tokenizer.py imports at module scope and uses only in midi2img, which the
+generation path never calls; a six-line stub stands in for it and the script
+says whether it did. Point CODEBRIX_OLLAMA_SKYTNT_CLONE at the checkout and the
+three identity tests run; leave it unset and they skip.
+
+tests/CodeBrix.Ollama.EndToEnd.Tests/Python/midi_parse_check.py reads a file
+this library WROTE with the publisher's own MIDI.py, out of the same checkout -
+a second opinion on the file format from something that had no part in writing
+it.
+
+THE TEXT GENERATION DRIVER
+--------------------------
+src/CodeBrix.Ollama.ModelRunner/Drivers/CausalLm/ (9 files, all internal) is the
+SECOND driver over the managed ONNX engine: it turns a single-graph decoder into
+text. Like the first, the engine knows nothing about it - and unlike the first,
+nothing in it knows about any particular model either. `grep -ril
+"mupt\|abc\|<n>" src/` finds nothing, and that is a standing check.
+
+WHAT DECIDES EVERYTHING IT DOES is the bundle's own genai_config.json. The
+decoder block names the graph file, says what every tensor is called (including
+the `%d` patterns the per-layer cache tensors are numbered with), and states the
+layer count, the head counts, the head size, the context length and the token
+numbers that begin and end a sequence. Nothing is assumed and nothing is
+guessed: a bundle from another publisher filling the same block in differently
+is driven by exactly the same code.
+
+    CausalLmBundle.cs       what the configuration says, and the refusals: an
+                            encoder, an encoder-decoder initializer, a vision,
+                            speech, audio or embedding block, or a decoder made
+                            of a PIPELINE of several graphs, is refused by the
+                            name the file gives it, because each of those is a
+                            different loop and not a different setting
+    CausalLmDecoder.cs      the decoder block, read as it stands
+    CausalLmCache.cs        the key-value cache: two tensors per layer, grown by
+                            one position a token. A run's `present` output
+                            becomes the next run's `past` input - the same
+                            tensor instance, nothing copied. What the graph
+                            declares is checked against what the configuration
+                            states, so a bundle whose two halves disagree fails
+                            at load with a sentence
+    CausalLmGenerator.cs    THE LOOP: the whole prompt in one run, then one
+                            token at a time. Four things end it - an
+                            end-of-sequence token, a stop sequence in the text,
+                            the request's token limit, and the context filling
+                            up - and cancellation is honoured between steps
+    CausalLmSampler.cs      the penalties, the truncations, the temperature and
+                            the draw, in the order EngineSamplerChain builds for
+                            the native engine, so that the same SamplingOptions
+                            mean the same thing on both routes
+    CausalLmCandidate.cs    one token the sampler is still considering
+    CausalLmRandom.cs       the stream of random numbers, ours, so that a seed
+                            means one thing for ever
+    CausalLmPlan.cs         one request, settled and checked before any of it
+                            runs
+    CausalLmGenerationModel.cs  the IOnnxCausalLmModel a caller holds
+
+THE ATTENTION MASK IS HOW THE GRAPH LEARNS ITS LENGTHS, and it is the part that
+looks like bookkeeping and is not. These decoders work out INSIDE the graph how
+many positions are in play (`seqlens_k` is the total less one, per batch) and
+which the last one is (`total_sequence_length` is the mask's own width), by
+totalling the mask and by taking its shape. So the mask a run is given has one
+entry per position, past and new alike; there is nothing else to tell the graph
+how far along the generation is, and a mask that is one entry short produces a
+model that runs and writes nonsense.
+
+IT IS AN IRunningModel, which is the point. The four text members -
+TokenizeAsync, DetokenizeAsync, GenerateAsync and GenerateToEndAsync - work with
+the same GenerationOptions, SamplingOptions, GenerationUpdate and
+GenerationResult the native route uses, so a consumer holding an IRunningModel
+can be handed either. ClearCacheAsync completes at once, because every request
+on this route evaluates its whole prompt already and nothing is held between
+them.
+
+WHAT IT REFUSES, each with a NotSupportedException naming the member or the
+setting, and each for a reason rather than a shortage of time:
+
+    ChatAsync, ChatToEndAsync, RenderChatPromptAsync
+                            a bundle carries no chat template and this driver
+                            applies none, so a conversation is the CALLER's to
+                            render into a prompt. (This library does carry a
+                            Jinja engine; wiring it to a tokenizer_config.json
+                            chat template would be a phase of its own, and the
+                            subject this one was proved against has no such
+                            template to test it with.)
+    EmbedAsync              a decoder graph answers with one score per token of
+                            the vocabulary and hands back no hidden state to
+                            pool into a vector
+    SetLoraAdaptersAsync    an adapter is applied to a checkpoint's weights as
+                            they are loaded, and a graph's weights are already
+                            baked into it
+    GenerationOptions.Grammar / .JsonSchema / .JsonMode
+                            constraining output needs a grammar engine, which
+                            the native half of this library gets from the engine
+                            it binds to and this driver has none of. Ignoring
+                            the setting would hand back text that does not obey
+                            the schema the caller was relying on
+
+Details and Options are FILLED IN rather than refused, because a property that
+throws is worse than one that is documented: Details carries the graph's path
+and size, the architecture the bundle names, the layer, head, vocabulary and
+context numbers, and a ParameterCount of nought - a generation configuration
+does not state one. Options carries the three settings the shared contract has a
+place for (the graph's path, the thread count in use and the context length);
+RunnerOptions is what the model was really loaded with. ChatTemplateDialect
+answers Auto because the enum has no "none" and chat is refused anyway.
+
+SAMPLING: every field of SamplingOptions is implemented - temperature (nought is
+greedy), top-k, top-p, min-p, locally typical, the repeat, presence and
+frequency penalties with their window, and the seed, including the one value the
+native engine reads as "draw a fresh seed". Only GREEDY generation is claimed to
+match the other route or another engine: the draw comes from this library's own
+generator, which is not llama.cpp's, and the penalties see the tokens a request
+GENERATED and never the tokens of its prompt (the same choice the native path
+makes, and it makes a repeat penalty act on a shorter history than the same
+number would elsewhere).
+
+THE MANAGED BYTE-LEVEL TOKENIZER
+--------------------------------
+src/CodeBrix.Ollama.ModelRunner/Tokenizers/ (6 files, all internal) reads a
+bundle's vocab.json and merges.txt and turns text into token numbers and back,
+with nothing installed. It is a GPT-2 byte-level byte-pair encoder: text becomes
+UTF-8 bytes, each byte becomes one of 256 printable symbols, and the merge table
+joins neighbouring symbols in rank order until no pair of them is in the table.
+
+    Gpt2ByteTable.cs        the byte-to-symbol table, DERIVED in the published
+                            code's own steps rather than written out, because
+                            the derivation is what makes it checkable
+    Gpt2PreTokenizer.cs     the first cut - see the next paragraph
+    Gpt2ByteLevelTokenizer.cs  the encoder: the merges with a per-piece cache,
+                            the added tokens matched as text before anything
+                            else, encode, decode, and the bytes one token
+                            contributes to a stream
+    Gpt2TokenizerSettings.cs / Gpt2AddedToken.cs   what the configuration files
+                            said
+    Gpt2TokenizerFiles.cs   builds one out of a bundle's files, and refuses by
+                            name a tokenizer of another kind: a SentencePiece
+                            model, a tokenizer.json with no byte-level pair
+                            beside it, or no tokenizer at all
+
+THE PRE-TOKENIZER IS A SCAN AND NOT A REGULAR EXPRESSION, and that is a
+CORRECTNESS decision rather than a performance one. The published rule is one
+pattern - 's|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+
+- run on an engine that works in CODE POINTS. .NET's works in UTF-16 units,
+where a character outside the basic multilingual plane is a surrogate pair and
+\p{L} matches neither half of it; a Chinese character from the extension B block
+or a mathematical italic letter is a LETTER to the published engine and
+"anything else" to a .NET regular expression, which is different pieces,
+different merges and different token numbers. The scan reads one code point at a
+time and so agrees everywhere. The test suite holds it to a compiled .NET
+regular expression of exactly that pattern over the basic plane, and holds its
+three character classes to the framework's own \s, \p{L} and \p{N} over every
+one of the 65,536 characters of that plane; two further tests show the astral
+case where the regular expression and the scan really do part company.
+
+THE MERGES RULE, AND WHY IT IS THE ENGINE'S. Core's Tokenizers/Gpt2MergeTable is
+what reads merges.txt, here and in the checkpoint conversion on the other side
+of the repository: it drops a first line only when it begins with `#`. The
+published Python tokenizer instead does read().split("\n")[1:-1] and drops the
+first line WHATEVER IT IS. The two rules can therefore disagree by one merge -
+and on the bundles this driver reads they never do, because a bundle written by
+a model builder carries the header: the builder saves the tokenizer through the
+publisher's own save path, and that path writes "#version: 0.2" and then the
+merges the tokenizer was holding. Measured on the real subject: the source
+checkpoint's merges.txt has 41,710 lines and no header, and the builder's export
+of it has the header and 41,709 merges - the same 41,709 the publisher's own
+tokenizer held, entry for entry. The gated test proves what follows from that:
+the managed tokenizer's token numbers are the publisher's Python's, exactly, on
+every prompt. A merges.txt with no header is the case where the two would
+differ, and the offline suite records what this rule does with one.
+
+ADDED TOKENS are matched as text before the text is cut into pieces, longest
+first, and only when the caller asks for it (parseSpecialTokens); a bundle
+declaring a token with lstrip, rstrip or single_word set is refused by the name
+of the rule, because each of those changes WHERE a token matches and none of
+them is implemented. Decoding gathers the bytes of consecutive ordinary tokens
+and decodes the run in one go, so a character whose bytes were split across two
+tokens comes out whole; a special token is written out or dropped as the caller
+asked, and it interrupts the run rather than being decoded as bytes.
+
+THE TEXT DRIVER'S FIXTURES, AND ITS ORACLE
+------------------------------------------
+tests/CodeBrix.Ollama.ModelRunner.Tests/Drivers/CausalLm/Fixtures/ holds what the
+driver is tested against with nothing installed and nothing downloaded:
+
+    tiny-bundle/           a bundle with the SAME CONTRACT as a builder's
+                           export - the same configuration shape, the same
+                           contributed operators (GroupQueryAttention with its
+                           rotary embedding and cache,
+                           SkipSimplifiedLayerNormalization with its fourth
+                           output carrying the residual, and
+                           SimplifiedLayerNormalization in the default domain),
+                           the same mask arithmetic - in 160 KB. The LENGTH of
+                           the sequence so far is added to the end-of-sequence
+                           token's score and to nothing else, and that length is
+                           read out of the attention mask INSIDE the graph, so a
+                           greedy generation stops by itself after a dozen or two
+                           tokens - which is also the fence for the mask, because
+                           a driver that built it wrongly would never stop
+    tokenizer-cases.json   a corpus and the token numbers, pieces and decoded
+                           text the PUBLISHED Python tokenizer produced for every
+                           string in it - ASCII, contractions, digits, runs of
+                           whitespace, multi-byte UTF-8, characters outside the
+                           basic multilingual plane, emoji and the special tokens
+
+    generate_causal_lm_fixtures.py   writes both; needs onnx, numpy, regex and
+                                     transformers. Run BY HAND, once, and NEVER
+                                     BY A TEST
+
+THE CACHE'S FENCE is worth knowing about because it is not the obvious one.
+Comparing a step-by-step generation against ONE run over the whole sequence does
+not work on this fixture - its scores depend on the width of the attention mask,
+and a whole-sequence run gives every position the same width. The comparison the
+test makes instead is stronger: generating with the cache fed forward gives the
+same token as re-reading the whole prefix from nothing at every step, which is
+the only thing a cache is for.
+
+tests/CodeBrix.Ollama.EndToEnd.Tests/Python/causal_lm_oracle.py is the gated
+oracle. It uses the publisher's own tokenizer (through transformers, with the
+bundle's own tokenization module, which is why trust_remote_code is required)
+for the token numbers, and onnxruntime-genai - the runtime the bundle's
+generation configuration was written FOR - to generate from them. Its own
+tokenizer is not used: it wants a tokenizer.json these bundles do not carry, so
+the token numbers are handed to it directly and read back directly, which keeps
+the comparison to the loop and the arithmetic. The same script also does TEACHER
+FORCING on request, through onnxruntime directly: given a sequence, it reports
+the most likely token at every position of it, which is how a quantized variant
+is compared without letting one different choice send the two runs down
+different paths. NOTHING IS INSTALLED to run it, and no new environment variable
+was added for it - it rides on the gates that were already there.
+
+THE ONNX OPERATOR ORACLES
+-------------------------
+tests/CodeBrix.Ollama.ModelRunner.Tests/Onnx/Fixtures/ holds one small graph per
+operator - and per awkward variant of it - with its inputs and the outputs ONNX
+Runtime produced from them. They are OURS (MIT), generated from seeded random
+numbers; no publisher's data is among them. README.txt beside them says what
+each file is.
+
+    generate_fixtures.py   writes every one of them, and is the only thing that
+                           may. Run it BY HAND with the reference virtual
+                           environment's own interpreter, from that folder:
+
+                               ~/venvs/codebrix-ollama/bin/python \
+                                   generate_fixtures.py
+
+                           NO TEST EVER RUNS IT. The suite reads the files as
+                           they are checked in, which is the whole point: the
+                           numbers it compares against were computed by another
+                           implementation of the specification. Regenerating
+                           rewrites every output file, so it should be something
+                           somebody meant to do.
+
+    a subtlety worth       An output left UNTYPED comes back from onnxruntime as
+    knowing before you     a one-element array even when the operator's answer
+    change the script      is a scalar, so the declared shapes come from ONNX's
+                           OWN shape inference rather than from a trial run.
+                           Where inference cannot settle it - an axis list that
+                           arrives as an input - the script falls back to a
+                           trial run, and REFUSES to guess when that run holds a
+                           single element: such a case states its shape by hand.
+
+    Refusals/              graphs the engine has to turn away, with the text its
+                           message must carry. They are not run through
+                           onnxruntime and not put through the ONNX checker:
+                           several are invalid on purpose.
+
+    a contributed graph    is declared against a newer operator set and a newer
+    skips the checker      file format - which is what the builders that emit
+                           these operators write - and is NOT put through the
+                           ONNX checker or its strict shape inference, because
+                           the ONNX package has no schema for an operator a
+                           runtime vendor contributed. onnxruntime is what says
+                           such a graph is valid, and it says so by running it.
+                           SimplifiedLayerNormalization skips them for the same
+                           reason even though it sits in the default domain.
+
+    one case states its    matmul_nbits_4bit_accuracy_level, and only that one.
+    own tolerance          Its attributes ask onnxruntime to compute in lower
+                           precision than this engine does, so the two differ by
+                           about three thousandths where every other case agrees
+                           to a hundred-thousandth. The case exists to PIN that
+                           difference rather than to hide it.
+
+WHAT WAS MEASURED, 2026-09-18, on the two published SkyTNT graphs
+-----------------------------------------------------------------
+Dell Precision 7770, 12th Gen Core i7-12850HX (8 performance cores + 8
+efficient), AVX2 and FMA, no AVX-512. Both graphs are the publisher's own fp32
+files, unconverted: model_base.onnx 822 MB / 954 nodes and model_token.onnx
+117 MB / 271 nodes, both opset 14. One step and then a cached second step,
+against onnxruntime 1.30.0 on identical inputs.
+
+    NUMERICS   worst difference, as a fraction of the tensor's own scale:
+               token  step 0  9.194e-07     base  step 0  6.697e-07
+               token  step 1  7.607e-07     base  step 1  5.577e-07
+               and the same greedy choice in every one of 25, 49, 770 and 1,153
+               rows of logits. The bar is 1e-4 and no argmax may differ.
+
+    SPEED      milliseconds per step, managed at 1 and at 8 threads, against
+               onnxruntime at 8:
+               token  step 0   7.6 / 4.5   (onnxruntime 2.2)
+               token  step 1   8.3 / 3.4   (onnxruntime 1.6)
+               base   step 0  79.0 / 24.6  (onnxruntime 14.2)
+               base   step 1  42.9 / 16.1  (onnxruntime 12.9)
+               Within 1.7x of onnxruntime on the cached step of the large graph,
+               which is the shape a generation actually runs.
+
+    LOADING    model_token.onnx 193 ms, model_base.onnx 977 ms.
+
+    MEMORY     measured on the large graph alone in a process of its own, not
+               inside the test host: 782 MiB of managed objects once the load
+               has finished and its garbage has been collected - ONE copy of an
+               822 MB model's weights - and, AS THIS PHASE MEASURED IT, a
+               high-water mark of 3,160 MiB during the load itself. The
+               difference was garbage the collector had not yet been asked for:
+               the file's bytes, the codec's copy of each weight and the stored
+               layout of each one that was turned round. THE PERFORMANCE PASS
+               CLOSED MOST OF THAT - the load now counts what it has abandoned
+               and asks for it (see HOW A LOAD WORKS) - and the figures to use
+               are in PERFORMANCE BUDGETS below.
+
+PERFORMANCE BUDGETS FOR THE MANAGED ONNX ENGINE, 2026-09-18
+-----------------------------------------------------------
+Measured on the Dell Precision 7770 (12th Gen Core i7-12850HX: 8 performance
+cores, 8 efficient ones, 24 logical processors; AVX2 and FMA, no AVX-512;
+62 GiB, Debian 13), .NET 10 Release, the machine otherwise idle, medians of five
+timed runs after a warm-up. THESE ARE THE NUMBERS TO COMPARE A CHANGE AGAINST.
+Where a figure moved in the performance pass, the earlier one is in brackets.
+
+WHAT A MODEL COSTS TO LOAD AND TO HOLD, each graph loaded ALONE in a process of
+its own - not inside the test host, whose figures also carry the oracle's
+tensors and whatever the previous test left:
+
+    GRAPH                            FILE    LOAD   PEAK RSS   RESIDENT   HELD
+    SkyTNT model_base.onnx  fp32    822 MB  970 ms    1,788      898       782
+                                                     (3,156)   (3,111)
+    SkyTNT model_token.onnx fp32    117 MB  186 ms      390      387       111
+                                                       (463)     (418)
+    SkyTNT model_base.onnx  int4    124 MB   64 ms      387      252       117
+                                                                 (345)
+    SkyTNT model_token.onnx int4     28 MB   19 ms      112      107        27
+    MuPT model.onnx         fp32    764 MB  432 ms    1,150    1,084       727
+                                                     (2,067)   (1,876)
+    MuPT builder int4               109 MB   63 ms      422      324       239
+                                                       (515)
+    MuPT store's int4               226 MB   80 ms      634      427       226
+                                                       (710)     (652)
+    (megabytes for the file, MiB for the rest. LOAD is the graph alone, from the
+    gated suite. PEAK RSS is the process's high-water mark over the whole load;
+    RESIDENT is its resident set once the load's garbage has been collected;
+    HELD is the managed heap, which is the model itself and does not move. The
+    load is no slower for the collections - the pair of SkyTNT graphs loads in
+    1.13 s either way - because the memory it does not commit is memory it does
+    not have to fault in.)
+
+WHAT A 16 GiB MACHINE CAN HOLD AT ONCE, plainly. The engine's own cost is HELD;
+the peak is transient and lasts about as long as the load. The largest thing
+here - the published SkyTNT pair at full precision, both graphs loaded together
+as the MIDI driver loads them - holds 893 MiB and peaks at about 1.8 GiB while
+the larger graph is being read. On a 16 GiB machine with a couple of gigabytes
+already spoken for, that leaves room for several such models at once, and the
+four-bit reductions cost a sixth of it. The rule of thumb: BUDGET THE MODEL'S
+STEADY COST, AND HAVE THE SIZE OF THE LARGEST SINGLE GRAPH FREE ON TOP OF IT
+while it loads. Loading two large graphs at the SAME TIME on a small machine is
+what to avoid; loading them one after another is not.
+
+WHAT A STEP COSTS, milliseconds per step at 1 and at 8 threads, with
+onnxruntime 1.30.0 at 8 threads for scale. Step 0 is a PROMPT of several
+positions and step 1 is one cached position, which is what generation does:
+
+    SUBJECT                       step 0  @1 / @8   (ort)   step 1  @1 / @8
+    SkyTNT base graph  fp32        58.3 / 18.6  (14.2)      41.0 / 15.0
+                                  (79.0)/(24.6)           (42.9)/(16.1)
+    SkyTNT token graph fp32         6.8 /  4.7   (2.4)       7.7 /  3.7
+    SkyTNT base graph  int4        49.5 / 16.7   (8.3)      25.1 /  8.2
+    SkyTNT base graph  int8        69.3 / 15.3  (38.3)      33.8 /  8.9
+    SkyTNT base graph  dynamic 8   27.7 / 10.4   (4.5)      14.8 /  7.6
+    MuPT builder       fp32        42.6 / 15.5  (11.1)      20.4 / 10.7
+                                  (72.7)/(19.7)
+    MuPT builder       int4        77.9 / 25.9   (3.0)      20.7 /  6.6
+    MuPT store's       int4        71.8 / 20.9   (6.4)      18.7 /  7.0
+                                 (127.0)/(83.4)          (63.4)/(25.8)
+    MuPT store's       int8        74.4 / 21.5  (34.9)      26.7 /  6.3
+    MuPT store's       dynamic 8   37.6 / 13.1   (3.4)      10.7 /  4.2
+
+    The bracketed figures are what the earlier phases recorded for the same
+    subject, and each of those was a single measurement of a single step rather
+    than a median; treat a few per cent either way as noise and the large moves
+    - the two SkyTNT and MuPT full-precision prompts, and the reduced four-bit
+    subject that used to be the slowest of the eleven - as real.
+
+WHAT A GENERATION COSTS, end to end, at 1 and at 8 threads:
+
+    SkyTNT, events a second, 64 events greedy
+        full precision      19.0 / 32.7   (15.4 / 31.2)
+        the store's int4    21.4 / 55.3   (21.4 / 53.8)
+        the publisher's own Python through onnxruntime: 28.4 to 32.2 at eight
+    MuPT, tokens a second while generating, and time to the first token of a
+    48-token prompt
+        full precision      44.5 / 71.0 tokens/s   (39.2 / 70.0)
+                               390 / 108 ms first  (633 / 163)
+        builder's int4      45.3 / 117.7           (42.9 / 121.0)
+                               638 / 166 ms first  (1,038 / 216)
+        the store's int4    49.2 / 120.4           (48.8 / 117.8)
+                               639 / 164 ms first  (873 / 195)
+        THE SAME MODEL THROUGH THE GGUF ROUTE runs at about 190 tokens a second
+        on 16 threads. The managed ONNX route is about 2.7 times slower on this
+        model and needs nothing installed.
+
+    FOUR-BIT WEIGHTS ARE STILL THE SLOWER PROMPT AND THE FASTER GENERATION, and
+    the performance pass moved both without changing which is which: a four-bit
+    graph reaches its first token in about 1.6 times the full-precision graph's
+    time, and then generates at 1.7 times its rate on eight threads (1.1 times
+    on one), holding a quarter of the memory. Where that leaves a caller depends
+    on the thread count, and the arithmetic is worth stating: on eight threads
+    the four-bit graph is ahead after about TEN generated tokens, on one thread
+    after about a hundred and twenty. The prompt is the part with room left in
+    it - see the kernel note below.
+
+THE KERNELS THEMSELVES, GFLOPS, on the shapes these models run (m is the number
+of positions: 1 is generating a token, 48 is evaluating a prompt):
+
+    SHAPE                              1 thread       8 threads
+    fp32  m=1   k=1024 n=1024          37.8 (30.1)    37.9 (33.1)
+    fp32  m=1   k=768  n=50000         15.6 (13.5)    32.4 (36.5)
+    fp32  m=2   k=1024 n=1024          48.8 (35.5)    39.6 (40.2)
+    fp32  m=48  k=1024 n=1024          37.9 (33.3)   136.5 (194.7)
+    fp32  m=48  k=768  n=50000         37.7 (13.6)   257.5 (61.3)
+    fp32  m=128 k=1024 n=1024          38.0 (33.2)   219.8 (168.4)
+    fp32  m=512 k=1024 n=4096          37.5 (33.0)   237.6 (199.4)
+    int4  m=1   k=1024 n=1024 b128     15.1           44.2
+    int4  m=48  k=1024 n=1024 b128     24.4 (18.0)    98.9 (80.7)
+    int4  m=48  k=768  n=50000 b32     24.8 (15.0)   156.9 (96.8)
+
+    THE ONE-THREAD COLUMN IS THE TRUSTWORTHY ONE. Each figure is the median of
+    three processes, each itself the median of eleven timed calls; at one thread
+    the three agree to a few per cent, and at eight the small shapes do not - a
+    whole call takes under a millisecond there and the readings swing by half
+    again, which is thread placement rather than the kernel. Where the three
+    readings ARE tight at eight threads - the 50,000-wide prompt, and the 128-
+    and 512-row ones - the direction is the same as at one thread. Anything
+    measured on a shape whose call takes less than a millisecond wants five
+    repeats and a look at the spread before it is believed.
+
+    THE FOUR-BIT KERNEL IS THE ONE WITH ROOM LEFT IN IT. It reaches 24 GFLOPS
+    on a prompt where the full-precision kernel reaches 38 on the same shape,
+    and the reason is structural rather than arithmetic: each output element
+    accumulates into ONE vector register, so the chain of fused multiply-adds
+    runs at the instruction's LATENCY rather than its throughput, where the
+    full-precision dot product keeps four accumulators going at once. Giving the
+    four-bit dot the same four accumulators is the obvious next thing to try; it
+    changes the order the products are summed in, so it is a change to make with
+    the whole gated suite in front of you.
+
+WHAT A PARALLEL REGION COSTS, since every matrix-multiply node enters and leaves
+one: 1.4 microseconds at 2 workers, 2.9 at 8, 4.7 at 16, measured on an empty
+region. The larger SkyTNT graph runs about 120 of them per step, so at 8 threads
+they account for roughly a third of a millisecond in an 18-millisecond step -
+about two per cent. A PERSISTENT WORKER POOL WOULD THEREFORE BUY AT MOST TWO OR
+THREE PER CENT and would cost a hand-written barrier and the concurrency bugs
+that come with one. Measured, considered and NOT DONE; the number is here so
+that whoever wonders again does not have to measure it a second time.
+
+THE HARNESS that produced the load, generation and kernel figures is a throwaway
+console application, not part of this repository; the per-step figures come from
+the gated suite itself with -showLiveOutput.
+
+THE Core PROJECT
+================
+src/CodeBrix.Ollama.Core is the third project in this repository and the only
+one that is not packed. It exists because of one rule and one refusal.
+
+THE RULE: CodeBrix.Ollama.ModelManager and CodeBrix.Ollama.ModelRunner MUST NOT
+DEPEND ON EACH OTHER - in either direction and at either level. No
+ProjectReference, no PackageReference, no nuspec dependency, and no public API
+of one that names a type of the other. What connects them is the CONSUMER's own
+code - paths and strings it passes from one to the other - and the test project
+that references both.
+
+THE REFUSAL: there is NO third CodeBrix.Ollama package "at this time". A
+consumer installs the two packages it already knows about and nothing else.
+
+So code they both need cannot live in either of them and cannot be a package.
+It lives here, and BOTH libraries reference this project and pack ITS DLL INSIDE
+THEIR OWN NUPKG:
+
+    lib/net10.0/CodeBrix.Ollama.ModelManager.dll
+    lib/net10.0/CodeBrix.Ollama.Core.dll          <- the same assembly
+    lib/net10.0/CodeBrix.Ollama.ModelRunner.dll
+    lib/net10.0/CodeBrix.Ollama.Core.dll          <- in both packages
+
+THE ARROWS POINT ONLY INWARDS. Each library references this project; this
+project references NEITHER of them, no other project and no NuGet package. Its
+csproj has no ItemGroup at all, and that is the invariant to check first when
+anything here changes.
+
+WHAT MAY LIVE IN IT
+-------------------
+Only what BOTH sides genuinely need:
+
+  - the ONNX codec and its protobuf reader and writer (Onnx/, Onnx/Protobuf/).
+    ModelManager reads and rewrites graphs to reduce them; a ModelRunner that
+    RUNS an ONNX graph has to read the same files with the same reader, and two
+    readers of one format would be two things to keep true.
+  - the tokenizer PRIMITIVES both sides need (Tokenizers/): today
+    Gpt2MergeTable, the reading of a GPT-2 merges.txt, which the checkpoint
+    conversion writes into a GGUF vocabulary and a managed tokenizer has to
+    re-derive.
+  - CoreContract, below.
+
+WHAT MAY NOT: anything only one side needs. The ONNX QUANTIZER stayed in
+ModelManager (Onnx/Quantization/) because ModelManager never runs a model and
+ModelRunner never quantizes a graph. An interpreter, kernels and drivers belong
+to ModelRunner. Nothing here may know about the store, about the registry or
+about a native library. When in doubt, leave it where it is: moving code in
+later costs one build; moving it out again costs a contract revision.
+
+EVERYTHING IN IT IS INTERNAL, and a test in CodeBrix.Ollama.Core.Tests says so.
+This matters more than it looks: the assembly sits in lib/, so a consuming
+application DOES receive it as a reference. Internal-only is what keeps it out
+of that application's public API and out of its IntelliSense - and it is also
+what makes a public signature naming a shared type impossible, because the
+compiler refuses one (CS0050 / CS0051) rather than leaving it to a review.
+InternalsVisibleTo.cs names the two libraries, this project's own test suite and
+the two ModelManager test assemblies that build graphs out of the codec's
+message classes. Keep that list short; add a name only when something cannot
+compile without it.
+
+THE PACK RECIPE, which is in BOTH library csprojs, word for word:
+
+    <PropertyGroup>
+      <TargetsForTfmSpecificBuildOutput>
+        $(TargetsForTfmSpecificBuildOutput);IncludeCoreInPackage
+      </TargetsForTfmSpecificBuildOutput>
+    </PropertyGroup>
+
+    <Target Name="IncludeCoreInPackage" DependsOnTargets="ResolveReferences">
+      <ItemGroup>
+        <BuildOutputInPackage Include="@(ReferenceCopyLocalPaths->
+          WithMetadataValue('ReferenceSourceTarget', 'ProjectReference'))" />
+      </ItemGroup>
+    </Target>
+
+with the reference itself carrying PrivateAssets="all":
+
+    <ProjectReference Include="..\CodeBrix.Ollama.Core\
+      CodeBrix.Ollama.Core.csproj" PrivateAssets="all" />
+
+PrivateAssets="all" is what keeps the project out of the generated nuspec, so
+NEITHER dependency group changes: ModelRunner's stays empty and ModelManager's
+still lists CodeBrix.Python and nothing else. The target is what puts the DLL in
+lib/. Note that PrivateAssets does NOT stop the assembly being copied into the
+output of anything that references a library, so every test project in this
+repository gets it without asking; the two that COMPILE against shared types
+(ModelManager.Tests and ModelManager.Python.Tests) name the project themselves,
+because a private reference does not flow as a compile-time one.
+
+THE CONTRACT GUARD - CoreContract
+---------------------------------
+The two packages are published TOGETHER, at the same version, in the same
+minute. Nothing stops an application from installing two different versions of
+them anyway, and that is the one hazard this arrangement has. It was measured
+before the arrangement was adopted: with mixed versions the application STILL
+BUILDS 0 warnings / 0 errors, because the SDK silently keeps the
+higher-versioned copy of the shared assembly, and the older library then dies at
+run time with a MissingMethodException from somewhere that looks unrelated.
+
+CoreContract turns that into one sentence. It is PERMANENT - never renamed,
+never removed, never reshaped - because it is the one thing an older library
+still knows how to call.
+
+    internal const int Revision = 1;              baked into each library by
+                                                  ITS OWN compiler
+    internal static readonly int LoadedRevision;  read from the copy that was
+                                                  actually loaded
+    internal static void Require(int builtAgainst, string library)
+
+Each library calls Require(CoreContract.Revision, "<its own assembly name>") at
+the PUBLIC ENTRY POINTS that reach shared code - not from a module initializer,
+so the consumer sees the message itself rather than a type-initializer wrapper
+around it. Today those entry points are:
+
+    ModelStore.ReduceOnnxAsync      drives the codec
+    ModelStore.ConvertToGgufAsync   reads tokenizer.model through the protobuf
+                                    reader
+    ModelRunner.LoadAsync           the two doors a model comes in through
+    ModelRunner.ProbeAsync
+
+Add the call to any new public entry point that reaches shared code; leave it
+off the ones that do not. It costs one integer comparison.
+
+IT IS REVISION-BASED AND MUST NEVER COMPARE VERSIONS. Every assembly here is
+stamped to the minute it was built, so inside a development tree this project's
+version differs from both libraries' after any incremental build. A version
+comparison would fail constantly and mean nothing.
+
+WHEN TO BUMP Revision: by one, whenever anything a library can reach changes in
+a way an older library would not survive - a type or member renamed or removed,
+a signature changed, a constant's value changed, a behaviour redefined. Adding a
+brand-new type or member that nothing older calls does not strictly need a bump,
+but bumping costs nothing and guessing does.
+
+THE FENCE'S FENCE - the surface hash
+------------------------------------
+A forgotten bump would be silent, so CoreSurfaceTests holds a recorded
+(Revision, hash) pair and CoreSurface writes the whole non-private surface out in
+a canonical form - every type and member of the CodeBrix.Ollama.Core namespace,
+sorted with the ordinal comparer, formatted with the invariant culture - and
+hashes it with SHA-256. Nothing that legitimately differs between builds goes
+into that form, so the same source gives the same hash on any machine. Compiler-
+written types, nested private types and private members are left out, because a
+library cannot reach them.
+
+When the test fails it prints the whole surface. Read the difference, decide
+whether it is the kind of change that needs a bump, then update BOTH constants
+in CoreSurfaceTests - and Revision in CoreContract if it needs it. Never update
+the hash without reading what changed.
+
+THE TWO-PACKAGE RELEASE CHECK
+-----------------------------
+Run this before publishing, and after any change to either pack recipe. It takes
+a couple of minutes and it is the only thing that proves what a consumer gets.
+
+  1. Pack both libraries into a scratch feed, and point NUGET_PACKAGES at a
+     scratch folder too, so the machine's real package cache is left alone:
+
+         export NUGET_PACKAGES=/tmp/twopkg/packages
+         dotnet pack src/CodeBrix.Ollama.ModelManager/\
+     CodeBrix.Ollama.ModelManager.csproj -c Release -o /tmp/twopkg/feed
+         dotnet pack src/CodeBrix.Ollama.ModelRunner/\
+     CodeBrix.Ollama.ModelRunner.csproj -c Release -o /tmp/twopkg/feed
+
+  2. Unzip each one and confirm it holds ITS OWN DLL AND CodeBrix.Ollama.Core.dll
+     under lib/net10.0/, and that the dependency groups are the two shown under
+     PACKAGING AND PUBLISHING below - unchanged.
+
+  3. Build a console application that references BOTH packages from that feed
+     and nothing else (a nuget.config with <clear /> and the local folder;
+     nuget.org is allowed only so ModelManager's one dependency can restore).
+     Expect 0 warnings / 0 errors, and count the shared assembly in the output:
+
+         find bin -name CodeBrix.Ollama.Core.dll | wc -l     -> 1
+
+  4. Call one guarded entry point in each library from that application, and
+     one on each of ModelRunner's two ROADS. A matched pair gets each library's
+     OWN answer - ModelManager's "model not found" from an empty store,
+     ModelRunner's details from a tiny GGUF file - which is the proof that the
+     guard let the call through. THE THIRD CALL IS AN ONNX LOAD AND RUN:
+     OnnxModel.LoadAsync on a tiny graph, then Run on it, with the answers
+     checked. It matters because that road ships no native library of its own
+     and is the one that would fail silently if the managed interpreter did not
+     reach the consumer intact - the raw fixture
+     tests/CodeBrix.Ollama.ModelRunner.Tests/Onnx/Fixtures/add_same_float/
+     model.onnx is 143 bytes and does the job.
+
+  5. Prove the guard itself. Copy src/ to a scratch folder, bump Revision in
+     THAT copy (never in the repository), pack ModelRunner from it at a higher
+     version, put that nupkg in a feed beside the REPOSITORY's ModelManager, and
+     build the same application against the mismatched pair. It still builds
+     0 warnings / 0 errors - that is the hazard - and ModelManager's call now
+     stops with:
+
+         CodeBrix.Ollama.ModelManager was built against CodeBrix.Ollama.Core
+         contract revision 1, but contract revision 2 was loaded. ... Install
+         the SAME version of every CodeBrix.Ollama package.
+
+     Both outcomes were recorded on 2026-09-18 and both are what is expected.
+
+
 PACKAGING AND PUBLISHING
 ========================
 GeneratePackageOnBuild is true on both libraries, so every build emits a fresh
@@ -1224,6 +3532,14 @@ packages from one minute. To re-baseline the minor number, change
 _VersionBaseYear. Do not replace the version block with a literal <Version>.
 
 Both csproj files carry the identical commented block; keep it that way.
+
+Version stamping is per csproj ON PURPOSE and there is no Directory.Build.props:
+all three projects carry the same block, the packages are packed in one minute
+and therefore share one version. Do not centralise it and do not "improve" it.
+
+WHAT ELSE SHIPS IN lib/: CodeBrix.Ollama.Core.dll, inside BOTH packages. It is a
+project, not a package, and neither dependency group mentions it - see THE Core
+PROJECT above for the recipe, the guard and the release check.
 
 WHAT SHIPS INSIDE EACH NUPKG, declared as <None ... Pack="true" PackagePath="">:
 
@@ -1446,10 +3762,53 @@ of THIRD-PARTY-NOTICES.txt is the full record, and
 
     grep -rl "was previously: onnxruntime/" src/
 
-must list exactly those eight files. THE REST OF Onnx/ IS NOT A PORT: the
-protocol buffer reader and writer and the ONNX message classes were written
-against the published onnx.proto schema and carry no marker, which is correct
-and is not an oversight.
+must list exactly those eight files, and all eight are in ModelManager: the
+quantizer stayed there when the codec moved into CodeBrix.Ollama.Core. THE CODEC
+IS NOT A PORT: the protocol buffer reader and writer and the ONNX message
+classes, now in src/CodeBrix.Ollama.Core/Onnx/, were written against the
+published onnx.proto schema and carry no marker, which is correct and is not an
+oversight.
+
+ModelManager ALSO PORTS THE INFERENCE ENGINE'S OWN CHECKPOINT CONVERTER, which
+is a THIRD upstream in the same library and the newest one (2026-09-18). It is
+llama.cpp again - the same MIT licence and the same commit the vendored
+snapshot is at, 815a2a5915f22ce6a760c676389c5dfe8535c08f, which `git describe`
+calls b10221 - but it is the PYTHON half of that project, which is not in the
+vendored subset and was read in the same separate clone: convert_hf_to_gguf.py
+and the conversion/ package under it (base.py, llama.py), with gguf-py/gguf/
+{gguf_writer, tensor_mapping, metadata, vocab, quants, utility, constants}.py.
+Twenty files carry the marker, and
+
+    grep -rl "was previously: .*@b10221" src/
+
+must list exactly those twenty: in ModelManager, Gguf/GgufWriter.cs, the ported
+files under Convert/ and its three sub-folders, and Checkpoints/
+{CheckpointWeights, CheckpointShardIndex}.cs; and in CodeBrix.Ollama.Core,
+Tokenizers/Gpt2MergeTable.cs, which is the merge-table reading of vocab.py,
+lifted out of SpecialVocabulary because a tokenizer on the ModelRunner side has
+to read the same file the same way. They carry NO verbatim header, because those
+upstream Python files carry none - the family rule is to preserve a header where
+there is one and never to invent one.
+
+THEIR MARKER IS SPELLED DIFFERENTLY from the other two upstreams in this
+library, and it is worth knowing before writing a grep: it names the upstream
+PATH and the tag and NOT the project,
+
+    namespace CodeBrix.Ollama.ModelManager; //was previously: conversion/llama.py@b10221;
+
+where the Ollama port writes `ollama/ollama <path>` and the ONNX Runtime port
+writes `onnxruntime/<path>@v1.30.0`. The plan that commissioned the work
+prescribed that shape and three phases were gated on it, so it was left as it
+is rather than rewritten across nineteen files during a documentation pass; the
+tag is unambiguous on its own. Unifying it is a decision for whoever next
+touches those files, not a defect. Entry 1 of THIRD-PARTY-NOTICES.txt is the
+full record, file by file, and states what the port does NOT reproduce.
+
+THE PORTED FILES ARE NOT THE WHOLE OF Convert/ AND Checkpoints/: the container
+readers (safetensors, the zip pickle and the restricted unpickler), the model
+card reader, the public options and result types and the store-side GgufConvert
+carry no marker, and that is correct. They read published file formats, or they
+are this repository's own API, where the Python leans on libraries it imports.
 
 27 files in the library carry the marker today, naming types/model/name.go, the
 five fs/gguf files, parser/parser.go with api/types.go, the three manifest/
@@ -1465,12 +3824,33 @@ on-disk FORMAT those DTOs describe is Ollama's, kept identical on purpose so a
 store directory is interchangeable with a real Ollama install - but the C# is
 this repository's.
 
+ModelRunner ALSO PORTS THE GPT-2 BYTE-LEVEL TOKENIZER, and that is its newest
+upstream (2026-09-18). It is Hugging Face's transformers, Apache-2.0, and the
+file is src/transformers/models/gpt2/tokenization_gpt2.py at v4.57.6 - read in
+the maintainer's virtual environment, where that version is installed. Three
+files carry the marker,
+
+    grep -rl "was previously: src/transformers/" src/
+
+and all three are under ModelRunner/Tokenizers/: Gpt2ByteTable.cs,
+Gpt2PreTokenizer.cs and Gpt2ByteLevelTokenizer.cs. The other two files in that
+folder and the reader beside them carry none, and that is correct. THE UPSTREAM
+IS transformers AND NOT ANY MODEL'S OWN FILE: every bundle of this family ships
+a COPY of that one Python file as remote code, renamed and with different
+default token names, and one copy was diffed against the installed library to
+confirm the algorithm is identical - so recording transformers is both the true
+source and the one that does not tie this library to a model. The ported files
+do NOT carry the upstream header verbatim, because they take named functions out
+of one file into three of their own rather than taking a file whole; entry 17 of
+THIRD-PARTY-NOTICES.txt says so and lists the four modifications.
+
 THIRD-PARTY-NOTICES.txt at the repository root holds the full attribution: the
 upstream-file-to-our-file scope list from which the marker list above was
 compiled, the modifications made during the port, and Ollama's MIT licence
 verbatim. It also covers llama.cpp and the licences that appear in the vendored
-snapshot, and everything ModelRunner ported. As of 2026-09-16 it carries
-FIFTEEN numbered entries: 1 llama.cpp and ggml, 2 Intel's SYCL and OpenVINO
+snapshot, and everything ModelRunner ported. As of 2026-09-18 it carries
+SEVENTEEN numbered entries - 16 is the SkyTNT MIDI model and 17 is Hugging
+Face's transformers; the first fifteen are, as of 2026-09-16: 1 llama.cpp and ggml, 2 Intel's SYCL and OpenVINO
 backends, 3 Ollama, 4 LLamaSharp (read, not copied), 5 the Go standard library,
 6 agnivade/levenshtein, 7 the Jinja project (read, not copied), and 8 to 14 the
 chat-template fixtures by licensor - Alibaba/Qwen, HuggingFaceTB, Mistral AI,
@@ -1485,8 +3865,8 @@ the tree.
 
 WHAT ModelRunner PORTED, AND FROM WHOM
 --------------------------------------
-ModelRunner takes code from four upstreams and reads three more without taking
-anything. 129 of its 240 files carry the marker; the marker names the upstream
+ModelRunner takes code from five upstreams and reads three more without taking
+anything. 151 of its 360 files carry the marker; the marker names the upstream
 project first, so a grep over src/CodeBrix.Ollama.ModelRunner is the index:
 
     grep -rh 'was previously:' src/CodeBrix.Ollama.ModelRunner | sort | uniq -c
@@ -1530,6 +3910,26 @@ project first, so a grep over src/CodeBrix.Ollama.ModelRunner is the index:
   GoLevenshtein.cs, because Ollama's template.Named matches a model's embedded
   template to a built-in by edit distance and the threshold is part of the
   behaviour.
+
+  The SkyTNT MIDI model (Apache-2.0, SkyTNT/midi-model, commit f504d5cb58f769
+  ab0f2909c679238f6621034573), the newest upstream here and the only one that
+  is Python. Drivers/SkyTnt/ is thirteen files: eight from midi_tokenizer.py -
+  MIDITokenizerV2's vocabulary, its two token-row conversions, and the whole of
+  the reading-in and writing-out of a piece of music - and five from
+  app_onnx.py: the two-graph generation loop, the sampling masks it narrows the
+  model's answer with at every token, its temperature/nucleus/top-k sampling,
+  the prompt its web page builds, and the two key-value caches. The markers
+  name the upstream FILE rather than a project path, because that repository is
+  flat and the file is the only address there is: `midi_tokenizer.py@<commit>`
+  and `app_onnx.py@<commit>`.
+
+  WHAT IS NOT A PORT, in the same library and easily mistaken for one: Midi/ is
+  a Standard MIDI File writer and reader written against the published format,
+  and it carries NO marker on purpose. The publisher's repository vendors a
+  Python MIDI library that states no licence at all, so nothing was taken from
+  it; THIRD-PARTY-NOTICES entry 16 records that decision in full, including the
+  one behavioural fact that WAS taken from reading it and where that fact is
+  written down in our own words.
 
   LLamaSharp (MIT, Copyright (c) 2025 SciSharp STACK, commit 59dc9752) was
   READ AND NOT COPIED. Six of its files - NativeLogConfig.cs,
@@ -1846,16 +4246,29 @@ test projects alike.
     real waiting; the run itself, once the lock is taken, is synchronous
     throughout.
 
-  - THE LIBRARY WRITES OUTSIDE THE STORE IN EXACTLY TWO PLACES, and they are
-    the export and the reduction: each lays the source bundle out in a folder
-    under the SYSTEM TEMPORARY DIRECTORY for the tools to read, lets them write
-    their output beside it, collects that into the store and removes the whole
-    folder in a finally. Nothing else in either library creates a temporary
+  - ModelManager WRITES OUTSIDE THE STORE IN EXACTLY FOUR PLACES, and they are
+    the export, the reduction, the GGUF conversion and the GGUF quantization:
+    each makes a folder
+    under the SYSTEM TEMPORARY DIRECTORY, lets the work write its output there,
+    collects that into the store and removes the whole
+    folder in a finally - on success and on failure alike. The first two lay the
+    source bundle out in it for external TOOLS to read; the conversion lays it
+    out for its own readers, and writes the GGUF file there before the existing
+    create path takes it in; the QUANTIZATION lays nothing out at all - the
+    stored blob is read where it lies and only the output is written - which is
+    why it is the one of the four that costs no extra disk for its input.
+    Nothing else in either library creates a temporary
     file of its own - a download's sidecars live beside the blob they belong
     to - and nothing ever writes to the current directory. A machine whose
     temporary directory is RAM-backed needs TMPDIR pointed at a real file
-    system before exporting or reducing anything of size; that is the caller's
-    decision and the AGENT-README says so.
+    system before exporting, reducing, converting or quantizing anything of
+    size; that is the caller's decision and the AGENT-README says so.
+
+    ModelRunner writes outside nothing at all until QuantizeAsync is called,
+    and that one writes only in the OUTPUT's own directory: the engine fills a
+    "<output>.quantizing-<8 hex>" file there and it is moved on to the output
+    path when the call has succeeded, so the move is a rename within one
+    directory whatever the model's size. TMPDIR is not involved.
 
   - NO NEW THIRD-PARTY NUGETS ANYWHERE, per the family rule: CodeBrix.* and
     Microsoft packages are fine; xUnit and SilverAssertions in the .Tests
@@ -2134,6 +4547,38 @@ path, and the ModelManager executable ran 789/788/1 - but see the
       - THE BIGGEST GRAPH, SkyTNT's 821,713,887-byte model_base.onnx, was read,
         quantized and written by the managed engine in 3.9 s at a peak of 2.9
         GiB resident, measured outside the suite with the probe.
+  * CONVERTING A CHECKPOINT TO GGUF, 2026-09-18, on the same Debian 13 laptop.
+      - OFFLINE, ON EVERY MACHINE: twelve synthetic checkpoints and the
+        fourteen GGUF files the inference engine's OWN converter produced from
+        them are checked in, and the managed converter equals every one of them
+        over the WHOLE FILE, byte for byte - not key by key and not tensor by
+        tensor. The variants cover bfloat16, float16 and float32 weights, both
+        containers, sharded and unsharded, grouped-query attention, tied
+        embeddings, attention bias, a padded vocabulary, a checkpoint that
+        declares no special token, and both tokenizer roads. The GGUF writer
+        also round-trips every GGUF file in the repository byte for byte, the
+        native conformance model included.
+      - THE REAL MODEL, THROUGH THE STORE. hf.co/m-a-p/MuPT-v1-8192-190M, a
+        380,166,726-byte PyTorch zip pickle, converted with ConvertToGgufAsync
+        to 381,878,656 bytes and 111 tensors in about a second, and compared
+        with what the engine's own converter wrote from the same folder for the
+        same model identifier: 0 of 381,878,656 bytes differ. The engine's
+        Python takes 2.8 to 3.4 s over the same file.
+      - THE RUNNER LOADS IT AND GENERATES. Resolved, probed, loaded through
+        ModelRunner and generating real multi-voice ABC, and its greedy
+        identifiers are the checkpoint's own framework's: 32 of 32 on each of
+        three prompts, at BF16 against torch-bfloat16 and at F16 against
+        torch-float32, with and without the supplied special tokens, with
+        tokenization agreeing on all six probe strings including multi-byte
+        UTF-8 and runs of whitespace. Three further prompts are run and
+        recorded rather than asserted - see WHAT THE TOKEN COMPARISON CAN AND
+        CANNOT PROMISE above.
+      - IT STREAMS. The 1.97B sibling, 3,931,517,782 bytes in one zip pickle,
+        converted in 10.1 s at a peak resident set of 195.7 MiB - 5.2% of the
+        checkpoint - and the converted file loaded and generated.
+      - NO CPython IS INVOLVED AT ANY POINT. The conversion names no
+        CodeBrix.Python type, starts no interpreter and imports no module; the
+        offline conversion tests run on a machine with no Python at all.
   * THE RELEASE CHECK AT THE END OF THE ONNX WORK, 2026-09-17, Debian 13
     laptop, .NET SDK 10.0.401, run in one sitting: `dotnet build
     CodeBrix.Ollama.slnx -c Release --no-incremental` 0 warnings / 0 errors;
@@ -2143,6 +4588,193 @@ path, and the ModelManager executable ran 789/788/1 - but see the
     unzipped - the five packed root files, lib/net10.0 with its assembly and
     XML documentation, ModelRunner's dependency group empty and ModelManager's
     carrying CodeBrix.Python.MitLicenseForever and nothing else.
+  * THE RELEASE CHECK AT THE END OF THE GGUF WORK, 2026-09-18, Debian 13
+    laptop, .NET SDK 10.0.4xx, run in one sitting: `dotnet build
+    CodeBrix.Ollama.slnx -c Release --no-incremental` 0 warnings / 0 errors;
+    ModelManager.Tests 1815 / 0 / 13; ModelRunner.Tests 1258 / 0 / 30 - the
+    fence that says the GGUF work never touched it; ModelManager.Python.Tests
+    43 / 0 / 43 with the gates shut; EndToEnd.Tests 5 / 0 / 5 with the gates
+    shut. Both nupkg files unzipped: ModelManager is the five packed root files
+    plus lib/net10.0 with its assembly and XML documentation, and its
+    dependency group carries CodeBrix.Python.MitLicenseForever and nothing
+    else; ModelRunner's dependency group is still empty and it still lists all
+    seven runtimes/<rid>/native/ pairs with their per-native licence files.
+  * QUANTIZING A GGUF MODEL, 2026-09-18, on the same Debian 13 laptop. The five
+    types the plan named (Q8_0, Q4_0, Q4_K_M, Q5_K_M, Q6_K) written by
+    ModelRunner.QuantizeAsync with no options are BYTE FOR BYTE what the
+    engine's own command-line quantizer writes for the same file - on the
+    repository's own conformance model and on the real MuPT 190M GGUF from
+    both a BF16 and an F16 source, fifteen comparisons and zero differing
+    bytes. The quantized MuPT loads through the runner and generates ABC at
+    305 (Q8_0) and 425 (Q4_K_M) tokens a second against 171-198 unquantized.
+    QUANTIZING (maintainer) has the whole table, the cmake options the oracle
+    tool was built with and the greedy-agreement numbers.
+  * THE RELEASE CHECK AT THE END OF THE QUANTIZATION WORK, 2026-09-18, Debian
+    13 laptop, run in one sitting: `dotnet build CodeBrix.Ollama.slnx -c
+    Release --no-incremental` 0 warnings / 0 errors; ModelManager.Tests
+    1839 / 0 / 13; ModelRunner.Tests 1286 / 0 / 30 - the first time that number
+    has moved since 2026-09-16; ModelManager.Python.Tests 43 / 0 / 43 with the
+    gates shut; EndToEnd.Tests 7 / 0 / 7 with the gates shut, and 6 / 0 / 1
+    with the live and quantize-tool gates open. Both nupkg files unzipped:
+    ModelManager's dependency group carries CodeBrix.Python.MitLicenseForever
+    and nothing else, and ModelRunner's is STILL EMPTY - which is the check
+    that says a public quantization API cost the package nothing.
+  * THE CONTRIBUTED AND QUANTIZED OPERATORS, 2026-09-18, Debian 13 laptop. Six
+    operators added to the managed engine - MatMulNBits, GroupQueryAttention,
+    SkipSimplifiedLayerNormalization, SimplifiedLayerNormalization,
+    DynamicQuantizeLinear and MatMulInteger - and ELEVEN REAL SUBJECTS run
+    against onnxruntime 1.30.0, every one of them produced by this library's own
+    store: the two published SkyTNT graphs reduced three ways, and the MuPT 190M
+    checkpoint as the GenAI builder exports it at fp32 and int4 plus the store's
+    three reductions of that export. THE CONTRIBUTED AND QUANTIZED OPERATORS
+    above has the table. Every weight-only subject agrees to about a millionth
+    with no greedy choice differing; the subjects that quantize their
+    ACTIVATIONS agree to a few percent, which is what the graph allows - this
+    engine's own two arithmetic paths disagree with each other by as much. The
+    822 MB graph's four-bit reduction holds 117 MiB of managed objects against
+    the original's 782 MiB, a factor of 6.7, which is the fence that says a
+    packed weight is never expanded at load.
+  * THE MIDI GENERATION DRIVER AGAINST THE PUBLISHER'S OWN PYTHON, 2026-09-18,
+    same Debian 13 laptop, with the live gate, the Python gate and
+    CODEBRIX_OLLAMA_SKYTNT_CLONE all open. What is proved is IDENTITY, not
+    closeness: asked for the most likely answer every time, the managed driver
+    writes the music the publisher's own generation loop writes.
+      - THREE COMPARISONS, 128 EVENTS EACH, EVERY EVENT THE SAME - the same
+        kinds, in the same order, at the same positions, with the same pitches,
+        loudnesses, lengths, instruments and signatures. From nothing at all;
+        from a described piece (three instruments, a drum kit, 100 beats a
+        minute, 3/4, three flats minor); and CONTINUING a piece of music read
+        from a file, which is the tokenizer's other direction - a prompt this
+        library wrote, read by both sides from the same bytes, and continued
+        the same way for 128 events.
+      - Each of the three files this library wrote was then READ BACK BY THE
+        PUBLISHER'S OWN MIDI.py out of the same checkout: a second opinion on
+        the file format from something that had no part in writing it.
+      - THE THREE REDUCTIONS the store makes all write valid music and write
+        the same music twice. Where each parts company with the full-precision
+        run is a fact about quantization and is RECORDED rather than asserted:
+        four-bit weights at event 2, eight-bit weights NOWHERE - the whole
+        128-event piece is the same, which is a stronger result than the plan
+        expected and says the store's eight-bit reduction changes no greedy
+        choice at all over a whole piece on this model - and the dynamic
+        eight-bit rewrite at event 18. That last is the D6a class, whose arithmetic is chaotic by
+        construction.
+      - SPEED, 64 events greedy, over two runs hours apart: full precision
+        14.8 to 15.6 events/s at one thread and 31.4 to 32.9 at eight; the
+        four-bit reduction 19.9 to 20.1 and 53.9 to 55.6. The publisher's
+        Python through onnxruntime writes 28.4 to 32.2 events/s at eight
+        threads on the same machine, so the managed engine is within a few per
+        cent of it on this model.
+      - SECONDS OF MUSIC PER SECOND OF WAITING, which is the number a consumer
+        streaming the result needs, measured on 384 events at eight threads
+        with the DEFAULT sampling settings and a fixed seed: full precision
+        6.2 to 6.5 (one instrument), 3.5 to 3.8 (three) and 2.0 to 2.1 (five
+        and a drum kit); the four-bit reduction 1.5 to 1.6, 3.0 to 3.3 and 1.3
+        to 1.5. Music comes out faster than it is played on every prompt tried,
+        by between 1.3 and 6.5 times. Greedy
+        settings are NOT the ones to measure this on: taking the most likely
+        answer every time is what makes the comparison above possible and is
+        also what makes a model of this family repeat itself, and a greedy
+        piece can spend hundreds of events setting itself up and never start.
+      - Peak resident memory in the test host, which is a ceiling and not the
+        model's footprint: 3.7 to 5.0 GiB with the full-precision pair loaded,
+        2.3 to 2.9 GiB with the four-bit one.
+  * THE TEXT GENERATION DRIVER AGAINST THE BUNDLE'S OWN RUNTIME, 2026-09-18,
+    Debian 13 laptop, on the 190M ABC-notation model the store exported and
+    reduced. Every comparison is against the publisher's own tokenizer
+    (transformers, with the bundle's own tokenization module) for the token
+    numbers and onnxruntime-genai 0.15.2 - the runtime the bundle's generation
+    configuration was written FOR - for the generation, at eight threads, three
+    prompts of 28, 42 and 48 tokens continued by 32 tokens each, greedy.
+      - TOKENIZING: 118 of 118 prompt tokens identical, on every one of the
+        five subjects. The managed byte-level encoder is the publisher's Python,
+        exactly.
+      - FULL PRECISION: 96 of 96 generated tokens IDENTICAL, prompt for prompt,
+        and 0 of 214 positions differ under teacher forcing. That is the
+        phase's done criterion and it is asserted.
+      - THE STORE'S FOUR-BIT AND EIGHT-BIT REDUCTIONS, which quantize weights
+        only: 0 of 214 positions differ under teacher forcing - asserted - and
+        both also reproduced the full-precision engine's own 96 tokens without
+        being asked to.
+      - THE BUILDER'S FOUR-BIT EXPORT: 2 of 214 positions differ under teacher
+        forcing, RECORDED rather than asserted. It carries accuracy_level on
+        every quantized matrix multiply, which asks a runtime to quantize the
+        activations too; onnxruntime does and this engine keeps floats, which
+        is the D6a class. Its free-running generation still agreed with the
+        oracle on all 96 tokens.
+      - THE STORE'S DYNAMIC EIGHT-BIT REWRITE: 6 of 214 positions differ under
+        teacher forcing, RECORDED. Free-running, one prompt of the three was
+        identical for all 32 tokens and the other two parted company at token 2
+        and token 17. That is the D6a class doing what D6a says it does.
+      - SPEED, 64 tokens greedy from a 48-token prompt, one load each:
+        full precision 40.1 tokens/s at one thread and 75.5 at eight; the
+        builder's four-bit export 43.4 and 77.2; the store's four-bit reduction
+        36.5 and 77.1. TIME TO THE FIRST TOKEN is the prompt's own evaluation
+        and nothing else: 654 ms at one thread and 190 ms at eight for full
+        precision, and about 1,240 ms and 362 ms for both four-bit forms - the
+        block-quantized matrix multiply is SLOWER than the full-precision one on
+        a wide prefill, which is a tuning item and not a defect. Loading takes
+        390 ms full precision and 70 to 114 ms four-bit. Peak resident memory in
+        the test host, which is a ceiling and not the model's footprint: 2.0 to
+        2.2 GiB full precision, 1.5 to 2.3 GiB four-bit.
+      - THE OTHER ROUTE, for comparison and measured the same day: the SAME
+        model through the GGUF path and the native engine runs at about 190
+        tokens/s on 16 threads. The managed ONNX route is therefore about two
+        and a half times slower on this model, and it is the route that needs
+        nothing installed and runs wherever .NET runs.
+  * THE RELEASE CHECK AT THE END OF THE CONTRIBUTED-OPERATOR WORK, 2026-09-18,
+    Debian 13 laptop, run in one sitting: `dotnet build CodeBrix.Ollama.slnx -c
+    Release --no-incremental` 0 warnings / 0 errors; Core.Tests 27 / 0 / 0;
+    ModelManager.Tests 1823 / 0 / 13 - unmoved, which is the fence that says
+    this work never touched the store; ModelRunner.Tests 2349 / 0 / 30;
+    ModelManager.Python.Tests 43 / 0 / 43 with the gates shut; EndToEnd.Tests
+    19 / 0 / 19 with the gates shut and 19 / 0 / 1 with them open, the skip
+    being the large streaming proof. ModelRunner's nuspec dependency group is
+    STILL EMPTY and both nupkg files still carry CodeBrix.Ollama.Core.dll.
+  * THE RELEASE CHECK AT THE END OF THE TEXT-DRIVER WORK, 2026-09-18, Debian 13
+    laptop, run in one sitting: `dotnet build CodeBrix.Ollama.slnx -c Release
+    --no-incremental` 0 warnings / 0 errors; Core.Tests 27 / 0 / 0 - UNMOVED,
+    and no file under src/CodeBrix.Ollama.Core or its test project was touched,
+    so CoreContract.Revision is still 1 and the recorded surface hash still
+    matches; ModelManager.Tests 1823 / 0 / 13 - unmoved, which is the fence that
+    says this work never touched the store; ModelRunner.Tests 2984 / 0 / 30 -
+    366 new cases, EVERY ONE of them offline, which is why the skipped count did
+    not move; ModelManager.Python.Tests 43 / 0 / 43 with the gates shut;
+    EndToEnd.Tests 30 / 0 / 30 with the gates shut and 30 / 0 / 1 with them open
+    in 258 s, the skip being the large streaming proof. ModelRunner's nuspec
+    dependency group is STILL EMPTY, ModelRunner still has ZERO
+    PackageReferences, both nupkg files still carry CodeBrix.Ollama.Core.dll,
+    and reflection over both libraries' 144 exported types finds 0 mentions of a
+    CodeBrix.Ollama.Core type and 0 of the other library's.
+  * THE PERFORMANCE PASS OVER THE MANAGED ONNX ENGINE, 2026-09-18, Debian 13
+    laptop, machine otherwise idle. What was PROVED, rather than measured, is
+    that nothing moved: every numeric oracle reproduced its recorded figure to
+    the last digit - the four SkyTNT one-step differences (9.194E-07, 7.607E-07,
+    6.697E-07, 5.577E-07), all eleven quantized subjects, the 384 of 384 events
+    of greedy identity with the publisher's own Python, and the 118 prompt
+    tokens and 96 generated tokens of identity with the bundle's own runtime,
+    teacher forcing included. No tolerance, fixture or expected output was
+    touched; the 1,678 checked-in fixture files are byte-identical. The changes
+    are memory accounting at load time, a thread default that follows the
+    PERFORMANCE cores on a hybrid processor, and three kernel changes that
+    reorder the WORK without reordering any answer's arithmetic - a four-bit
+    column unpacked once for a whole prompt instead of once per position, a
+    result walked by column and in cache-sized blocks of rows, and two weight
+    rows worked out at a time when there is only one row of input. The numbers
+    are in PERFORMANCE BUDGETS above; the shortest statement of them is that the
+    822 MB graph's load peak fell from 3,156 MiB to 1,788 and the resident set
+    it leaves behind from 3,111 to 898, time to the first token fell by between
+    a sixth and two-fifths on every subject, and the slowest of the eleven
+    subjects' prompt steps went from 127.0 / 83.4 ms to 71.8 / 20.9.
+    Build 0 warnings / 0 errors; Core.Tests 27 / 0 / 0 UNMOVED with
+    CoreContract.Revision still 1; ModelManager.Tests 1823 / 0 / 13 unmoved;
+    ModelRunner.Tests 3028 / 0 / 30, 44 new cases every one offline;
+    ModelManager.Python.Tests 43 / 0 / 0 live in 110.6 s; EndToEnd.Tests
+    30 / 0 / 1 with the gates open. ModelRunner still has ZERO
+    PackageReferences, its nuspec dependency group is still empty, both nupkg
+    files still carry CodeBrix.Ollama.Core.dll, and reflection over both
+    libraries' 144 exported types - unchanged - finds 0 mentions of a
+    CodeBrix.Ollama.Core type and 0 of the other library's.
   * The osx-x64 native: built, full gate passed (architecture, 248/248 required
     exports, exact export surface, install name, system-only dependencies,
     minos 13.3, signature, smoke test, byte-identical model regeneration, and
@@ -2153,6 +4785,41 @@ path, and the ModelManager executable ran 789/788/1 - but see the
 
 WHAT HAS NOT BEEN VALIDATED
 ---------------------------
+  * QUANTIZING ON WINDOWS OR macOS, or on any native but linux-x64. The
+    byte-for-byte comparison against the engine's own tool was made on the
+    Debian laptop, with a tool built by the host's own gcc 14.2.0 against a
+    shipped native built by a container's gcc 14.2.1. Whether a quantization
+    made by the win-arm64 or osx-arm64 native is byte-identical to one made by
+    this one is UNKNOWN and, given that the reference quantizers are
+    floating-point C, is not something to assume: the files are expected to be
+    equivalent, not necessarily equal.
+  * QUANTIZING ANY TYPE BUT THE FIVE COMPARED. Q8_0, Q4_0, Q4_K_M, Q5_K_M and
+    Q6_K are checked against the engine's own tool; the other thirty members of
+    GgufQuantizationType are passed through the same one native call with the
+    same parameter struct and are fenced only by the 1:1 enumeration test. The
+    IQ family in particular has never been run here, and without an importance
+    matrix - which this API does not take - the engine writes some of its
+    tensors at more bits than the name suggests.
+  * QUANTIZING A MODEL WITH A PROJECTOR OR AN ADAPTER. The store carries those
+    layers over to the quantized model unchanged, and nothing has been stored
+    that way.
+  * THE GGUF CONVERSION ON WINDOWS OR macOS. It is pure managed code and the
+    offline oracle comparison would catch a difference anywhere, but it has run
+    on Linux only.
+  * THE GGUF CONVERSION OF A REAL SENTENCEPIECE OR SHARDED CHECKPOINT. Both
+    roads are proven against the engine's own output on SYNTHETIC checkpoints,
+    byte for byte, and the real model that has been converted end to end is a
+    single-file GPT-2 byte-level one. The first real llama-family checkpoint
+    with a tokenizer.model, and the first published one split over shards, are
+    still to come.
+  * A CHECKPOINT OF EXACTLY 32,016 OR 49,152 TOKENS. Those two sizes take rules
+    of the engine's that this port deliberately does not reproduce; such a
+    checkpoint converts to a correct, loadable file that is NOT byte-identical
+    to the engine's. See CONVERTING TO GGUF (maintainer) - THE DESIGN.
+  * A CHECKPOINT WHOSE MODEL CARD NAMES base_model OR datasets. Those keys are
+    not read, so the general.base_model.* and general.dataset.* keys are not
+    written and such a checkpoint would differ from the engine's output by
+    exactly them. Neither test subject has one.
   * EXPORTING MuseCoco - ATTEMPTED 2026-09-17 AND BLOCKED, and the reason is
     the model, not this library. The smaller half of the pipeline,
     hf.co/XinXuNLPer/MuseCoco_text2attribute (1.25 GiB, pulled and kept in the
@@ -2227,6 +4894,39 @@ WHAT HAS NOT BEEN VALIDATED
     message naming it, each refusal is unit-tested, and no real model here has
     one - so what the Python engine makes of those graphs is known and what the
     managed engine would make of them is not, because it declines to.
+
+  * A 16-BIT FLOAT WEIGHT IN A REAL MODEL, through the managed ONNX engine.
+    Such a weight is widened as the graph is read and the behaviour is covered
+    by the cast_float16_weight fixture alone; none of the eleven real subjects
+    carries one. A 16-bit float at a graph's own EDGE is refused by name, and
+    that refusal is fixtured.
+
+  * MatMulNBits AT TWO BITS, which ReduceOnnxAsync can write and the managed
+    engine refuses by the bit width. Four and eight are implemented and
+    fixtured at every block size the quantizer writes.
+
+  * THE INTEGER PATH OF ReduceSum, which the five gated MuPT subjects prove and
+    nothing offline does. It is three lines in generate_fixtures.py to add an
+    int64 case and it has not been added.
+
+  * THE MANAGED ONNX ENGINE'S THREAD DEFAULT ON ANY PROCESSOR BUT THIS LAPTOP'S.
+    EnginePerformanceCores reads the operating system's own answer on Linux
+    (Intel-style hybrid and ARM big.LITTLE), macOS and Windows, and every
+    format it parses is unit-tested from strings - but only the Linux
+    Intel-hybrid branch has ever answered on real hardware. The macOS and
+    Windows branches have never been executed. Everywhere the detection answers
+    nought the fallback is the physical core count.
+
+  * THE THREAD CAP ON A MACHINE THAT IS NOT THIS ONE. ModelRunnerOptions
+    .MaxThreads and OnnxRunnerOptions.MaxThreads are unit-tested against a
+    STATED detected count, so the rule is proven on a four-core machine and a
+    sixty-four-core one without owning either; what has actually RUN is this
+    laptop, where an uncapped default is sixteen threads on the native road and
+    eight on the managed one.
+
+  * THE ONNX ROAD ON A 16 GiB MACHINE. The memory budgets in PERFORMANCE
+    BUDGETS were measured on a 62 GiB laptop and reasoned down; no run has been
+    made on a machine where the load peak actually matters.
 
   * THE WIN-ARM64 NATIVE SLICE HAS NEVER BEEN EXECUTED: cross-built and
     statically checked on x64, adopted by decision, as described under THE

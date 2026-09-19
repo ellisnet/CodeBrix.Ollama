@@ -1,0 +1,26 @@
+{
+  "name": "matmul_nbits_8bit_vector",
+  "opset": 21,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        1,
+        128
+      ],
+      "file": "in_a.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        1,
+        9
+      ],
+      "file": "out_y.bin"
+    }
+  ]
+}

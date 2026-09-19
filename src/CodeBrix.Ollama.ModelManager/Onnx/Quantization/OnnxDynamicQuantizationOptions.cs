@@ -4,6 +4,8 @@
 // license information.
 // --------------------------------------------------------------------------
 
+using CodeBrix.Ollama.Core;
+
 namespace CodeBrix.Ollama.ModelManager; //was previously: onnxruntime/python/tools/quantization/quantize.py@v1.30.0
 
 /// <summary>

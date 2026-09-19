@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using CodeBrix.Ollama.Core;
 
 namespace CodeBrix.Ollama.ModelManager;
 

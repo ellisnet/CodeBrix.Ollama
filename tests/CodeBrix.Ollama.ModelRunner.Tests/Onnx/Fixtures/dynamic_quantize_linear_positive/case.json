@@ -1,0 +1,39 @@
+{
+  "name": "dynamic_quantize_linear_positive",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        4,
+        4
+      ],
+      "file": "in_a.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "int32",
+      "shape": [
+        4,
+        4
+      ],
+      "file": "out_y.bin"
+    },
+    {
+      "name": "scale",
+      "type": "float",
+      "shape": [],
+      "file": "out_scale.bin"
+    },
+    {
+      "name": "zp",
+      "type": "int32",
+      "shape": [],
+      "file": "out_zp.bin"
+    }
+  ],
+  "note": "Every value positive, so the range is stretched to include nought."
+}

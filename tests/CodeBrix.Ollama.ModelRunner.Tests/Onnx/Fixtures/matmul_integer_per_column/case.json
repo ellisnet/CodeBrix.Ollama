@@ -1,0 +1,36 @@
+{
+  "name": "matmul_integer_per_column",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        3,
+        8
+      ],
+      "file": "in_a.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "product",
+      "type": "int32",
+      "shape": [
+        3,
+        5
+      ],
+      "file": "out_product.bin"
+    },
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        3,
+        5
+      ],
+      "file": "out_y.bin"
+    }
+  ],
+  "note": "One zero point and one scale for each column, which per-channel quantization writes."
+}

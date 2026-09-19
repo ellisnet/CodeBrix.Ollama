@@ -1,0 +1,29 @@
+{
+  "name": "simplified_layer_normalization",
+  "opset": 21,
+  "inputs": [
+    {
+      "name": "x",
+      "type": "float",
+      "shape": [
+        2,
+        3,
+        8
+      ],
+      "file": "in_x.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        2,
+        3,
+        8
+      ],
+      "file": "out_y.bin"
+    }
+  ],
+  "note": "A runtime's own operator that lives in the DEFAULT domain, which is where the builders put it."
+}

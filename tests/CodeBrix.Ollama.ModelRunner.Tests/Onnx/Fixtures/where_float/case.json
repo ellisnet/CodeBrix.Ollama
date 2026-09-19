@@ -1,0 +1,48 @@
+{
+  "name": "where_float",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "c",
+      "type": "bool",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "file": "in_c.bin"
+    },
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "file": "in_a.bin"
+    },
+    {
+      "name": "b",
+      "type": "float",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "file": "in_b.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "file": "out_y.bin"
+    }
+  ]
+}

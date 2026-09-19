@@ -1,0 +1,36 @@
+{
+  "name": "gather_negative_axis",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        2,
+        3,
+        6
+      ],
+      "file": "in_a.bin"
+    },
+    {
+      "name": "i",
+      "type": "int64",
+      "shape": [
+        3
+      ],
+      "file": "in_i.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        2,
+        3,
+        3
+      ],
+      "file": "out_y.bin"
+    }
+  ]
+}

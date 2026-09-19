@@ -274,6 +274,136 @@ public interface IModelStore
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Converts a transformers checkpoint held as a bundle into an ordinary GGUF model in the store - one
+    /// that lists, shows, resolves and deletes like any other GGUF model, and whose file an in-process
+    /// runner loads through <see cref="ResolveAsync"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// NOTHING IS INSTALLED AND NO PYTHON IS STARTED. The conversion is this library's own managed code: it
+    /// reads the checkpoint's weights - safetensors or a PyTorch zip pickle - maps every tensor on to the
+    /// name the inference engine expects, reads the tokenizer out of the files the publisher shipped, and
+    /// writes the GGUF file the engine's own converter would have written.
+    /// </para>
+    /// <para>
+    /// The source bundle is laid out in a temporary folder under the system temporary directory, the GGUF
+    /// file is written beside it, the result is stored as a model, and the whole folder is removed however
+    /// the conversion ends. On a machine whose temporary directory is in memory, point TMPDIR at a real
+    /// file system first - a checkpoint is gigabytes.
+    /// </para>
+    /// <para>
+    /// The result records its provenance the way every derived artifact of this library does: which model
+    /// it came from, that this library made it, and what it was asked for. The source's licence record is
+    /// carried over unchanged, and a licence TEXT the source ships becomes a licence layer.
+    /// </para>
+    /// </remarks>
+    /// <param name="name">The model name. It must name a bundle holding a transformers checkpoint.</param>
+    /// <param name="options">
+    /// Which numeric type to write, which architecture to read the checkpoint as, what to call the result,
+    /// whether a model of that name may be replaced, and what the checkpoint's files do not say about its
+    /// special tokens. <see langword="null"/> keeps the checkpoint's own numeric type, reads the
+    /// architecture from the configuration and stores the result under the source name with the tag
+    /// <c>gguf</c>, replacing nothing.
+    /// </param>
+    /// <param name="progress">
+    /// Where the statuses go - "materializing source", "reading checkpoint", "writing gguf", "creating
+    /// model", "success" - or <see langword="null"/> to report nothing.
+    /// </param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>
+    /// The name the model was stored under, how the checkpoint was read, how many tensors it wrote, how
+    /// large the two files are and which numeric type was written.
+    /// </returns>
+    /// <exception cref="ArgumentException">
+    /// <see cref="ConvertOptions.AddedSpecialTokens"/> names a token the checkpoint's vocabulary does not
+    /// hold.
+    /// </exception>
+    /// <exception cref="ModelNotFoundException">The store has no such model.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The model is not a bundle, or it holds a GGUF file or an exported ONNX graph rather than a
+    /// checkpoint.
+    /// </exception>
+    /// <exception cref="NotSupportedException">
+    /// The checkpoint's architecture, tokenizer, rotary scaling or layout is one this version does not
+    /// convert; the message names what the checkpoint's own files said.
+    /// </exception>
+    /// <exception cref="CheckpointFormatException">
+    /// The checkpoint has no configuration, or one of its containers is malformed.
+    /// </exception>
+    /// <exception cref="PickleRefusedException">
+    /// The checkpoint is a PyTorch pickle holding a construct the restricted reader will not interpret.
+    /// </exception>
+    /// <exception cref="ModelManagerException">
+    /// The output name is taken and <see cref="ConvertOptions.Overwrite"/> is not set.
+    /// </exception>
+    Task<ConvertResult> ConvertToGgufAsync(
+        string name,
+        ConvertOptions options = null,
+        IProgress<PullProgress> progress = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Quantizes a stored GGUF model with a quantizer THE CALLER SUPPLIES, and puts the smaller file away as
+    /// an ordinary GGUF model in the store - one that lists, shows, resolves and deletes like any other.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// THE QUANTIZER IS NOT THIS LIBRARY'S. Quantizing weights is an inference engine's work, and this
+    /// library depends on no inference engine: it has none, it loads none, and the package that carries one
+    /// is a package this one does not reference. <see cref="QuantizeGgufOptions.Quantizer"/> is therefore
+    /// required, and what the store contributes is everything around it - finding the file, naming the
+    /// result, carrying the source's template, parameters and licence over, recording where it came from,
+    /// and cleaning up whatever happens. <c>CodeBrix.Ollama.ModelRunner.QuantizeAsync</c> is a quantizer that
+    /// fits this shape exactly; so does a command-line tool a consumer starts itself.
+    /// </para>
+    /// <para>
+    /// The stored file is handed to the quantizer WHERE IT LIES, so nothing is copied, and the quantized file
+    /// is written into a temporary folder under the system temporary directory, taken into the store, and the
+    /// folder removed however the work ends. On a machine whose temporary directory is in memory, point
+    /// TMPDIR at a real file system first - a model is gigabytes.
+    /// </para>
+    /// <para>
+    /// The result records its provenance the way every derived artifact of this library does: which model it
+    /// came from, what the caller says did the work, and which type was asked for. The source's licence
+    /// record and licence texts are carried over, and so are its template, system prompt, parameters and
+    /// stored messages - quantizing changes the weights and nothing else about how a model is used.
+    /// </para>
+    /// </remarks>
+    /// <param name="name">The model name. It must name a GGUF model held in a single file.</param>
+    /// <param name="options">
+    /// The quantizer, what the type is called, what to call the result, whether a model of that name may be
+    /// replaced, and what to record as having done the work. It is required, and so are its
+    /// <see cref="QuantizeGgufOptions.Quantizer"/> and <see cref="QuantizeGgufOptions.Type"/>.
+    /// </param>
+    /// <param name="progress">
+    /// Where the statuses go - "quantizing", "creating model", "success" - or <see langword="null"/> to
+    /// report nothing.
+    /// </param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>
+    /// The name the model was stored under, the model it came from, the type, the two sizes and the tool the
+    /// caller named.
+    /// </returns>
+    /// <exception cref="ArgumentNullException"><paramref name="options"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">
+    /// The options carry no quantizer, or a type that cannot be part of a model name.
+    /// </exception>
+    /// <exception cref="ModelNotFoundException">The store has no such model.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The model is a publisher file tree rather than a GGUF model, or carries no weights at all.
+    /// </exception>
+    /// <exception cref="NotSupportedException">The model's weights are split over several files.</exception>
+    /// <exception cref="ModelManagerException">
+    /// The quantizer wrote no file, or the output name is taken and
+    /// <see cref="QuantizeGgufOptions.Overwrite"/> is not set.
+    /// </exception>
+    Task<QuantizeGgufResult> QuantizeGgufAsync(
+        string name,
+        QuantizeGgufOptions options,
+        IProgress<PullProgress> progress = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Lists every model in the store, most recently modified first.
     /// </summary>
     /// <param name="cancellationToken">A token to cancel the operation.</param>

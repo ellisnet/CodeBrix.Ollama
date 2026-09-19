@@ -1,0 +1,39 @@
+{
+  "name": "dynamic_quantize_linear_zeros",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        2,
+        3
+      ],
+      "file": "in_a.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "int32",
+      "shape": [
+        2,
+        3
+      ],
+      "file": "out_y.bin"
+    },
+    {
+      "name": "scale",
+      "type": "float",
+      "shape": [],
+      "file": "out_scale.bin"
+    },
+    {
+      "name": "zp",
+      "type": "int32",
+      "shape": [],
+      "file": "out_zp.bin"
+    }
+  ],
+  "note": "Nothing to quantize: the range is nought and the scale must not be a division by it."
+}

@@ -11,9 +11,14 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.12" />
     <PackageReference Include="CodeBrix.Platform.ApacheLicenseForever" Version="1.0.254.167" />
     <PackageReference Include="CodeBrix.Platform.Fonts.Roboto.OflLicenseForever" Version="1.0.248.1219" />
+    <!-- The terminal is the chat surface: the user types prompts into it and reads the model's
+         replies in it. Kept lock-stepped with the CodeBrix.Platform version above - the family
+         ships at one version. -->
+    <PackageReference Include="CodeBrix.Platform.TerminalView.ApacheLicenseForever" Version="1.0.254.167" />
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\libs\ModelQueryTool.ChatTerminal\ModelQueryTool.ChatTerminal.csproj" />
     <ProjectReference Include="..\libs\ModelQueryTool.ModelAccess\ModelQueryTool.ModelAccess.csproj" />
     <ProjectReference Include="..\libs\ModelQueryTool.ModelRunning\ModelQueryTool.ModelRunning.csproj" />
   </ItemGroup>

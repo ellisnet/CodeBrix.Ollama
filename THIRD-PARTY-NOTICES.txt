@@ -17,7 +17,15 @@ that the record is complete rather than merely obligatory. Entries 8 to 14
 cover the public models' chat templates the ModelRunner test suite carries as
 fixtures. Entry 15 covers ONNX Runtime's quantization tools, whose Python and
 C++ code ModelManager's managed reduction engine ports so that reducing a model
-needs none of them installed.
+needs none of them installed. Entry 16 covers the SkyTNT MIDI model's own
+generation loop and MIDI tokenizer, which ModelRunner's MIDI driver ports so
+that generating music needs nothing installed either - and records what was
+deliberately NOT taken from the MIDI file library that repository vendors.
+Entry 17 covers the GPT-2 byte-level tokenizer as Hugging Face's transformers
+library writes it, which ModelRunner's managed tokenizer ports so that
+generating TEXT from an ONNX bundle needs nothing installed either. Entry 1 covers a second port in the same library:
+llama.cpp's own checkpoint converter, which is Python, ported so that turning a
+checkpoint into a GGUF file needs nothing installed either.
 
 Four distinct things in this repository come from other people today, and all
 four are covered below. They are a way of grouping what is here, not the list
@@ -49,8 +57,15 @@ holder, and one of these four things can span several of them.
      packages (Templates/OllamaGo/ and Parsing/).
      src/CodeBrix.Ollama.ModelManager/Onnx/Quantization/ contains C# ported
      from ONNX Runtime's own quantization tools, in Python and in C++ (entry
-     15). Every ported file names its upstream source in its first lines, in
-     a trailing comment on its namespace line.
+     15), src/CodeBrix.Ollama.ModelRunner/Drivers/SkyTnt/ contains C# ported
+     from the SkyTNT MIDI model's own generation loop and tokenizer, which are
+     Python (entry 16), src/CodeBrix.Ollama.ModelRunner/Tokenizers/ contains C#
+     ported from the GPT-2 byte-level tokenizer in Hugging Face's transformers
+     library, which is Python (entry 17), and src/CodeBrix.Ollama.ModelManager/Convert/ together with
+     Gguf/GgufWriter.cs and src/CodeBrix.Ollama.Core/Tokenizers/
+     Gpt2MergeTable.cs contains C# ported from llama.cpp's own checkpoint
+     converter, which is Python (entry 1). Every ported file names its upstream
+     source in its first lines, in a trailing comment on its namespace line.
 
   4. THE COPIED DATA FILES. src/CodeBrix.Ollama.ModelRunner/Templates/
      OllamaGo/BuiltIn/ holds Ollama's twenty built-in chat templates, their
@@ -223,16 +238,26 @@ MODIFICATIONS TO THE VENDORED SNAPSHOT
     None. See "WHAT WAS MODIFIED" above.
 
 WHAT THE MANAGED CODE TAKES FROM UPSTREAM, BEYOND THE SNAPSHOT
+    TWO of this repository's libraries take code from llama.cpp.
     CodeBrix.Ollama.ModelRunner is a managed binding over the native library,
     and parts of it are hand-written C# derived from upstream llama.cpp source
-    at the very same commit. Four of the five upstream paths below are NOT in
-    the vendored subset - common/, grammars/ and tests/ are not needed to
+    at the very same commit; CodeBrix.Ollama.ModelManager ports the PYTHON half
+    of the project - its own checkpoint converter and the gguf package under it
+    - so that a checkpoint can be turned into a GGUF file by managed code with
+    nothing installed. Neither part is vendored, and nothing of either is run.
+    Four of the five C++/header paths below are NOT in the vendored subset -
+    common/, grammars/ and tests/ are not needed to
     build the native library, so they were deliberately not copied into it -
-    and those four were read in a separate clone of the upstream repository at
+    and neither is any of the Python; all of them were read in a separate clone
+    of the upstream repository at
     commit 815a2a59, never in llama-native-tools/llama.cpp/. Every C# file
-    listed carries the family's provenance marker on its namespace line,
+    listed carries the family's provenance marker on its namespace line, in one
+    of two spellings - the binding names the project,
       namespace CodeBrix.Ollama.ModelRunner; //was previously: ggml-org/llama.cpp <upstream path>;
-    which is how this list was compiled.
+    and the conversion port names the path and the tag,
+      namespace CodeBrix.Ollama.ModelManager; //was previously: conversion/llama.py@b10221;
+    where b10221 is `git describe` for that same commit. Between them, the two
+    greps are how this list was compiled.
 
       include/llama.h and ggml/include/ggml.h, ggml-backend.h, ggml-cpu.h,
       ggml-opt.h, gguf.h   (vendored; the snapshot is the source of truth for
@@ -260,6 +285,58 @@ WHAT THE MANAGED CODE TAKES FROM UPSTREAM, BEYOND THE SNAPSHOT
           -> Engine/EngineSamplerChain.cs - the ORDER in which the sampler
              chain is assembled, and nothing else. The chain itself is built
              by llama_sampler_init_* calls into the native library.
+      src/llama-sampling.cpp   (not vendored)
+          -> Drivers/CausalLm/CausalLmSampler.cs - the same chain order again,
+             and this time the RULE each stage applies, because this one has no
+             native library to call: how a penalty is applied to a score on
+             either side of nought, how many candidates top-k, top-p, min-p and
+             locally typical sampling keep, and where the temperature goes. It
+             is the managed equivalent of the chain EngineSamplerChain builds,
+             written so that one SamplingOptions means one thing on both routes.
+      conversion/base.py, conversion/llama.py, gguf-py/gguf/gguf_writer.py,
+      gguf-py/gguf/tensor_mapping.py, gguf-py/gguf/metadata.py,
+      gguf-py/gguf/vocab.py, gguf-py/gguf/quants.py, gguf-py/gguf/utility.py,
+      gguf-py/gguf/constants.py   (not vendored; upstream's own checkpoint
+      converter, convert_hf_to_gguf.py and the packages under it)
+          -> src/CodeBrix.Ollama.ModelManager/Gguf/GgufWriter.cs,
+             Convert/GgufConversion.cs, Convert/TensorDataConverter.cs,
+             Convert/Architectures/LlamaArchitecture.cs,
+             Convert/Architectures/LlamaTensorNameMap.cs,
+             Convert/Architectures/HuggingFaceConfig.cs,
+             Convert/Metadata/ModelIdComponents.cs,
+             Convert/Metadata/ModelMetadata.cs,
+             Convert/Tokenizers/Gpt2BpeTokenizerExport.cs,
+             Convert/Tokenizers/SentencePieceTokenizerExport.cs,
+             Convert/Tokenizers/SentencePieceModel.cs,
+             Convert/Tokenizers/SentencePiecePiece.cs,
+             Convert/Tokenizers/SentencePieceTokenType.cs,
+             Convert/Tokenizers/VocabularyExport.cs,
+             Convert/Tokenizers/SpecialVocabulary.cs,
+             Convert/Tokenizers/TokenizerExport.cs,
+             Convert/Tokenizers/GgufTokenType.cs,
+             Checkpoints/CheckpointWeights.cs,
+             Checkpoints/CheckpointShardIndex.cs,
+             and, in the shared project both libraries carry,
+             src/CodeBrix.Ollama.Core/Tokenizers/Gpt2MergeTable.cs, which is
+             vocab.py's reading of a merges.txt on its own, lifted out of
+             SpecialVocabulary because a tokenizer on the ModelRunner side has
+             to read the same file the same way - the knowledge a checkpoint
+             conversion cannot be guessed at: the GGUF writer's layout and the
+             order it writes key-values in, the Llama tensor-name table, the
+             rotary permutation of the query and key projections, which
+             tensors stay at full precision whatever type was asked for, the
+             bfloat16 rounding, the naming heuristic behind general.name /
+             basename / size_label, where the special-token identifiers are
+             looked up, the merge-table and vocabulary-padding rules, the order
+             a tokenizer kind is chosen in and how each piece of a
+             SentencePiece model becomes a token type, and the order the
+             tensors of a SHARDED checkpoint are visited in.
+             Ported, not executed: the converter is a Python program, and
+             nothing in this repository runs it or ships it. It is used in one
+             more place - as the test ORACLE, run by hand outside the
+             repository to produce the checked-in GGUF files under
+             tests/CodeBrix.Ollama.ModelManager.Tests/Convert/Fixtures/, whose
+             own README.txt and oracle-converter.patch record how.
 
 MODIFICATIONS MADE DURING THE MANAGED PORT
     - The C# drops C++ idioms and nullable annotations for this repository's
@@ -279,6 +356,47 @@ MODIFICATIONS MADE DURING THE MANAGED PORT
       llama.h's own comment advises, and only generated tokens are fed to
       them, so penalties see less history than llama.cpp's main program gives
       them.
+    - The conversion port reads FILES where the Python reads a loaded
+      transformers model. It therefore fills in for itself the two model-class
+      defaults the Python gets for free (the head width and the key-value head
+      count), reads a model card's front matter with a reader of its own rather
+      than a YAML library, and takes the model identifier the general metadata
+      is derived from as a parameter instead of using the directory name
+      implicitly. It covers the llama architecture, the GPT-2 byte-level BPE
+      tokenizer and the SentencePiece tokenizer, and refuses anything else by
+      name rather than converting it approximately. What it does convert it
+      converts to the byte: the checked-in fixtures are compared with the
+      Python's own output over the whole file.
+    - Two rules of the Python's LlamaModel.set_vocab are deliberately NOT
+      ported, and a checkpoint that meets either converts to a correct file
+      that is not byte-identical to the Python's: a vocabulary of exactly
+      32,016 tokens is given four fixed infilling token identifiers, and one of
+      exactly 49,152 tokens is given a false add_bos_token. Both write keys
+      whose position among the others decides the file's bytes, and the only
+      checkpoints that would show that position are model families far too
+      large to check in as a test fixture, so the rules are recorded rather
+      than guessed at.
+    - Where a SHARDED checkpoint's index and its files disagree, the port
+      refuses by name in two places the Python does not: a tensor held by two
+      parts (the Python silently keeps the copy from the later part) and a
+      weight map that lists one tensor twice (Python's JSON reader silently
+      keeps the last entry). The cases the Python does refuse - a tensor in a
+      part that the index does not list, and a tensor the index lists that no
+      part holds - are refused here too.
+    - A SentencePiece model's own USER_DEFINED pieces are written as ORDINARY
+      tokens, which is what the Python does: only an added_tokens.json entry or
+      an added-token table entry makes a token user-defined in the output.
+    - Where the Python calls the SentencePiece LIBRARY to open a tokenizer.model,
+      the port reads the file itself. A tokenizer.model is a Protocol Buffers
+      message (SentencePiece's ModelProto), and three of its fields - a piece's
+      text, its score and its kind - are all a conversion needs, so they are
+      read with the Protocol Buffers codec this library already carries for ONNX
+      and everything else in the file is skipped. NO CODE IS TAKEN FROM the
+      SentencePiece project, nothing depends on it at run time, and no file of
+      it is shipped: only the published wire layout of that message is relied
+      on, in the same way a reader of any documented file format relies on its
+      layout. The values the port then derives from those fields - which piece
+      kind becomes which GGUF token type - are the Python's, above.
 
 ----- llama.cpp licence (MIT), reproduced verbatim from LICENSE -----
 
@@ -1351,7 +1469,8 @@ MODIFICATIONS
 
 ================================================================================
 15. Microsoft Corporation - ONNX Runtime  (the quantization tools whose Python
-    and C++ code the managed reduction engine ports)
+    and C++ code the managed reduction engine ports, and the contributed
+    operator kernels the managed ONNX engine ports)
 ================================================================================
 
 Project:        https://github.com/microsoft/onnxruntime
@@ -1362,10 +1481,17 @@ WHAT WAS TAKEN
     LOGIC, by hand, into C#. Nothing from ONNX Runtime is vendored, compiled,
     linked, downloaded or referenced as a package: this repository has no
     Microsoft.ML.OnnxRuntime dependency and never loads a native ONNX Runtime
-    library. What was taken is the arithmetic and the exact output shape of two
-    of its quantization tools, so that the managed engine behind
+    library. What was taken is, first, the arithmetic and the exact output shape
+    of two of its quantization tools, so that the managed engine behind
     CodeBrix.Ollama.ModelManager's ReduceOnnxAsync writes the same file those
-    tools write, byte for byte, for the modes it covers.
+    tools write, byte for byte, for the modes it covers; and second, the
+    SEMANTICS OF SIX OPERATORS that ONNX Runtime either contributed itself or
+    implements outside the published specification, so that the managed ONNX
+    engine behind CodeBrix.Ollama.ModelRunner's OnnxModel.LoadAsync runs a graph
+    a model builder wrote. Those six are not described by any ONNX release: the
+    operator schemas name their inputs and attributes, and the meaning of some
+    of them - what seqlens_k counts, which pair of values a rotary embedding
+    turns together, which output carries the residual - is only in the code.
 
 SCOPE - the files that carry the marker
     src/CodeBrix.Ollama.ModelManager/Onnx/Quantization/ holds every ported
@@ -1391,18 +1517,63 @@ SCOPE - the files that carry the marker
     core/mlas/lib/q4common.h and the wrapper that calls the kernel,
     python/onnxruntime_pybind_quant.cc.
 
+SCOPE - the second set, the operator kernels
+    src/CodeBrix.Ollama.ModelRunner/Onnx/ holds the ported operator semantics,
+    and each of those files names its upstream source the same way:
+
+      Kernels/OnnxGroupQueryAttentionKernel.cs
+                                     onnxruntime/contrib_ops/cpu/bert/gqa_attention_base.h
+      Kernels/OnnxMatMulNBitsKernel.cs
+                                     onnxruntime/contrib_ops/cpu/quantization/matmul_nbits.cc
+      Kernels/OnnxMatMulIntegerKernel.cs
+                                     onnxruntime/core/providers/cpu/quantization/matmul_integer.cc
+      Kernels/OnnxDynamicQuantizeLinearKernel.cs
+                                     onnxruntime/core/providers/cpu/quantization/dynamicquantizelinear.cc
+      Kernels/OnnxSkipSimplifiedLayerNormalizationKernel.cs
+                                     onnxruntime/contrib_ops/cpu/skip_layer_norm.cc
+      Kernels/OnnxSimplifiedLayerNormalizationKernel.cs
+                                     onnxruntime/core/providers/cpu/nn/layer_norm_impl.cc
+      OnnxRootMeanSquareNorm.cs      onnxruntime/core/providers/cpu/nn/layer_norm_impl.cc
+      OnnxRotaryEmbedding.cs         onnxruntime/core/mlas/lib/rotary_embedding.cpp
+      OnnxIntegerGemm.cs             onnxruntime/core/providers/cpu/quantization/matmul_integer.cc
+
+    Five further upstream files were read while porting those and are named here
+    because their logic is inside the ports above, although no file carries
+    their name: contrib_ops/cpu/bert/group_query_attention.cc and
+    group_query_attention_helper.h (the parameters and the rotary call),
+    contrib_ops/cpu/bert/attention_helper.h (the cache concatenation),
+    contrib_ops/cpu/bert/rotary_embedding.cc (the position identifiers a
+    grouped-query attention derives when none are supplied) and
+    core/util/qmath.h (the dynamic scale and zero point). Two more were read as
+    the reference for the packed weight layout:
+    contrib_ops/cpu/quantization/matmul_nbits_helper.h and
+    contrib_ops/cpu/quantization/matmul_nbits_impl.cc.
+
     The check, from the repository root:
 
         grep -rl "was previously: onnxruntime/" src/
 
-    must list exactly the eight files above.
+    must list exactly the seventeen files above - eight under ModelManager and
+    nine under ModelRunner.
 
 WHAT IS NOT FROM ONNX RUNTIME
-    src/CodeBrix.Ollama.ModelManager/Onnx/ outside that Quantization/ folder -
-    the protocol buffer reader and writer and the ONNX message classes - is
-    original code of this repository, written against the published onnx.proto
-    schema, and carries no marker. That schema is a specification; it is not
-    code taken from anyone.
+    src/CodeBrix.Ollama.Core/Onnx/ - the protocol buffer reader and writer and
+    the ONNX message classes, which the quantizer reads and writes graphs with -
+    is original code of this repository, written against the published
+    onnx.proto schema, and carries no marker. That schema is a specification; it
+    is not code taken from anyone. (That codec sat beside the quantizer, under
+    src/CodeBrix.Ollama.ModelManager/Onnx/, until it moved into the shared
+    project both libraries carry. Nothing about its provenance changed with it.)
+
+    THE REST of src/CodeBrix.Ollama.ModelRunner/Onnx/ - the graph loader, the
+    execution plan and arena, the shape and broadcasting arithmetic, the float
+    matrix kernels and the thirty-one STANDARD operator kernels - is original
+    code of this repository, written against the published ONNX operator
+    specification, and carries no marker. What it is held to is ONNX Runtime's
+    OUTPUT, through the oracle fixtures under
+    tests/CodeBrix.Ollama.ModelRunner.Tests/Onnx/Fixtures/ and the gated
+    comparisons on real models. Those fixtures are ours (MIT) and are generated
+    from seeded random numbers; no publisher's data is among them.
 
 MODIFICATIONS MADE DURING THE PORT
     - Python and C++ became C#: dictionaries became typed collections, numpy
@@ -1420,6 +1591,18 @@ MODIFICATIONS MADE DURING THE PORT
       none, and requires a model that records having been through it.
     - The tools' warnings, logging and command-line entry points were not
       ported.
+    - The operator kernels were ported for the FP32 CPU path only. Upstream's
+      half-precision and bfloat16 paths, its quantized key-value cache, its
+      flash-attention and MLAS micro-kernels, its prepacking and its thread-pool
+      cost models are not ported; the managed engine spreads its own work and
+      refuses by name every attribute and optional input that would take it down
+      one of those paths.
+    - MatMulNBits' accuracy_level is read and IGNORED. It asks a runtime to
+      quantize the activations as well, and this engine keeps them in 32-bit
+      floats, which is more accurate than anything the attribute permits.
+    - GroupQueryAttention is ported for the fp32, non-shared-buffer,
+      non-windowed case. Sharing one buffer between past and present, a local
+      window, a softcap, a smooth softmax and a quantized cache are refused.
 
 ----- ONNX Runtime licence (MIT), reproduced verbatim from LICENSE at tag
       v1.30.0 -----
@@ -1448,18 +1631,285 @@ SOFTWARE.
 
 
 ================================================================================
+16. SkyTNT - the MIDI music model  (the generation loop and the MIDI tokenizer
+    the managed MIDI driver ports, Apache-2.0)
+================================================================================
+
+Project:        https://github.com/SkyTNT/midi-model
+                    commit f504d5cb58f769ab0f2909c679238f6621034573
+License:        Apache License 2.0 (the repository's LICENSE file)
+
+WHAT WAS TAKEN
+    LOGIC, by hand, into C#. Nothing from the project is vendored, downloaded,
+    executed or referenced as a package, and none of its files is in this
+    repository. What was taken is what a MIDI model of that family MEANS - the
+    order its two networks are stepped in, which tokens it may answer with at
+    each position of an event, and how an event becomes a row of tokens and a
+    row of tokens becomes music - so that CodeBrix.Ollama.ModelRunner's
+    MidiGenerationModel writes the same music the publisher's own Python
+    writes, event for event, with nothing installed.
+
+    Those rules are not written down anywhere but in that code. A vocabulary is
+    a numbered list whose order is the order the tokens were handed out; a
+    sampling mask is a list of which numbers are allowed where; and the
+    tidying-up a piece goes through on its way in - channels and tracks
+    re-numbered into the order they are used, an instrument given to a channel
+    that chose none, everything before the first note gathered into a setup -
+    is what the model was trained to see. Guess at any one of them and the
+    model still runs and still writes rows of tokens; it just writes different
+    music.
+
+SCOPE - the files that carry the marker
+    src/CodeBrix.Ollama.ModelRunner/Drivers/SkyTnt/ holds every ported file,
+    and each one names its upstream source in a trailing comment on its
+    namespace line:
+
+      SkyTntTokenizer.cs             midi_tokenizer.py  (MIDITokenizerV2: the
+                                     vocabulary, event2tokens, tokens2event)
+      SkyTntTokenizer.Midi.cs        midi_tokenizer.py  (tokenize, detokenize,
+                                     detect_key_signature, sf2key/key2sf,
+                                     bpm2tempo/tempo2bpm)
+      SkyTntEventType.cs             midi_tokenizer.py
+      SkyTntParameter.cs             midi_tokenizer.py
+      SkyTntEventRow.cs              midi_tokenizer.py
+      SkyTntRowMap.cs                midi_tokenizer.py
+      SkyTntOrderedIntMap.cs         midi_tokenizer.py
+      SkyTntLastNote.cs              midi_tokenizer.py
+      SkyTntGenerator.cs             app_onnx.py        (generate)
+      SkyTntMask.cs                  app_onnx.py        (generate's masks)
+      SkyTntSampler.cs               app_onnx.py        (softmax, sample_top_p_k)
+      SkyTntPrompt.cs                app_onnx.py        (run's prompt building)
+      SkyTntCache.cs                 app_onnx.py        (generate's two caches)
+
+    One file in the TEST projects carries the same provenance in its own
+    header, because it lifts the publisher's loop rather than importing it (the
+    module it lives in imports a web framework and a synthesizer binding):
+
+      tests/CodeBrix.Ollama.EndToEnd.Tests/Python/skytnt_generate_oracle.py
+
+    Two upstream files were read while porting and are named here although no
+    file carries their name: midi_model.py (to confirm that the two networks
+    are ordinary decoders and that the base one is fed the SUM of an event's
+    token embeddings, which the exported graphs already do) and export.py (to
+    confirm which graph is which).
+
+    The two scripts that MAKE the driver's test fixtures use the publisher's
+    tokenizer through a checkout of that repository, and are run by hand once:
+    tests/CodeBrix.Ollama.ModelRunner.Tests/Drivers/SkyTnt/Fixtures/
+    generate_mask_fixtures.py and generate_tiny_model.py. What they write -
+    masks.json and a tiny model of our own - is ours, under this repository's
+    licence; the VOCABULARY the numbers in masks.json describe is the
+    publisher's, and that is what this entry covers.
+
+MODIFICATIONS MADE DURING THE PORT
+    - Python became C#: dictionaries whose ORDER the algorithm depends on
+      became collections that keep an order of their own, numpy array
+      operations became loops, and the loop's io_binding became this
+      repository's own tensor interface.
+    - ONE PIECE AT A TIME. Upstream writes several pieces side by side in one
+      batch; this driver writes one, so every branch that exists to keep
+      several in step is gone, and the one place where the batch changes the
+      answer - the row length a batch settles on when its pieces have finished
+      at different lengths - is ported as the single-piece case with the other
+      branch kept and marked.
+    - The random numbers are NOT the publisher's. Upstream draws from numpy's
+      generator; this library has one of its own, written out so that a seed
+      means one thing for ever. Only GREEDY generation - the most likely answer
+      every time, and no number drawn at all - is claimed to be identical, and
+      that is what is proved against the publisher's Python on the published
+      model.
+    - A piece to CONTINUE has the tokenizer's end-of-piece row taken off it
+      before the model sees it. Upstream leaves it on when a caller asks for
+      more events than the piece has, which shows the model "and that is the
+      end" and then asks for more.
+    - The tokenizer's version one is not ported. The published model this
+      driver was written for asks for version two, says so in its own
+      configuration, and a bundle asking for another version is refused by
+      name.
+    - midi2img, augment and check_quality are not ported: the first draws a
+      picture, and the other two belong to training rather than to generating.
+    - The events this library hands out carry an ABSOLUTE position in ticks, a
+      note's length in ticks, and a horizon - none of which upstream computes,
+      because upstream hands its events to a web page rather than to a player.
+
+WHAT WAS DELIBERATELY *NOT* TAKEN: MIDI.py
+    The publisher's repository vendors MIDI.py, which is Peter Billam's
+    (http://www.pjb.com.au/midi/free/MIDI.py), and uses it to turn a generated
+    piece into a Standard MIDI File and to read one back.
+
+    THE VENDORED COPY STATES NO LICENCE AT ALL. It was read in full at the
+    commit above: it carries a #!/usr/bin/python3 line, a note dated 20091104
+    about two unsupported events, a bug report dated 20150914 credited to
+    "jimbo1qaz", a long docstring describing the "opus" and "score" formats, a
+    download address and a version history from 1.1 to 6.7 (20201120). There is
+    no copyright notice, no licence grant, no SPDX tag and no reference to any
+    licence anywhere in its 1,772 lines (checked with a case-insensitive search
+    for licen, copyright, public domain, GPL, BSD, Artistic, "same terms",
+    redistribut, permission and warrant; the only hits are an event named
+    copyright_text_event and prose about Perl's pack format). The repository's
+    own Apache-2.0 LICENSE is a statement by the publisher about the
+    publisher's work, and this file is somebody else's.
+
+    SO NOTHING WAS PORTED FROM IT. Terms that are not stated are not terms that
+    are clearly compatible with this repository's MIT licence, and the standing
+    instruction in that case is to write the code from the published format
+    instead. src/CodeBrix.Ollama.ModelRunner/Midi/ - the Standard MIDI File
+    writer and reader - is ORIGINAL CODE written against the Standard MIDI File
+    specification: the header and track chunks, the variable-length delta time,
+    running status, the four channel messages this library produces and the
+    three meta events it produces. None of its files carries a "was previously"
+    marker, because none of it is a port.
+
+    ONE FACT WAS TAKEN FROM READING IT, and it is recorded here rather than
+    left unsaid: the ORDER in which its reader lists the events of a track,
+    which is that a note takes its place where it ENDS and everything else
+    where it happens. That is a statement about how the publisher's own files
+    are laid out, not a piece of its expression, and this library has to match
+    it to read a prompt the same way. It is written in our own words in a
+    comment in SkyTntTokenizer.Midi.cs, and it is what the gated
+    continue-a-piece test proves end to end.
+
+----- SkyTNT midi-model licence (Apache-2.0) -----
+
+    The Apache License, Version 2.0 is reproduced verbatim in entry 2 above and
+    is not repeated here. The repository's LICENSE file at the commit named
+    above is that licence, unmodified, with no appendix filled in and no NOTICE
+    file anywhere in the repository (checked at the commit). The obligations it
+    places on this repository are met as follows:
+
+      * a copy of the licence: entry 2's verbatim text;
+      * a statement of what changed: the MODIFICATIONS list above, and the
+        per-file markers named under SCOPE;
+      * the retention of notices: the project carries no copyright, patent,
+        trademark or attribution notices in the files that were ported - there
+        are no per-file headers - so there are none to retain beyond the
+        attribution in this entry;
+      * NOTICE: there is no NOTICE file to reproduce.
+
+
+17. Hugging Face - transformers  (the GPT-2 byte-level tokenizer whose Python
+    ModelRunner's managed tokenizer ports, so that turning text into token
+    numbers needs nothing installed)
+
+Project:        https://github.com/huggingface/transformers
+Licence:        Apache License 2.0
+Copyright:      Copyright 2018 The OpenAI Team Authors and The HuggingFace Inc.
+                team. Copyright (c) 2018, NVIDIA CORPORATION.
+Version read:   v4.57.6, the version installed in the maintainer's virtual
+                environment and read there
+File read:      src/transformers/models/gpt2/tokenization_gpt2.py
+
+WHAT THIS IS, AND WHY IT IS NOT A MODEL'S FILE. Every bundle of the family this
+driver reads carries a COPY of that one file, renamed and with different default
+token names, because the publishers ship their tokenizer as remote code. The
+copies are byte-identical to the transformers file in everything that matters -
+the byte-to-symbol table, the pre-tokenizer pattern, the merge loop, the
+encoding and the decoding - which was checked by diffing one against the
+installed library. So the upstream recorded here is transformers itself rather
+than any one publisher's copy of it, which is both the true source and the one
+that does not tie this library to a model.
+
+SCOPE - the file-to-file list, which is what the marker greps must match:
+
+    src/transformers/models/gpt2/tokenization_gpt2.py@v4.57.6
+        -> src/CodeBrix.Ollama.ModelRunner/Tokenizers/Gpt2ByteTable.cs
+           bytes_to_unicode(): the 256-symbol table and the order the
+           unprintable bytes are allotted their symbols in
+        -> src/CodeBrix.Ollama.ModelRunner/Tokenizers/Gpt2PreTokenizer.cs
+           the pre-tokenizer pattern's RULE - see the modification below
+        -> src/CodeBrix.Ollama.ModelRunner/Tokenizers/Gpt2ByteLevelTokenizer.cs
+           bpe(), get_pairs(), _tokenize(), _convert_token_to_id(),
+           _convert_id_to_token() and convert_tokens_to_string(), together with
+           the added-token splitting PreTrainedTokenizer.tokenize() does and the
+           grouping PreTrainedTokenizer._decode() does around it
+
+    The two files beside them - Gpt2TokenizerSettings.cs and Gpt2AddedToken.cs -
+    and the reader Gpt2TokenizerFiles.cs carry NO marker: they are this
+    repository's own way of holding what a bundle's configuration files say, and
+    the refusals in the reader are its own.
+
+MODIFICATIONS, and there are four worth stating:
+
+  * THE PRE-TOKENIZER IS A SCAN, NOT A REGULAR EXPRESSION. The Python runs one
+    pattern on an engine that works in CODE POINTS; .NET's regular-expression
+    engine works in UTF-16 units, where a character outside the basic
+    multilingual plane is a surrogate pair and no letter or number class matches
+    either half of it. The scan implements the pattern's alternatives in the
+    order the pattern writes them and reads one code point at a time, so it
+    agrees with the Python everywhere rather than only inside the basic plane.
+    The test suite holds it to a compiled .NET regular expression of exactly
+    that pattern over the basic plane, and to the framework's own character
+    classes over all 65,536 of those characters.
+  * THE MERGE FILE IS READ BY THIS REPOSITORY'S OWN RULE, in
+    CodeBrix.Ollama.Core (entry 1): a first line is dropped only when it begins
+    with `#`, where the Python drops the first line whatever it is. On the
+    bundles this driver reads the two select the same table, because a bundle
+    written by a model builder carries the header the Python's own save path
+    writes; MAINTAINER-README states the case where they would differ.
+  * THE CACHE IS A MERGED PIECE'S TOKEN NUMBERS rather than its merged symbol
+    string, which is the same answer computed once instead of twice.
+  * NOTHING ELSE OF PreTrainedTokenizer IS PORTED: no padding, no truncation, no
+    attention masks, no chat template, no fast-tokenizer conversion and no
+    saving. A bundle asking for an added token with lstrip, rstrip or
+    single_word set is refused by the name of the rule rather than tokenized a
+    different way from the way it was trained.
+
+WHAT IS NOT FROM transformers: everything else under Tokenizers/ and everything
+under Drivers/CausalLm/, which is this repository's own.
+
+----- transformers licence (Apache-2.0) -----
+
+    The Apache License, Version 2.0 is reproduced verbatim in entry 2 above and
+    is not repeated here. The obligations it places on this repository are met
+    as follows:
+
+      * a copy of the licence: entry 2's verbatim text;
+      * a statement of what changed: the MODIFICATIONS list above, and the
+        per-file markers named under SCOPE;
+      * the retention of notices: the upstream file carries a copyright and
+        licence header, and the three ported files do NOT reproduce it - the
+        family rule preserves an upstream header verbatim only where a file was
+        taken whole, and these take named functions out of one file into three
+        of their own. The attribution is this entry, and each file's marker
+        names the upstream path and version;
+      * NOTICE: the transformers repository carries no NOTICE file.
+
+    The upstream file's own header credits OpenAI's GPT-2 encoder.py for the
+    byte-to-symbol table and the pre-tokenizer pattern, which OpenAI published
+    under the MIT licence. That code was not read for this port - the
+    transformers file was - and the credit is recorded here so the chain is
+    complete.
+
+
+================================================================================
 INVENTORY: HOW THIS FILE WAS COMPILED, AND HOW TO RE-CHECK IT
 ================================================================================
 (This section covers entries 1 and 2, the vendored llama.cpp snapshot. The
 other entries are checked differently, and each is a one-line grep from the
 repository root:
 
-  entry 1  grep -rl "was previously: ggml-org/llama.cpp" src/
+  entry 1  grep -rl "was previously: ggml-org/llama.cpp" src/   and
+           grep -rl "was previously: .*@b10221" src/  (entry 1 covers TWO
+           ports and its markers are written in two spellings - the binding
+           names the project, the checkpoint conversion names the path and the
+           tag - so BOTH greps are needed to compile its list. The second
+           finds twenty files: nineteen under ModelManager and one under
+           CodeBrix.Ollama.Core, Tokenizers/Gpt2MergeTable.cs, which is the
+           merges reading that moved into the shared project when the codec
+           did and is named in entry 1's scope table where it now lives)
   entry 3  grep -rl "was previously: ollama/ollama" src/
   entry 4  grep -rl "was previously: LLamaSharp" src/
   entry 5  grep -rl "was previously: golang/go" src/
   entry 6  grep -rl "was previously: agnivade/levenshtein" src/
   entry 15 grep -rl "was previously: onnxruntime/" src/
+  entry 16 grep -rl "was previously: midi_tokenizer.py" src/ and
+           grep -rl "was previously: app_onnx.py" src/  (thirteen files in all,
+           every one of them under ModelRunner/Drivers/SkyTnt/; nothing under
+           ModelRunner/Midi/ carries a marker, and that is the point of the
+           MIDI.py paragraph in entry 16)
+  entry 17 grep -rl "was previously: src/transformers/" src/  (three files, all
+           under ModelRunner/Tokenizers/; the other two files in that folder
+           carry no marker and that is correct)
 
 Each list must match that entry's scope table exactly, in both directions:
 a marked file missing from a table, or a table naming a file that no longer

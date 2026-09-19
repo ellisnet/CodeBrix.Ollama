@@ -56,16 +56,23 @@
   </ItemGroup>
 
   <!--
-    The comparison of what the two reduction engines write is done with the SAME reader the offline suite compares
-    fixtures with, linked rather than copied for the same reason: two copies of the rules for "these are the same
-    model" would be two things to keep true, and the whole point of the comparison is that there is one.
+    The comparison of what the two reduction engines write is done with the SAME reader every other suite compares
+    models with, linked rather than copied for the same reason: two copies of the rules for "these are the same
+    model" would be two things to keep true, and the whole point of the comparison is that there is one. It lives
+    with the codec's own tests, which is where the rules it applies come from.
   -->
   <ItemGroup>
-    <Compile Include="..\CodeBrix.Ollama.ModelManager.Tests\Onnx\OnnxModelComparison.cs" Link="Onnx\OnnxModelComparison.cs" />
+    <Compile Include="..\CodeBrix.Ollama.Core.Tests\Onnx\OnnxModelComparison.cs" Link="Onnx\OnnxModelComparison.cs" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\CodeBrix.Ollama.ModelManager\CodeBrix.Ollama.ModelManager.csproj" />
+    <!--
+      The shared project, named here as well as by the library. The library keeps it private, so it does not
+      reach this project on its own; the live comparison reads both engines' output back through the codec,
+      so this project compiles against it directly.
+    -->
+    <ProjectReference Include="..\..\src\CodeBrix.Ollama.Core\CodeBrix.Ollama.Core.csproj" />
     <!--
       The probe is a console application, not a library: it is referenced only so that it is built before
       these tests run, and its output is copied below rather than linked. The ownership modes are facts

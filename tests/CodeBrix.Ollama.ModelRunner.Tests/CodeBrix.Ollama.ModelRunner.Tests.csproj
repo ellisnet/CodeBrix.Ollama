@@ -51,4 +51,45 @@
     </Content>
   </ItemGroup>
 
+  <!--
+    The ONNX operator oracles: one small graph per operator, its inputs, and what ONNX Runtime computed from
+    them. They sit under Onnx/Fixtures/ beside the tests that read them, and they are copied beside the test
+    assembly so the suite finds them without reaching anywhere. Onnx/Fixtures/README.txt says who made them
+    and how; generate_fixtures.py is checked in with them and is never run by a test.
+  -->
+  <ItemGroup>
+    <Content Include="Onnx\Fixtures\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <!--
+    The MIDI driver's fixtures: a two-graph model small enough to check in, with the same contract as the
+    published one, and the sampling masks the publisher's own generation loop uses. They sit under
+    Drivers/SkyTnt/Fixtures/ beside the tests that read them and are copied beside the test assembly, so the
+    whole driver - the loop, both caches, the masks and the stop conditions - is exercised with nothing
+    installed and nothing downloaded. Drivers/SkyTnt/Fixtures/README.txt says who made them and how; the two
+    scripts are checked in with them and are never run by a test.
+  -->
+  <ItemGroup>
+    <Content Include="Drivers\SkyTnt\Fixtures\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <!--
+    The text driver's fixtures: a single-graph bundle small enough to check in, with the same generation
+    configuration, the same contributed operators and the same cache contract as the one a model builder
+    writes, and what the published Python tokenizer made of a corpus. They sit under
+    Drivers/CausalLm/Fixtures/ beside the tests that read them and are copied beside the test assembly, so
+    the whole driver - the loop, the cache, the mask, the stop conditions and the tokenizer - is exercised
+    with nothing installed and nothing downloaded. Drivers/CausalLm/Fixtures/README.txt says who made them
+    and how; the script is checked in with them and is never run by a test.
+  -->
+  <ItemGroup>
+    <Content Include="Drivers\CausalLm\Fixtures\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
 </Project>

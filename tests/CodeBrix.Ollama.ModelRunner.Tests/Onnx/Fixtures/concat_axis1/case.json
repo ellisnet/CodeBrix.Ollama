@@ -1,0 +1,44 @@
+{
+  "name": "concat_axis1",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        2,
+        3
+      ],
+      "file": "in_a.bin"
+    },
+    {
+      "name": "b",
+      "type": "float",
+      "shape": [
+        2,
+        1
+      ],
+      "file": "in_b.bin"
+    },
+    {
+      "name": "c",
+      "type": "float",
+      "shape": [
+        2,
+        5
+      ],
+      "file": "in_c.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        2,
+        9
+      ],
+      "file": "out_y.bin"
+    }
+  ]
+}

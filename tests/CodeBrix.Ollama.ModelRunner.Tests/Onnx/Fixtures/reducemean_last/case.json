@@ -1,0 +1,28 @@
+{
+  "name": "reducemean_last",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        2,
+        3,
+        16
+      ],
+      "file": "in_a.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        2,
+        3,
+        1
+      ],
+      "file": "out_y.bin"
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "name": "reducesum_last",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        2,
+        3,
+        16
+      ],
+      "file": "in_a.bin"
+    },
+    {
+      "name": "axes",
+      "type": "int64",
+      "shape": [
+        1
+      ],
+      "file": "in_axes.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        2,
+        3,
+        1
+      ],
+      "file": "out_y.bin"
+    }
+  ]
+}

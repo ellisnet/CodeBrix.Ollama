@@ -1,0 +1,50 @@
+{
+  "name": "subgraph_empty_step",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "past",
+      "type": "float",
+      "shape": [
+        1,
+        2,
+        0,
+        4
+      ],
+      "file": "in_past.bin"
+    },
+    {
+      "name": "fresh",
+      "type": "float",
+      "shape": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "file": "in_fresh.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        1
+      ],
+      "file": "out_y.bin"
+    },
+    {
+      "name": "present",
+      "type": "float",
+      "shape": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "file": "out_present.bin"
+    }
+  ],
+  "note": "A cached decode step's shape: an empty past concatenated onto a fresh key."
+}

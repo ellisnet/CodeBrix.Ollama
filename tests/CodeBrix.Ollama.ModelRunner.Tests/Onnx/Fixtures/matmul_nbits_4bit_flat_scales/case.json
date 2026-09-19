@@ -1,0 +1,27 @@
+{
+  "name": "matmul_nbits_4bit_flat_scales",
+  "opset": 21,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        2,
+        64
+      ],
+      "file": "in_a.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        2,
+        5
+      ],
+      "file": "out_y.bin"
+    }
+  ],
+  "note": "Scales as one long list rather than a row per column, which older models write."
+}

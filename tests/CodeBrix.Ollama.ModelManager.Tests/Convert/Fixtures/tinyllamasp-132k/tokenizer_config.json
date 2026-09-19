@@ -1,0 +1,79 @@
+{
+ "added_tokens_decoder": {
+  "0": {
+   "content": "<pad>",
+   "lstrip": false,
+   "normalized": false,
+   "rstrip": false,
+   "single_word": false,
+   "special": true
+  },
+  "2": {
+   "content": "<bos>",
+   "lstrip": false,
+   "normalized": false,
+   "rstrip": false,
+   "single_word": false,
+   "special": true
+  },
+  "3": {
+   "content": "<eos>",
+   "lstrip": false,
+   "normalized": false,
+   "rstrip": false,
+   "single_word": false,
+   "special": true
+  },
+  "6": {
+   "content": "<sep>",
+   "lstrip": false,
+   "normalized": false,
+   "rstrip": false,
+   "single_word": false,
+   "special": false
+  },
+  "322": {
+   "content": "▁gap",
+   "lstrip": false,
+   "normalized": false,
+   "rstrip": false,
+   "single_word": false,
+   "special": false
+  },
+  "323": {
+   "content": "<|looksspecial|>",
+   "lstrip": false,
+   "normalized": false,
+   "rstrip": false,
+   "single_word": false,
+   "special": false
+  },
+  "386": {
+   "content": "<extra2>",
+   "lstrip": false,
+   "normalized": false,
+   "rstrip": false,
+   "single_word": false,
+   "special": false
+  },
+  "387": {
+   "content": "<ctrlextra>",
+   "lstrip": false,
+   "normalized": false,
+   "rstrip": false,
+   "single_word": false,
+   "special": true
+  }
+ },
+ "add_bos_token": true,
+ "add_eos_token": false,
+ "add_prefix_space": true,
+ "bos_token": "<bos>",
+ "chat_template": "{% for message in messages %}{{ message['role'] }}: {{ message['content'] }}\n{% endfor %}",
+ "clean_up_tokenization_spaces": false,
+ "eos_token": "<eos>",
+ "model_max_length": 256,
+ "pad_token": "<pad>",
+ "tokenizer_class": "LlamaTokenizer",
+ "unk_token": "<unk>"
+}

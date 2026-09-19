@@ -1,0 +1,34 @@
+{
+  "name": "expand_new_rank",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        4
+      ],
+      "file": "in_a.bin"
+    },
+    {
+      "name": "s",
+      "type": "int64",
+      "shape": [
+        3
+      ],
+      "file": "in_s.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "file": "out_y.bin"
+    }
+  ]
+}

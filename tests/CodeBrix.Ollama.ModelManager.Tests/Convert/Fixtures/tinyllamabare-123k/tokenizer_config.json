@@ -1,0 +1,9 @@
+{
+ "bos_token": null,
+ "clean_up_tokenization_spaces": false,
+ "eos_token": null,
+ "model_max_length": 256,
+ "pad_token": null,
+ "tokenizer_class": "GPT2Tokenizer",
+ "unk_token": null
+}

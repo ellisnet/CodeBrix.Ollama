@@ -1,0 +1,68 @@
+{
+  "name": "skip_simplified_layer_normalization_bias",
+  "opset": 21,
+  "inputs": [
+    {
+      "name": "input",
+      "type": "float",
+      "shape": [
+        2,
+        3,
+        8
+      ],
+      "file": "in_input.bin"
+    },
+    {
+      "name": "skip",
+      "type": "float",
+      "shape": [
+        2,
+        3,
+        8
+      ],
+      "file": "in_skip.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "output",
+      "type": "float",
+      "shape": [
+        2,
+        3,
+        8
+      ],
+      "file": "out_output.bin"
+    },
+    {
+      "name": "mean",
+      "type": "float",
+      "shape": [
+        2,
+        3,
+        1
+      ],
+      "file": "out_mean.bin"
+    },
+    {
+      "name": "inv_std_var",
+      "type": "float",
+      "shape": [
+        2,
+        3,
+        1
+      ],
+      "file": "out_inv_std_var.bin"
+    },
+    {
+      "name": "input_skip_bias_sum",
+      "type": "float",
+      "shape": [
+        2,
+        3,
+        8
+      ],
+      "file": "out_input_skip_bias_sum.bin"
+    }
+  ]
+}

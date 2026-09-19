@@ -20,6 +20,9 @@
 *.gguf  binary
 *.onnx binary
 *.data binary
+*.safetensors binary
+*.bin   binary
+tokenizer.model binary
 *.png   binary
 *.dylib binary
 *.so    binary

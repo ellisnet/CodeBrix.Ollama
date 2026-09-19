@@ -1,0 +1,26 @@
+{
+  "name": "constant_tensor",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        2,
+        2
+      ],
+      "file": "in_a.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        2,
+        2
+      ],
+      "file": "out_y.bin"
+    }
+  ]
+}

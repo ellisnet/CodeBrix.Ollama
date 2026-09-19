@@ -48,15 +48,29 @@ public sealed class ModelRunnerOptions
 
     /// <summary>
     /// The number of threads used for generation. <see langword="null"/> (the default) uses the number of
-    /// physical cores, or the logical count when the physical count is unknown.
+    /// PHYSICAL cores, or the logical count when the physical count cannot be found out, bounded by
+    /// <see cref="MaxThreads"/> where one is set. A value here is used EXACTLY as it stands - it is never
+    /// clamped, and <see cref="MaxThreads"/> is ignored for it - so it may oversubscribe a small machine.
+    /// Below 1 is <see cref="ArgumentException"/>.
     /// </summary>
     public int? Threads { get; set; }
 
     /// <summary>
-    /// The number of threads used for prompt processing. <see langword="null"/> (the default) uses the same
-    /// value as <see cref="Threads"/>.
+    /// The number of threads used for prompt processing. <see langword="null"/> (the default) uses whatever
+    /// <see cref="Threads"/> resolved to, cap and all. A value here is used EXACTLY as it stands, and
+    /// <see cref="MaxThreads"/> is ignored for it. Below 1 is <see cref="ArgumentException"/>.
     /// </summary>
     public int? BatchThreads { get; set; }
+
+    /// <summary>
+    /// The largest number of threads this library may choose BY ITSELF, or <see langword="null"/> (the
+    /// default) for no cap. It is for an application that ships to machines it has never seen: "use what this
+    /// machine has, but never more than this" - four on a four-core machine, and this number on a large
+    /// server. It bounds ONLY the automatic choice, so it does nothing once <see cref="Threads"/> or
+    /// <see cref="BatchThreads"/> is set, and an unset <see cref="Threads"/> resolves to the smaller of the
+    /// physical core count and this. Below 1 is <see cref="ArgumentException"/>.
+    /// </summary>
+    public int? MaxThreads { get; set; }
 
     /// <summary>Whether the engine uses flash attention. Default <see cref="FlashAttentionMode.Auto"/>.</summary>
     public FlashAttentionMode FlashAttention { get; set; } = FlashAttentionMode.Auto;

@@ -1,0 +1,25 @@
+{
+  "name": "cast_uint8_weight_to_float",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        6
+      ],
+      "file": "in_a.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "z",
+      "type": "float",
+      "shape": [
+        6
+      ],
+      "file": "out_z.bin"
+    }
+  ],
+  "note": "An unsigned 8-bit WEIGHT read as it lies and widened by a Cast."
+}

@@ -1,0 +1,73 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    THE SHARED PROJECT, AND IT IS A PROJECT RATHER THAN A PACKAGE ON PURPOSE.
+
+    CodeBrix.Ollama.ModelManager and CodeBrix.Ollama.ModelRunner must never depend on each other, in
+    either direction and at either level, so code they both need cannot live in one of them. It lives
+    here instead, and BOTH libraries reference this project and pack this assembly INSIDE their own
+    .nupkg beside their own (lib/net10.0/CodeBrix.Ollama.Core.dll). There is no third NuGet package:
+    a consumer installs the two packages it already knows about and each of them brings its own copy
+    of this one. The arrows point only INTO this project - it references neither library, no other
+    project and no NuGet package at all, and it never will.
+
+    Everything in here is INTERNAL. A consuming application does receive the assembly as a reference,
+    because it sits in lib/, so internal-only is what keeps it out of that application's public API
+    and out of its IntelliSense. See MAINTAINER-README.txt, "THE Core PROJECT".
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>CodeBrix.Ollama.Core</RootNamespace>
+    <AssemblyName>CodeBrix.Ollama.Core</AssemblyName>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!--
+      Never packed on its own: this assembly reaches a consumer only inside the two library packages.
+      GeneratePackageOnBuild is spelled out beside IsPackable so that neither can be turned on by
+      accident while the other stays off.
+    -->
+    <IsPackable>false</IsPackable>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+  </PropertyGroup>
+
+  <!--
+    Package / assembly version: date-stamped and auto-incrementing, exactly as the two libraries stamp
+    themselves, and computed here for the same reason they compute it for themselves - there is no shared
+    props file in this repository. Nothing compares this number with either library's: inside a
+    development tree an incremental build leaves them a minute apart, which is precisely why the
+    compatibility guard in CoreContract.cs is revision-based and never looks at a version.
+
+    Format:  1.<x>.<y>.<z>   (every field is derived from UTC "now")
+
+      1  (major)     Always 1 for this project.
+      x  (minor)     Whole years since $(_VersionBaseYear).
+                     With base 2026: 2026=0, 2027=1, 2028=2, ...
+      y  (build)     Day of year, 1-based inclusive, UTC.
+                     Jan 1 = 1, Feb 1 = 32, Dec 31 = 365 (366 in a leap year).
+      z  (revision)  Minute of day, UTC, range 0 to 1439.
+                     00:00 = 0, 23:59 = 1439.
+  -->
+  <PropertyGroup>
+    <_VersionBaseYear>2026</_VersionBaseYear>
+    <_VersionYears>$([MSBuild]::Subtract($([System.DateTime]::UtcNow.Year), $(_VersionBaseYear)))</_VersionYears>
+    <_VersionDayOfYear>$([System.DateTime]::UtcNow.DayOfYear)</_VersionDayOfYear>
+    <_VersionMinuteOfDay>$([System.Convert]::ToInt32($([System.Math]::Floor($([System.DateTime]::UtcNow.TimeOfDay.TotalMinutes)))))</_VersionMinuteOfDay>
+    <BuildVersion>1.$(_VersionYears).$(_VersionDayOfYear).$(_VersionMinuteOfDay)</BuildVersion>
+    <Version>$(BuildVersion)</Version>
+    <AssemblyVersion>$(BuildVersion)</AssemblyVersion>
+    <FileVersion>$(BuildVersion)</FileVersion>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <Product>CodeBrix.Ollama.Core</Product>
+    <Authors>Jeremy Ellis</Authors>
+    <Copyright>Copyright (c) 2026 Jeremy Ellis and contributors</Copyright>
+  </PropertyGroup>
+
+  <!--
+    NO ItemGroup HERE, EVER. No PackageReference, no ProjectReference: this project is the bottom of the
+    stack and depends on nothing but the framework.
+  -->
+
+</Project>

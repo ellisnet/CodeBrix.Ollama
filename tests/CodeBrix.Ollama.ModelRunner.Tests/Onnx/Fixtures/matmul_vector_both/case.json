@@ -1,0 +1,30 @@
+{
+  "name": "matmul_vector_both",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        6
+      ],
+      "file": "in_a.bin"
+    },
+    {
+      "name": "b",
+      "type": "float",
+      "shape": [
+        6
+      ],
+      "file": "in_b.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [],
+      "file": "out_y.bin"
+    }
+  ]
+}

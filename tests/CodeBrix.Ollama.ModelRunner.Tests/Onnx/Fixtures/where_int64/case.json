@@ -1,0 +1,44 @@
+{
+  "name": "where_int64",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "c",
+      "type": "bool",
+      "shape": [
+        3,
+        4
+      ],
+      "file": "in_c.bin"
+    },
+    {
+      "name": "a",
+      "type": "int64",
+      "shape": [
+        3,
+        4
+      ],
+      "file": "in_a.bin"
+    },
+    {
+      "name": "b",
+      "type": "int64",
+      "shape": [
+        3,
+        4
+      ],
+      "file": "in_b.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "int64",
+      "shape": [
+        3,
+        4
+      ],
+      "file": "out_y.bin"
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "name": "unsqueeze_two_axes",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        3,
+        4
+      ],
+      "file": "in_a.bin"
+    },
+    {
+      "name": "axes",
+      "type": "int64",
+      "shape": [
+        2
+      ],
+      "file": "in_axes.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        3,
+        1,
+        4,
+        1
+      ],
+      "file": "out_y.bin"
+    }
+  ]
+}

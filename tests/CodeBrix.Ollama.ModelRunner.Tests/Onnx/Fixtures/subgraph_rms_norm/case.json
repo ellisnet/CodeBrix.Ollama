@@ -1,0 +1,29 @@
+{
+  "name": "subgraph_rms_norm",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "x",
+      "type": "float",
+      "shape": [
+        1,
+        7,
+        64
+      ],
+      "file": "in_x.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        1,
+        7,
+        64
+      ],
+      "file": "out_y.bin"
+    }
+  ],
+  "note": "Root-mean-square normalization, decomposed exactly as the decoder graphs decompose it."
+}

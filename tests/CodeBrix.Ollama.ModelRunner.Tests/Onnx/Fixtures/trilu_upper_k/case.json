@@ -1,0 +1,32 @@
+{
+  "name": "trilu_upper_k",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        6,
+        6
+      ],
+      "file": "in_a.bin"
+    },
+    {
+      "name": "k",
+      "type": "int64",
+      "shape": [],
+      "file": "in_k.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        6,
+        6
+      ],
+      "file": "out_y.bin"
+    }
+  ]
+}

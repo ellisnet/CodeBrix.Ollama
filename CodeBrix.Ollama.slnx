@@ -12,11 +12,14 @@
     <File Path="THIRD-PARTY-NOTICES.txt" />
   </Folder>
   <Folder Name="/Tests/">
+    <Project Path="tests/CodeBrix.Ollama.Core.Tests/CodeBrix.Ollama.Core.Tests.csproj" />
+    <Project Path="tests/CodeBrix.Ollama.EndToEnd.Tests/CodeBrix.Ollama.EndToEnd.Tests.csproj" />
     <Project Path="tests/CodeBrix.Ollama.ModelManager.Probe/CodeBrix.Ollama.ModelManager.Probe.csproj" />
     <Project Path="tests/CodeBrix.Ollama.ModelManager.Python.Tests/CodeBrix.Ollama.ModelManager.Python.Tests.csproj" />
     <Project Path="tests/CodeBrix.Ollama.ModelManager.Tests/CodeBrix.Ollama.ModelManager.Tests.csproj" />
     <Project Path="tests/CodeBrix.Ollama.ModelRunner.Tests/CodeBrix.Ollama.ModelRunner.Tests.csproj" />
   </Folder>
+  <Project Path="src/CodeBrix.Ollama.Core/CodeBrix.Ollama.Core.csproj" />
   <Project Path="src/CodeBrix.Ollama.ModelManager/CodeBrix.Ollama.ModelManager.csproj" />
   <Project Path="src/CodeBrix.Ollama.ModelRunner/CodeBrix.Ollama.ModelRunner.csproj" />
 </Solution>

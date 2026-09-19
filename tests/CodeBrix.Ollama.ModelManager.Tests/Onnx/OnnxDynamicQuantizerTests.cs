@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using CodeBrix.Ollama.Core;
+using CodeBrix.Ollama.Core.Tests;
 using SilverAssertions;
 using Xunit;
 

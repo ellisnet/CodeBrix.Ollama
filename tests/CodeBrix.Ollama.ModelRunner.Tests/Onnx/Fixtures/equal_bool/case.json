@@ -1,0 +1,35 @@
+{
+  "name": "equal_bool",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "bool",
+      "shape": [
+        3,
+        4
+      ],
+      "file": "in_a.bin"
+    },
+    {
+      "name": "b",
+      "type": "bool",
+      "shape": [
+        3,
+        4
+      ],
+      "file": "in_b.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "bool",
+      "shape": [
+        3,
+        4
+      ],
+      "file": "out_y.bin"
+    }
+  ]
+}

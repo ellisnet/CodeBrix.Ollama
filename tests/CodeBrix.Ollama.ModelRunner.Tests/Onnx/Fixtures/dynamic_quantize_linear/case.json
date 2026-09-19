@@ -1,0 +1,38 @@
+{
+  "name": "dynamic_quantize_linear",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        3,
+        5
+      ],
+      "file": "in_a.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "int32",
+      "shape": [
+        3,
+        5
+      ],
+      "file": "out_y.bin"
+    },
+    {
+      "name": "scale",
+      "type": "float",
+      "shape": [],
+      "file": "out_scale.bin"
+    },
+    {
+      "name": "zp",
+      "type": "int32",
+      "shape": [],
+      "file": "out_zp.bin"
+    }
+  ]
+}

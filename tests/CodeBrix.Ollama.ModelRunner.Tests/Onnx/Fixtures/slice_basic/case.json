@@ -1,0 +1,42 @@
+{
+  "name": "slice_basic",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        6,
+        5
+      ],
+      "file": "in_a.bin"
+    },
+    {
+      "name": "starts",
+      "type": "int64",
+      "shape": [
+        2
+      ],
+      "file": "in_starts.bin"
+    },
+    {
+      "name": "ends",
+      "type": "int64",
+      "shape": [
+        2
+      ],
+      "file": "in_ends.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        3,
+        3
+      ],
+      "file": "out_y.bin"
+    }
+  ]
+}

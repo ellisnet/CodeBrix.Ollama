@@ -1,0 +1,29 @@
+{
+  "name": "simplified_layer_normalization_axis1",
+  "opset": 21,
+  "inputs": [
+    {
+      "name": "x",
+      "type": "float",
+      "shape": [
+        2,
+        4,
+        3
+      ],
+      "file": "in_x.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        2,
+        4,
+        3
+      ],
+      "file": "out_y.bin"
+    }
+  ],
+  "note": "Everything from the axis on is one row, so this normalizes twelve values at a time."
+}

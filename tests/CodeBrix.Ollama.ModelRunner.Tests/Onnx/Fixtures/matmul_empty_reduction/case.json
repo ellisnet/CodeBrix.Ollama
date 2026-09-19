@@ -1,0 +1,35 @@
+{
+  "name": "matmul_empty_reduction",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        3,
+        0
+      ],
+      "file": "in_a.bin"
+    },
+    {
+      "name": "b",
+      "type": "float",
+      "shape": [
+        0,
+        4
+      ],
+      "file": "in_b.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        3,
+        4
+      ],
+      "file": "out_y.bin"
+    }
+  ]
+}

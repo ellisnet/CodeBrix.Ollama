@@ -1,0 +1,39 @@
+{
+  "name": "skip_simplified_layer_normalization",
+  "opset": 21,
+  "inputs": [
+    {
+      "name": "input",
+      "type": "float",
+      "shape": [
+        2,
+        3,
+        8
+      ],
+      "file": "in_input.bin"
+    },
+    {
+      "name": "skip",
+      "type": "float",
+      "shape": [
+        2,
+        3,
+        8
+      ],
+      "file": "in_skip.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "output",
+      "type": "float",
+      "shape": [
+        2,
+        3,
+        8
+      ],
+      "file": "out_output.bin"
+    }
+  ],
+  "note": "Only the normalized tensor is asked for."
+}

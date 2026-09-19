@@ -1,9 +1,11 @@
-using ModelQueryTool.Helpers;
 using CodeBrix.Platform.Simple;
 using Microsoft.Extensions.Logging;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Navigation;
+using ModelQueryTool.Helpers;
+using ModelQueryTool.ModelAccess;
+using ModelQueryTool.ModelRunning;
 using System;
 
 namespace ModelQueryTool;
@@ -26,8 +28,9 @@ public partial class App : Application
 
         SimpleServiceResolver.CreateInstance(HostHelper.GetHost(), services =>
         {
-            //Register the app's services here
-
+            //The two halves of the model: the files on disk, and the weights in memory
+            services.AddModelAccess();
+            services.AddModelRunning();
         });
         SimpleViewModel.SetIsDesignMode(false);
 
@@ -42,6 +45,10 @@ public partial class App : Application
         {
             Title = "ModelQueryTool"
         };
+
+        //Closing the window is the other way out of the application, beside /exit, and the model
+        //  holds many gibibytes of native memory - so it is put away here too.
+        MainWindow.Closed += (_, _) => UnloadModel();
 
         if (MainWindow.Content is not Frame rootFrame)
         {
@@ -61,6 +68,21 @@ public partial class App : Application
     void OnNavigationFailed(object sender, NavigationFailedEventArgs e)
     {
         throw new InvalidOperationException($"Failed to load {e.SourcePageType.FullName}: {e.Exception}");
+    }
+
+    // Unloads the model on the way out. The host is IAsyncDisposable and the container is never
+    // torn down synchronously, so the unload is awaited here, on the closing window's thread; every
+    // await inside the host is configured to need no context, so waiting for it cannot deadlock.
+    static void UnloadModel()
+    {
+        try
+        {
+            SimpleServiceResolver.Instance.GetService<IModelHost>().DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+        catch (Exception)
+        {
+            //The window is going regardless; there is nowhere left to report this to.
+        }
     }
 
     // Called from each head's Program.Main BEFORE building the host.

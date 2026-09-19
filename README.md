@@ -11,17 +11,25 @@ models in-process**, with no Ollama installation and no server:
   GGUF metadata, and resolves a model name to the GGUF files on disk. It also obtains models
   that no such registry serves - a Hugging Face file repository, any list of HTTPS addresses, a
   folder on disk - into the same store, and lays their files back out as the publisher wrote
-  them. It exports a model to ONNX and makes the graphs it holds several times smaller, keeping
-  each result in the same store with a record of what made it. Pure managed code.
+  them. It converts a checkpoint into a GGUF model a runner can load, stores a smaller,
+  quantized copy of a model that a quantizer the application supplies writes, exports a model to
+  ONNX and makes the graphs it holds several times smaller, keeping each result in the same store
+  with a record of what made it. Pure managed code.
 * **CodeBrix.Ollama.ModelRunner** - runs a GGUF model in-process over a self-built native
   inference engine, bound through hand-written P/Invoke and exposed to the application through
   an interface contract: completion, streaming chat through the model's own chat template, tool
   calling, separated reasoning, embeddings, grammar- and JSON-schema-constrained output,
-  tokenization and model metadata. One native library per supported platform ships inside the
-  package; nothing is downloaded and nothing is compiled on the machine.
+  tokenization and model metadata. The same engine rewrites a model file at a smaller
+  quantization, so making a model smaller needs nothing installed either. One native library per
+  supported platform ships inside the package; nothing is downloaded and nothing is compiled on
+  the machine. It **also runs ONNX models**, on a pure-managed interpreter inside the same
+  package: tensors in and tensors out for a graph of your own, MIDI music streamed event by
+  event as it is written, or text through the same interface contract - with nothing installed
+  at all and nothing native, so it runs wherever .NET runs.
 
 The two packages do not depend on each other. An application asks ModelManager for the path of
-a model and hands that path to ModelRunner, or to any other in-process GGUF runner.
+a model and hands that path to ModelRunner, or to any other in-process runner. The two are
+released together and should be installed at the same version.
 
 Both are provided as .NET 10 libraries and associated `*.MitLicenseForever` NuGet packages, and
 support applications and assemblies that target Microsoft .NET version 10.0 and later.
@@ -45,6 +53,9 @@ different - there are no packages named plain `CodeBrix.Ollama.ModelManager` or
   `CodeBrix.Ollama.ModelRunner` - i.e. `using CodeBrix.Ollama.ModelManager;` and
   `using CodeBrix.Ollama.ModelRunner;`
 
+The two packages are versioned and released together: when an application uses both, install
+them at the SAME version.
+
 The `.MitLicenseForever` suffix belongs to the package ID only; it never appears in a namespace, a
 using directive or a type name. Each library declares exactly one namespace, and every public type
 lives in it - the folders you see in the repository are file organization, not namespaces.
@@ -52,16 +63,20 @@ lives in it - the folders you see in the repository are file organization, not n
 XML documentation (IntelliSense) ships alongside each assembly.
 
 ModelRunner has no NuGet dependencies at all: its dependency group is empty and it pulls in
-nothing but the .NET runtime. ModelManager has exactly one, `CodeBrix.Python`, and it is inert -
-nothing of it is loaded until you use a Python feature, and obtaining, listing, resolving and
-materializing models are not Python features. Everything else in both libraries is in-box:
-downloads go through `HttpClient`, JSON through `System.Text.Json` and hashing through
-`System.Security.Cryptography`.
+nothing but the .NET runtime - and that stays true of running ONNX models, which is managed code
+inside the package and needs no runtime, no interpreter and no native library. ModelManager has
+exactly one, `CodeBrix.Python`, and it is inert - nothing of it is loaded until you use a Python
+feature, and obtaining, listing, resolving and materializing models are not Python features, nor
+is converting a checkpoint to GGUF, nor is making an existing ONNX graph smaller. Everything else
+in both libraries is in-box: downloads go through `HttpClient`, JSON through `System.Text.Json`
+and hashing through `System.Security.Cryptography`.
 
 The ModelRunner package additionally carries a native inference library for each supported
 runtime identifier, in the standard NuGet `runtimes/<rid>/native/` layout - `win-x64`,
 `win-arm64`, `osx-x64`, `osx-arm64`, `linux-x64`, `linux-arm64` and `linux-riscv64`. NuGet gives
 your application the one it needs. There is no build-time compilation and no run-time download.
+That library is for GGUF models only; nothing of it is loaded to run an ONNX model, which is why
+that road works on a platform with no native library in the package at all.
 
 ## CodeBrix.Ollama.ModelManager supports:
 
@@ -81,6 +96,13 @@ your application the one it needs. There is no build-time compilation and no run
   records what made it and from what: the graphs a publisher already ships are passed through with
   no conversion and no Python at all, and a checkpoint is converted by the ONNX Runtime GenAI model
   builder or by Hugging Face Optimum, running in a CPython the machine already has
+* Converting a checkpoint into a GGUF model with **nothing installed at all**: the weights a
+  publisher ships - `safetensors` or PyTorch containers, one file or many - are read by this
+  library's own managed code, mapped on to the tensor names the native inference engine expects
+  and written as an ordinary GGUF model in the same store, which `ResolveAsync` then hands to a
+  runner like any other. No Python and no publisher tooling; tensors are read one at a time and
+  written as they are read, so a checkpoint of several gigabytes converts in a process that
+  holds a tensor's worth of buffers rather than a file's
 * Reducing the ONNX graphs a bundle holds - dynamic INT8, or block-wise four- or eight-bit
   weights - into another derived bundle a few times smaller than the one it came from, with the
   files that are not graphs carried through unchanged and the settings recorded; a reduced model
@@ -90,6 +112,11 @@ your application the one it needs. There is no build-time compilation and no run
   library's own managed ONNX codec and quantizer - no Python, no native library - and write the
   same bytes ONNX Runtime's own tools write for the same model, which the test suite checks
   against real published models file by file
+* Storing a **quantized copy of a GGUF model** in the same store, under `<name>:gguf-<type>`, with
+  the source's template, parameters, messages and licence carried over and the provenance
+  recorded. The quantizer is a delegate the application supplies - this package depends on no
+  inference engine, so the one line that joins it to CodeBrix.Ollama.ModelRunner is written in the
+  application's own code
 * Reporting the licence a publisher states - the identifier, the address it was read from, and
   the `LICENSE` text a bundle ships - and applying no rule of its own
 * A store directory interchangeable with a real Ollama install's `~/.ollama/models` (the default
@@ -109,8 +136,8 @@ your application the one it needs. There is no build-time compilation and no run
   takes a `CancellationToken` as its last parameter
 
 Not in this package: running a model, rendering chat templates, pushing to a registry,
-safetensors layers in an Ollama manifest, loading a checkpoint itself rather than driving the
-publisher's own export tooling, deciding anything about a licence, or any HTTP server.
+safetensors layers in an Ollama manifest, exporting a checkpoint to ONNX without the publisher's
+own tooling, deciding anything about a licence, or any HTTP server.
 
 ## CodeBrix.Ollama.ModelRunner supports:
 
@@ -136,14 +163,37 @@ publisher's own export tooling, deciding anything about a licence, or any HTTP s
 * LoRA adapters applied at load or swapped at run time, a progress callback for long loads,
   cancellation that interrupts even a large model's prompt evaluation, and a log handler
   (`ModelRunner.SetLogHandler`) that hands you the engine's own output
+* Rewriting a GGUF file at a smaller quantization (`ModelRunner.QuantizeAsync`) with the same
+  engine that runs it and **nothing installed** - `Q4_K_M`, `Q8_0`, `Q6_K` and the rest, byte for
+  byte what the engine's own command-line quantizer writes, with no partial file ever left behind
 * Public utilities you can use on their own, with no model loaded: `JinjaTemplate`,
   `OllamaTemplate`, `ThinkingParser`, `ToolCallParser`, `ToolCallFormat` and `JsonSchemaGrammar`
+* **Running an ONNX graph with nothing installed at all** - no ONNX runtime, no Python, no native
+  library and no NuGet dependency: the interpreter, its operators, the tokenizer and the model
+  drivers are managed code inside the package, so a graph runs wherever .NET runs, on the CPU.
+  `OnnxModel.LoadAsync` is the raw surface - tensors in by name, tensors out by name, with the
+  graph's own metadata, and a decoder's key/value cache fed from one step to the next without a
+  byte being copied. Full-precision and quantized graphs alike; a four-bit graph keeps four-bit
+  weights in memory
+* **Generating MIDI music from an ONNX music model** (`MidiGenerationModel`), streamed as it is
+  written: every event carries its absolute position in ticks, a note carries its own length, and
+  each one says how far the piece is settled - so an application can start playing the beginning
+  of a piece whose end does not exist yet, and save the whole of it as a Standard MIDI File
+  afterwards. It can also continue a piece read from a file
+* **Generating text from an ONNX bundle** (`OnnxCausalLmModel`), through the same `IRunningModel`
+  contract, the same `GenerationOptions` and the same `SamplingOptions` as the rest of the
+  package, with a managed byte-level byte-pair tokenizer read from the bundle's own files. What a
+  bundle cannot honour - chat templates, embeddings, adapters and grammar-constrained output - is
+  refused by name rather than answered wrongly
 * The same async-only API rule: `Task`, `Task<T>` or `IAsyncEnumerable<T>`, with a
   `CancellationToken` last
 
 Not in this package: an HTTP server or client, multimodal (vision or audio) models, speculative
-decoding with a draft model, quantizing or writing model files, session save and restore, or
-serving many conversations from one loaded model at once.
+decoding with a draft model, converting a training framework's checkpoint into a model file or
+making an ONNX graph smaller (that is the other package's work), keeping a store of models,
+session save and restore, serving many conversations from one loaded model at once, training, or
+running an ONNX graph on an accelerator - that road is CPU-only by design, because that is what
+runs everywhere with nothing installed.
 
 ## Requirements
 
@@ -153,13 +203,27 @@ serving many conversations from one loaded model at once.
   bundle's files come from, for pulls only.
   Everything else works offline against the local store. Disk space for the store; a pull writes
   to the store directory and nowhere else.
-* For ModelManager's ONNX features: converting a checkpoint needs a CPython shared library on the
-  machine with the export tooling installed in it, and the library says which module is missing and
-  how to install it when one is not. Passing a publisher's own ONNX graphs through, and making an
-  existing graph smaller with block-wise four- or eight-bit weights, need nothing installed.
+* For ModelManager's ONNX features: exporting a checkpoint to ONNX needs a CPython shared library
+  on the machine with the export tooling installed in it, and the library says which module is
+  missing and how to install it when one is not. Passing a publisher's own ONNX graphs through, and
+  making an existing graph smaller with block-wise four- or eight-bit weights, need nothing
+  installed.
+* For ModelManager's GGUF conversion: nothing at all. It is pure managed code - no CPython, no pip
+  module, no native library - even though what it reads is a checkpoint written by a training
+  framework. Point `TMPDIR` at a real file system if yours is in memory; the file it writes is as
+  large as the model.
+* For ModelRunner's quantization: nothing at all - the quantizer is the engine already inside the
+  package. Room beside the output for a second copy of the model, and patience: it reads the whole
+  model and writes a whole new one.
 * For ModelRunner: a GGUF file on disk, and enough memory for it. Memory mapping is the default
   load mode, so the weights are paged in on demand rather than read in, and a 20 GB model runs on
   a 32 GiB machine. No GPU is required - CPU-only inference is the tested path.
+* For ModelRunner's ONNX models: nothing at all - no runtime, no Python, no native library and no
+  package. The files of the model on disk, and memory for the graph's weights plus a little
+  working room; the peak while a graph is read has been measured at up to about twice what the
+  loaded graph then settles at, so size for the load and not for the steady state. It runs on
+  every platform .NET runs on, including ones this package ships no native library for, because
+  that road never loads one.
 
 ## Sample Code
 
@@ -233,6 +297,62 @@ Console.WriteLine($"{info.Tool} {info.ToolVersion} made this from {info.DerivedF
 
 foreach (var path in await store.MaterializeAsync(reduced.Name, "/work/example-model-int4"))
     Console.WriteLine(path);
+```
+
+### Convert a Checkpoint to a GGUF Model
+
+```csharp
+using CodeBrix.Ollama.ModelManager;
+
+using var store = new ModelStore();
+
+// The publisher's own files, then the conversion. Nothing is installed for either
+// step, and no interpreter is started: the readers, the tokenizer and the GGUF
+// writer are this library's own managed code.
+const string name = "hf.co/example-org/example-model";
+await foreach (var progress in store.PullAsync(
+    name, PullOptions.ForHuggingFace(null, null, FileFilter.ExcludeTrainingArtifacts)))
+{
+    Console.WriteLine(progress.Status);
+}
+
+ConvertResult result = await store.ConvertToGgufAsync(name);
+
+Console.WriteLine($"{result.Name}: {result.TensorCount} tensors, " +
+                  $"{result.OutputBytes} bytes, {result.TypeWritten}");
+
+// An ordinary GGUF model in the same store - resolve it and hand the path on.
+var resolved = await store.ResolveAsync(result.Name);
+Console.WriteLine(resolved.ModelPath);
+```
+
+### Make a Stored Model Smaller
+
+```csharp
+using CodeBrix.Ollama.ModelManager;
+using CodeBrix.Ollama.ModelRunner;
+
+using var store = new ModelStore();
+
+// The store finds the file, names the result and records where it came from; the
+// runner does the quantizing. Neither package references the other, so the line
+// that joins them is this one, here, in your code.
+QuantizeGgufResult result = await store.QuantizeGgufAsync(
+    "hf.co/example-org/example-model:gguf",
+    new QuantizeGgufOptions
+    {
+        Type = "q4_k_m",
+        Tool = "CodeBrix.Ollama.ModelRunner",
+        Quantizer = (input, output, ct) => ModelRunner.QuantizeAsync(
+            input, output, GgufQuantizationType.Q4_K_M, null, ct),
+    });
+
+Console.WriteLine($"{result.Name}: {result.SourceBytes} -> {result.OutputBytes} bytes");
+
+// An ordinary model in the same store - about a third of the size, and it loads.
+var resolved = await store.ResolveAsync(result.Name);
+await using IRunningModel model = await ModelRunner.LoadAsync(
+    new ModelRunnerOptions { ModelPath = resolved.ModelPath });
 ```
 
 ### Describe What Is in the Store
@@ -359,6 +479,63 @@ GenerationResult result = await model.GenerateToEndAsync(
 Console.WriteLine(result.Text);   // parses the first time; the grammar saw to that
 ```
 
+### Run an ONNX Model, with Nothing Installed
+
+```csharp
+using CodeBrix.Ollama.ModelRunner;
+
+// A graph of your own: tensors in by name, tensors out by name.
+await using IOnnxModel graph = await OnnxModel.LoadAsync("/models/example/model.onnx");
+
+foreach (OnnxValueMetadata input in graph.Metadata.Inputs)
+    Console.WriteLine($"{input.Name} {input.ElementType}");
+
+var outputs = graph.Run(new Dictionary<string, OnnxTensor>
+{
+    ["input_ids"] = OnnxTensor.FromInt64(new long[] { 1, 2, 3 }, 1, 3),
+});
+
+Console.WriteLine(outputs["logits"].Floats.Length);
+
+// Or text, through the same contract the GGUF road hands back.
+await using IOnnxCausalLmModel model =
+    await OnnxCausalLmModel.LoadFromDirectoryAsync("/models/example-onnx");
+
+GenerationResult result = await model.GenerateToEndAsync(
+    "the prompt", new GenerationOptions { MaxTokens = 64 });
+
+Console.WriteLine(result.Text);
+```
+
+### Generate MIDI Music and Start Playing It Before It Is Finished
+
+```csharp
+using CodeBrix.Ollama.ModelRunner;
+
+await using IMidiGenerationModel model =
+    await MidiGenerationModel.LoadFromDirectoryAsync("/models/example-midi-onnx");
+
+var options = new MidiGenerationOptions { MaximumEvents = 512, Seed = 42 };
+var events = new List<MidiEvent>();
+
+// `player` is YOUR OWN streaming MIDI player - nothing in this package knows about
+// one. Events arrive AS THEY ARE MADE, and a model may write music more slowly than
+// it is played, so buffer enough of the piece before you start it; HorizonTicks is
+// how far the piece is settled, and channels here are 0-15, so a player numbering
+// them 1-16 adds one.
+await foreach (MidiEvent e in model.GenerateAsync(options))
+{
+    events.Add(e);
+
+    if (e.Kind == MidiEventKind.Note)
+        player.AppendNote(e.Tick, e.Channel + 1, e.NoteNumber, e.Velocity, e.DurationTicks);
+
+    player.SettledThrough(e.HorizonTicks);
+}
+
+await model.SaveAsync("/tmp/piece.mid", events);
+```
+
 ### Pair the Two Packages
 
 ```csharp
@@ -374,6 +551,27 @@ await using IRunningModel model = await ModelRunner.LoadAsync(new ModelRunnerOpt
     OllamaTemplate = resolved.Template,   // the Modelfile TEMPLATE text
 });
 ```
+
+An ONNX model is many files rather than one, so the seam is a name-to-path pair per file -
+still nothing but strings, and still written here in your own code:
+
+```csharp
+using CodeBrix.Ollama.ModelManager;
+using CodeBrix.Ollama.ModelRunner;
+
+using var store = new ModelStore();
+var resolved = await store.ResolveAsync("example/midi-model:onnx");
+
+var files = new Dictionary<string, string>();
+foreach (ResolvedFile file in resolved.Files)
+    files[file.Name] = file.BlobPath;     // nothing is copied or laid out first
+
+await using IMidiGenerationModel model =
+    await MidiGenerationModel.LoadFromFilesAsync(files);
+```
+
+Neither package references the other, in either direction and at either level. They are
+released together, so install both at the same version.
 
 ## Documentation
 

@@ -1,0 +1,50 @@
+{
+  "name": "slice_of_empty",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        0,
+        4
+      ],
+      "file": "in_a.bin"
+    },
+    {
+      "name": "starts",
+      "type": "int64",
+      "shape": [
+        1
+      ],
+      "file": "in_starts.bin"
+    },
+    {
+      "name": "ends",
+      "type": "int64",
+      "shape": [
+        1
+      ],
+      "file": "in_ends.bin"
+    },
+    {
+      "name": "axes",
+      "type": "int64",
+      "shape": [
+        1
+      ],
+      "file": "in_axes.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        0,
+        4
+      ],
+      "file": "out_y.bin"
+    }
+  ]
+}

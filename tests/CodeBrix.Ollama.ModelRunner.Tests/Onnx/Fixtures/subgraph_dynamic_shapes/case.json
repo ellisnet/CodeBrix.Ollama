@@ -1,0 +1,28 @@
+{
+  "name": "subgraph_dynamic_shapes",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "x",
+      "type": "float",
+      "shape": [
+        3,
+        5
+      ],
+      "file": "in_x.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        3,
+        5,
+        5
+      ],
+      "file": "out_y.bin"
+    }
+  ],
+  "note": "Shape arithmetic on int64 tensors, which is how a graph resolves a length it was not told."
+}

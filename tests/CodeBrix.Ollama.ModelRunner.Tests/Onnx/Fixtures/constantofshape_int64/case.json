@@ -1,0 +1,25 @@
+{
+  "name": "constantofshape_int64",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "s",
+      "type": "int64",
+      "shape": [
+        2
+      ],
+      "file": "in_s.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "int64",
+      "shape": [
+        2,
+        2
+      ],
+      "file": "out_y.bin"
+    }
+  ]
+}

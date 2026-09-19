@@ -7,12 +7,19 @@ CodeBrix.Ollama.ModelRunner.MitLicenseForever NuGet package
 OVERVIEW
 ========
 CodeBrix.Ollama.ModelRunner is a cross-platform, zero-dependency .NET 10
-library that loads a GGUF model file and runs it IN YOUR OWN PROCESS, over a
-llama.cpp engine this repository builds itself and ships inside the package.
-There is no server to start, no daemon to talk to, no Ollama installation to
-find, no HTTP anywhere, and no NuGet dependency of any kind.
+library that loads a model file and runs it IN YOUR OWN PROCESS. There is no
+server to start, no daemon to talk to, no Ollama installation to find, no HTTP
+anywhere, and no NuGet dependency of any kind.
 
-What it does, through one interface:
+IT HAS TWO ROADS THROUGH IT, and which one you take is decided by the file you
+have. A GGUF file runs over a llama.cpp engine this repository builds itself
+and ships inside the package; an ONNX graph runs on an interpreter written in
+managed code inside the same assembly, which needs nothing installed at all and
+runs wherever .NET runs. The GGUF road is everything from here to QUANTIZING A
+GGUF MODEL below; the ONNX road is the one section RUNNING ONNX MODELS. They
+share the package and nothing else.
+
+What it does with a GGUF file, through one interface:
 
   1. COMPLETION -- stream tokens from a raw prompt, or wait for the whole
      text. Stop sequences, a token limit, and Ollama's sampling defaults.
@@ -25,6 +32,17 @@ What it does, through one interface:
   4. CONSTRAINED OUTPUT -- a GBNF grammar, or a JSON schema this library
      converts into one, so structured output comes back valid the first time
      rather than being validated and retried.
+  5. QUANTIZATION -- rewrite a GGUF file at a smaller type (Q4_K_M, Q8_0 and
+     the rest), with the same engine that runs it and nothing installed. The
+     file is byte for byte what the engine's own command-line quantizer
+     writes.
+
+And what it does with an ONNX graph, on managed code with NOTHING installed:
+
+  6. RUNNING AN ONNX GRAPH -- tensors in by name, tensors out by name, with
+     the graph's own metadata; a driver that generates MIDI music and streams
+     the events as it writes them; and a driver that generates TEXT through
+     the same IRunningModel contract. See RUNNING ONNX MODELS below.
 
 Everything that touches the engine is async and takes a CancellationToken
 last, with a default. The template engines, the parsers and the schema-to-
@@ -41,7 +59,8 @@ CodeBrix.Ollama.ModelManager.MitLicenseForever, which keeps a local model
 store in exactly Ollama's on-disk layout, pulls models into it and resolves a
 model name to the files on disk. It has its own AGENT-README, and nothing in
 this document describes its API. The two packages are independent -- neither
-references the other -- and the seam between them is a FILE PATH:
+references the other -- and the seam between them is a FILE PATH (or, for a
+bundle of several files, a name-to-path pair per file; see RUNNING ONNX MODELS):
 
     ResolvedModel resolved = await store.ResolveAsync("smollm:135m");
 
@@ -68,6 +87,11 @@ CodeBrix.Ollama.ModelRunner. NuGet dependencies: NONE -- the dependency group
 is empty, JSON goes through the in-box System.Text.Json, and the native
 engine is inside the package. License: MIT, with license acceptance required.
 
+THE TWO CodeBrix.Ollama PACKAGES ARE VERSIONED AND RELEASED TOGETHER. If your
+application also uses CodeBrix.Ollama.ModelManager.MitLicenseForever, install
+both at the SAME version. A mixture builds without complaint and then fails at
+run time with a message telling you to do exactly this.
+
 THE PACKAGE CARRIES NATIVE CODE, one library per runtime identifier, in the
 standard NuGet runtimes/<rid>/native/ layout: win-x64, win-arm64, osx-x64,
 osx-arm64, linux-x64, linux-arm64 and linux-riscv64. Nothing is downloaded at
@@ -90,14 +114,17 @@ KEY NAMESPACES / USINGS
     using CodeBrix.Ollama.ModelRunner;   // EVERY public type in the package
 
 That is the whole story. The library declares ONE namespace and every public
-type lives in it. The repository folders (Contracts/, Options/, Common/,
-Native/, Engine/, Templates/Jinja/, Templates/OllamaGo/, Parsing/, Grammar/)
-are FILE ORGANIZATION ONLY, not namespaces: `using
-CodeBrix.Ollama.ModelRunner.Engine;` is a CS0246 error. Everything under
-Native/ and Engine/ is internal -- the P/Invoke surface, the worker thread and
-the decode loop are reached only through ModelRunner and IRunningModel. You
-will also want the ordinary framework usings: System,
-System.Collections.Generic, System.Threading and System.Threading.Tasks.
+type lives in it, on BOTH roads -- the ONNX types are in the same namespace as
+the GGUF ones and need no second using. The repository folders (Contracts/,
+Options/, Common/, Native/, Engine/, Templates/Jinja/, Templates/OllamaGo/,
+Parsing/, Grammar/, Onnx/, Drivers/, Midi/, Tokenizers/) are FILE ORGANIZATION
+ONLY, not namespaces: `using CodeBrix.Ollama.ModelRunner.Engine;` is a CS0246
+error. Everything under Native/, Engine/, Onnx/, Drivers/, Midi/ and
+Tokenizers/ is internal -- the P/Invoke surface, the worker thread, the decode
+loop, the ONNX interpreter, its operators and the two model drivers are reached
+only through the public entry points and their interfaces. You will also want
+the ordinary framework usings: System, System.Collections.Generic,
+System.Threading and System.Threading.Tasks.
 
 NAMING SHARP EDGE. The static entry point is called ModelRunner and so is the
 last segment of the namespace. That is not a conflict in ordinary code:
@@ -158,6 +185,12 @@ hands back:
     STRUCTURED OUTPUT               JSON, schemas and GBNF grammars
     EMBEDDINGS                      one vector per input, and the limits
     LoRA ADAPTERS                   applying and replacing them
+    QUANTIZING A GGUF MODEL         a smaller file, with nothing installed
+    RUNNING ONNX MODELS             the other road: a managed interpreter,
+                                    a MIDI driver and a text driver
+    THREADS: HOW MANY ARE USED, AND HOW TO CONTROL IT
+                                    both roads: the defaults, Threads,
+                                    BatchThreads and MaxThreads
     THE CACHE, CANCELLATION AND THREADS   what is coordinated, what is not
     LOGGING                         SetLogHandler and what the engine says
     MEMORY AND SPEED                what to set for a model that barely fits
@@ -169,12 +202,17 @@ hands back:
 
 THE ModelRunner STATIC CLASS
 ============================
-Four members, and they are the only way into the engine.
+Five members, and they are the only way into the engine.
 
     static Task<IRunningModel> LoadAsync(ModelRunnerOptions options,
                                          CancellationToken)
     static Task<ModelDetails>  ProbeAsync(string modelPath,
                                           CancellationToken)
+    static Task<QuantizeResult> QuantizeAsync(string inputPath,
+                                              string outputPath,
+                                              GgufQuantizationType type,
+                                              QuantizeOptions options,
+                                              CancellationToken)
     static NativeRuntimeInfo   GetNativeRuntimeInfo()
     static void SetLogHandler(Action<ModelRunnerLogLevel, string> handler)
 
@@ -212,6 +250,12 @@ no such file or the engine cannot read it as a model. The probe loads the
 file's metadata with the engine's "simulate the allocations" flag, and falls
 back to a vocabulary-only load for a file that will not open that way, so a
 file with unusual tensors is still described.
+
+QuantizeAsync
+-------------
+Reads a GGUF file and writes a smaller one at another quantization. It needs
+nothing installed, changes nothing about the input file, and is described in
+full under QUANTIZING A GGUF MODEL below.
 
 GetNativeRuntimeInfo
 --------------------
@@ -257,8 +301,12 @@ and is NOT the same as zero.
                                           enormous; set it for such models
     uint     BatchSize          = 2048    logical batch, tokens per call
     uint     PhysicalBatchSize  = 512     physical batch; must be <= BatchSize
-    int?     Threads            = null    null -> the physical core count
-    int?     BatchThreads       = null    null -> the same as Threads
+    int?     Threads            = null    generation; null -> the physical
+                                          core count. See THREADS below
+    int?     BatchThreads       = null    prompt processing; null -> whatever
+                                          Threads resolved to
+    int?     MaxThreads         = null    a ceiling on what the library picks
+                                          BY ITSELF; null -> no ceiling
     FlashAttentionMode FlashAttention = Auto | Disabled | Enabled
     KvCacheType KeyCacheType    = Default   Default F32 F16 BF16 Q8_0 Q4_0
     KvCacheType ValueCacheType  = Default
@@ -279,8 +327,8 @@ and is NOT the same as zero.
 
 VALIDATED BEFORE ANYTHING NATIVE IS TOUCHED: a blank ModelPath, a zero
 BatchSize, PhysicalBatchSize or MaxSequences, a PhysicalBatchSize larger than
-BatchSize, a ContextSize of 0, a Threads or BatchThreads below 1, and a
-LoraAdapterOptions with no path, are all ArgumentException. A ModelPath or an
+BatchSize, a ContextSize of 0, a Threads, BatchThreads or MaxThreads below 1,
+and a LoraAdapterOptions with no path, are all ArgumentException. A ModelPath or an
 adapter path that names no file is ModelLoadException. Nothing has been
 allocated by the time either is thrown.
 
@@ -304,9 +352,12 @@ hundreds of thousands of tokens; for anything above a few billion parameters,
 set it. KeyCacheType and ValueCacheType are the second dial: Q8_0 halves the
 cache against the F16 default for a small loss of accuracy.
 
-THREADS. The default is the number of PHYSICAL cores, not logical ones,
-because hyperthreads do not help a memory-bound matrix multiply and usually
-hurt. Set Threads explicitly when the process shares the machine.
+THREADS. Leave Threads, BatchThreads and MaxThreads null and this road uses one
+thread per PHYSICAL core, which is right for most applications. Set Threads
+when you know the machine; set MaxThreads when you do not and want a ceiling
+anyway. THREADS: HOW MANY ARE USED, AND HOW TO CONTROL IT, below, is the whole
+of it for both roads -- the rule, the precedence, the examples and how to
+measure your own machine.
 
 UseExtraBufferTypes lets the CPU backend repack the weights into its faster
 layouts at load time. It is true by default and it costs a second copy of much
@@ -913,6 +964,1347 @@ before LoadAsync returns, and a missing adapter file is caught in validation
 before anything is allocated.
 
 
+QUANTIZING A GGUF MODEL
+=======================
+A quantized model is the same model with its weights written at fewer bits per
+value. It is smaller on disk, loads faster, needs less memory and generates
+faster; it also generates slightly differently, because rounding the weights
+changes the arithmetic. QuantizeAsync does that rewrite with the engine that
+is already inside this package.
+
+    QuantizeResult result = await ModelRunner.QuantizeAsync(
+        "/models/mymodel-f16.gguf",
+        "/models/mymodel-q4_k_m.gguf",
+        GgufQuantizationType.Q4_K_M);
+
+    Console.WriteLine($"{result.InputBytes:N0} -> {result.OutputBytes:N0}"
+                      + $" in {result.Elapsed.TotalSeconds:F1} s");
+
+NOTHING IS INSTALLED AND NOTHING IS FETCHED. The quantizer is the native
+engine this package ships, the same one that runs a model, so there is no tool
+to download, no Python, and no second copy of anything. With no options the
+call writes, byte for byte, the file the engine's own command-line quantizer
+writes for the same input and the same type.
+
+WHICH TYPE
+----------
+GgufQuantizationType carries the engine's own file types, with the engine's
+own numbers. The ones worth knowing:
+
+    Q8_0     about 53% of an F16 file; all but indistinguishable from it
+    Q6_K     about 41%; very close
+    Q5_K_M   about 37%
+    Q4_K_M   about 32%; the usual choice when a model has to be made smaller
+    Q4_0     about 31%; older and simpler than Q4_K_M, and measurably worse
+    F16 / BF16 / F32    not quantizations at all, but written through the
+                        same call, which is how a BF16 file becomes an F16 one
+
+The rest are there too: Q4_1, Q5_0, Q5_1, Q2_K, Q2_K_S, Q3_K_S/M/L, Q4_K_S,
+Q5_K_S, TQ1_0, TQ2_0, MXFP4_MOE, Q1_0, Q2_0 and the IQ family (IQ1_S, IQ1_M,
+IQ2_XXS, IQ2_XS, IQ2_S, IQ2_M, IQ3_XXS, IQ3_XS, IQ3_S, IQ3_M, IQ4_NL,
+IQ4_XS). A value that is not a member of the enumeration is
+ArgumentOutOfRangeException; the engine writes no others.
+
+A "K" type is a mixture on purpose: the engine writes the tensors that matter
+most at the next type up, which is the whole difference between Q4_K_S and
+Q4_K_M. The IQ types are smaller still and are meant to be given an importance
+matrix, which this API does not take -- without one the engine quantizes some
+of their tensors with more bits, so an IQ file made here is larger and better
+than one made with a matrix.
+
+QuantizeOptions
+---------------
+All three default to what the engine itself defaults to, so a null options
+object and a `new QuantizeOptions()` produce the same file.
+
+    int  Threads          = 0      0 (or less) -> one per hardware thread
+    bool AllowRequantize  = false  quantize weights that are already quantized
+    bool Pure             = false  write every tensor at the one type, turning
+                                   the k-quant mixture off
+
+Threads changes how long the work takes and never what is written: each thread
+quantizes whole rows of its own. AllowRequantize is what a source that is
+already Q8_0 needs before it can be made Q4_K_M, and quantizing twice loses
+far more than quantizing once -- go back to the F16 or BF16 file if there is
+one. Pure makes the file smaller and the model measurably worse.
+
+The engine has more switches than these (an importance matrix, per-tensor and
+per-layer type overrides, metadata overrides, layer pruning, a dry run,
+leaving the output tensor alone, writing the result as several shards). They
+are deliberately not here: each needs a file format of its own or changes what
+the output of one call IS, and a caller who needs them wants the engine's own
+tool. Everything not settable stays at the engine's default.
+
+QuantizeResult
+--------------
+    string InputPath / OutputPath   the two files, as full paths
+    GgufQuantizationType Type       what was written
+    long   InputBytes / OutputBytes the two sizes
+    TimeSpan Elapsed                the native call alone
+
+WHAT IT COSTS
+-------------
+It reads the whole model and writes a whole second one, so the output's
+directory needs room for both and the work is bounded by the disk and the
+CPU -- on a modern laptop, roughly a second per 400 MB of input at Q4_K_M and
+less at Q8_0. There is no progress report and nothing is streamed; what the
+engine has to say goes to the handler SetLogHandler installed, which is where
+to watch a long quantization.
+
+CANCELLATION IS HONOURED BEFORE THE ENGINE STARTS AND NOT AFTER. The native
+quantizer offers no way to interrupt it, so a token cancelled while it runs is
+noticed only when it returns: the call runs to the end and the file is
+written. This is stated plainly rather than hidden behind a token that looks
+like it works. A caller that must be able to stop should quantize in a process
+of its own.
+
+NO PARTIAL FILE IS EVER LEFT AT THE OUTPUT PATH. The engine is given a file of
+its own beside the output, and that file is moved into place only when the
+call has returned success; a failure removes it and leaves a file that was
+already at the output path exactly as it was. The output's directory must
+exist -- DirectoryNotFoundException when it does not -- because the move is a
+rename within it.
+
+WHAT IT REFUSES
+---------------
+ArgumentException for a path that is not set and for an output path that names
+the input file, ArgumentOutOfRangeException for a type the engine does not
+write, FileNotFoundException when there is no input file,
+DirectoryNotFoundException for an output directory that is not there, and
+ModelLoadException when the engine will not do the work -- the file is not a
+GGUF model, its weights are already quantized and AllowRequantize is not set,
+or it could not be written. The engine's own last words are on that
+exception's message, as they are for a failed load.
+
+STORING THE RESULT
+------------------
+This package writes a file and says nothing about where models live. The
+separate CodeBrix.Ollama.ModelManager package has QuantizeGgufAsync, which
+takes the quantizer as a DELEGATE and puts the result away as a model of its
+own with its provenance recorded. The two never reference each other, so the
+consumer writes the one line that joins them:
+
+    await store.QuantizeGgufAsync("mymodel:gguf", new QuantizeGgufOptions
+    {
+        Type = "q4_k_m",
+        Tool = "CodeBrix.Ollama.ModelRunner",
+        Quantizer = (input, output, ct) => ModelRunner.QuantizeAsync(
+            input, output, GgufQuantizationType.Q4_K_M, null, ct),
+    });
+
+
+RUNNING ONNX MODELS
+===================
+This package also runs ONNX graphs, on an interpreter written in managed code
+INSIDE the package. Everything above this section is about GGUF files and the
+native engine; everything in this section is a separate road through the same
+package, and the two never meet.
+
+NOTHING IS INSTALLED AND NOTHING IS FETCHED. There is no ONNX runtime to
+install, no Python, no pip module, no publisher tooling and no native library
+of the engine's own: the graph reader, the operators, the two model drivers,
+the tokenizer and the Standard MIDI File writer are all managed code in this
+assembly. The package still declares NO NuGet dependencies. So a graph runs
+wherever .NET 10 runs -- including a runtime identifier this package ships no
+native for, because this road never loads one.
+
+WHAT IT COSTS. The arithmetic is done on the CPU with the widest vector
+instructions the processor offers, and there is no accelerator path: a graph
+runs at processor speed and nothing offloads. Expect it to be in the same
+order as a specialized CPU runtime on a decoder of a few hundred million
+parameters, and expect a GGUF file of the same model through the native engine
+to be faster -- that road is what this package is built around, and this one is
+what runs when nothing may be installed. Memory is the graph's own weights plus
+a small pool of working buffers: a four-bit graph really does hold four-bit
+weights, because a packed weight is unpacked inside the multiply and never
+expanded in memory. LOADING COSTS MORE THAN RUNNING DOES, briefly: while a
+large full-precision graph is being read the peak is roughly twice what the
+loaded graph then settles at, and for a small or four-bit graph it is a larger
+multiple of a much smaller figure, so a machine sized for the steady figure
+alone can fail on the load of the largest graph. Load the largest one first if
+you load several.
+
+THREADS. OnnxRunnerOptions.Threads defaults to a count the engine works out
+from the processor -- the PERFORMANCE cores where the operating system says
+which cores are which, and the physical cores where they are all alike -- and
+OnnxRunnerOptions.MaxThreads is how an application that ships to machines it
+has never seen puts a ceiling on that without naming a count. THREADS: HOW MANY
+ARE USED, AND HOW TO CONTROL IT, below, is the whole of it for both roads: the
+rule, why this road's default differs from the GGUF road's, the precedence,
+the examples and how to measure your own machine.
+
+    THE THREE ENTRY POINTS        which to use, and when
+    OnnxModel                     the raw surface: tensors in, tensors out
+    MidiGenerationModel           MIDI music, streamed as it is written
+    OnnxCausalLmModel             text, through this package's own
+                                  IRunningModel contract
+    LOADING BY PATH               and the two-package example
+    STREAMING MIDI TO A PLAYER    the consumer-side loop, in full
+    WHAT IS SUPPORTED AND WHAT IS REFUSED
+    HOW CLOSE THE NUMBERS ARE
+    WHAT BELONGS TO YOU AND NOT TO THIS PACKAGE
+
+WHICH ENTRY POINT TO USE
+------------------------
+    OnnxModel            You have a graph and you know what to feed it. It
+                         runs the graph and hands back what the graph
+                         computes -- no tokens, no sampling, no cache. Use it
+                         for a model whose family this package has no driver
+                         for, for a step of your own around a driver, or to
+                         look at what a graph declares.
+    MidiGenerationModel  The bundle is a two-graph MIDI model. Use it to
+                         generate music: it drives both graphs, samples,
+                         keeps the caches and hands you musical EVENTS as it
+                         makes them.
+    OnnxCausalLmModel    The bundle is a text decoder with a generation
+                         configuration beside it. Use it to generate text:
+                         it tokenizes, prefills, decodes, samples and stops,
+                         through the same IRunningModel contract the rest of
+                         this package uses.
+
+Each driver decides what it can do from what the BUNDLE says about itself, and
+refuses by name what it cannot. Nothing about any particular publisher's model
+is built into the engine.
+
+OnnxModel AND IOnnxModel -- THE RAW SURFACE
+-------------------------------------------
+    static Task<IOnnxModel> LoadAsync(string modelPath,
+            OnnxRunnerOptions options = null, CancellationToken)
+    static Task<IOnnxModel> LoadFromDirectoryAsync(string bundleDirectory,
+            string modelFileName, OnnxRunnerOptions options = null,
+            CancellationToken)
+    static Task<IOnnxModel> LoadFromFilesAsync(
+            IReadOnlyDictionary<string, string> files, string modelFileName,
+            OnnxRunnerOptions options = null, CancellationToken)
+
+Three named methods rather than three overloads, because the call site then
+says which one it means. The first takes one .onnx file and finds any side
+file it names beside it; the second takes a directory and the graph's name
+inside it, which may name a sub-folder ("onnx/model_base.onnx"); the third
+takes (logical file name -> path) pairs, which is what a content-addressed
+store needs, since it keeps every file under a digest rather than under the
+publisher's name for it.
+
+    IOnnxModel : IDisposable, IAsyncDisposable
+        OnnxModelMetadata  Metadata { get; }
+        OnnxRunnerOptions  Options  { get; }   // defaults resolved
+        IReadOnlyDictionary<string, OnnxTensor> Run(
+                IReadOnlyDictionary<string, OnnxTensor> inputs)
+        Task<IReadOnlyDictionary<string, OnnxTensor>> RunAsync(
+                IReadOnlyDictionary<string, OnnxTensor> inputs,
+                CancellationToken)
+
+Run is SYNCHRONOUS because it is pure computation and touches no I/O; RunAsync
+is the same work on a thread pool thread, for a caller who must not be blocked.
+Its token is honoured BETWEEN nodes -- a run already inside one large matrix
+multiply finishes that node first.
+
+    await using IOnnxModel model = await OnnxModel.LoadAsync(
+        "/models/example/model.onnx",
+        new OnnxRunnerOptions { Threads = 8 });
+
+    foreach (OnnxValueMetadata input in model.Metadata.Inputs)
+        Console.WriteLine($"{input.Name} {input.ElementType} " +
+                          string.Join(",", input.Shape));
+
+    Dictionary<string, OnnxTensor> inputs = new Dictionary<string, OnnxTensor>
+    {
+        ["input_ids"] = OnnxTensor.FromInt64(new long[] { 1, 2, 3 }, 1, 3),
+    };
+
+    IReadOnlyDictionary<string, OnnxTensor> outputs = model.Run(inputs);
+    float[] logits = outputs["logits"].Floats;
+
+OnnxTensor -- AN ELEMENT TYPE, A SHAPE AND ONE ARRAY. Build one with
+FromFloats, FromInt32, FromInt64 or FromBooleans, each taking the array and
+then the shape as `params long[]`; read one back through ElementType, Shape,
+Count and whichever of Floats, Int32s, Int64s and Booleans matches its type
+(the other three are null). The elements are in row-major order and a rank of
+zero is a scalar. A dimension of ZERO is ordinary and not an error: it is how a
+cached decode step says it is adding no new positions, and every operator
+handles it.
+
+THE ARRAY IS NEVER COPIED, IN EITHER DIRECTION, and that is the point. A
+tensor you build keeps YOUR array and the engine reads it where it lies; a
+tensor a run hands back owns an array of exactly Count elements that the engine
+will not write to again. So a decoder's key/value cache costs nothing to carry
+forward:
+
+    // The graph's `present` outputs become the next step's `past` inputs.
+    // The same instances go back in; nothing is copied, whatever the size.
+    next["past_key_values.0.key"] = outputs["present.0.key"];
+
+The consequence is the usual one: do not write to an array you handed in while
+a run is in flight, and do not modify a tensor another run still reads.
+
+    OnnxElementType   Float = 1, UInt8 = 2, Int8 = 3, Int32 = 6, Int64 = 7,
+                      Bool = 9     -- the ONNX specification's own numbers
+
+UInt8 and Int8 are the QUANTIZED types and they behave differently from the
+rest: they live only INSIDE a quantized graph -- a weight the loader folded, or
+an activation between DynamicQuantizeLinear and MatMulInteger -- and an
+OnnxTensor does not carry them. A graph that declares one as its OWN input or
+output is refused at load, saying so.
+
+    OnnxModelMetadata  string GraphName, ProducerName, ProducerVersion;
+                       long IrVersion;
+                       IReadOnlyList<OnnxOpsetImport> Opsets;
+                       IReadOnlyList<OnnxValueMetadata> Inputs, Outputs;
+                       IReadOnlyList<string> Operators
+    OnnxValueMetadata  string Name; OnnxElementType ElementType;
+                       IReadOnlyList<OnnxDimension> Shape
+    OnnxDimension      long Length (-1 when the dimension is symbolic);
+                       string Symbol; bool IsFixed
+    OnnxOpsetImport    string Domain; long Version
+
+    OnnxRunnerOptions  int? Threads = null    see THREADS: HOW MANY ARE USED
+                       int? MaxThreads = null a ceiling on the engine's own
+                                              choice; ignored once Threads is
+                                              set. See the same section
+                       OnnxKernelPath KernelPath = Automatic
+                       bool ReuseBuffers = true
+
+KernelPath is Automatic (the widest arithmetic the processor offers), Vector
+(the portable vector path) or Scalar (one element at a time). Automatic is the
+right answer everywhere; the other two exist so that the three can be compared
+on one machine, and all three compute the same thing -- not in the same ORDER,
+so a long sum of products can differ in its last bits between them, exactly as
+it does between any two matrix libraries. ReuseBuffers lets a run hand a buffer
+out again once every node that could read it has run, which keeps a decode
+step's allocation flat instead of proportional to the size of the graph; turn
+it off only to compare the two.
+
+MidiGenerationModel AND IMidiGenerationModel -- MUSIC
+------------------------------------------------------
+    static Task<IMidiGenerationModel> LoadFromDirectoryAsync(
+            string bundleDirectory, OnnxRunnerOptions options = null,
+            CancellationToken)
+    static Task<IMidiGenerationModel> LoadFromFilesAsync(
+            IReadOnlyDictionary<string, string> files,
+            OnnxRunnerOptions options = null, CancellationToken)
+
+WHAT IT EXPECTS TO FIND is a bundle holding a config.json describing the model
+and its tokenizer, and TWO graphs -- one that turns the events so far into
+hidden states, and one that turns a hidden state into an event's tokens. The
+driver reads the tokenizer's whole layout out of that config.json and checks it
+against the port before a model is run; a bundle describing something else is
+refused by name.
+
+    IMidiGenerationModel : IDisposable, IAsyncDisposable
+        MidiGenerationMetadata Metadata { get; }
+        OnnxRunnerOptions      Options  { get; }
+        IAsyncEnumerable<MidiEvent> GenerateAsync(
+                MidiGenerationOptions options = null, CancellationToken)
+        MidiScore ToScore(IEnumerable<MidiEvent> events)
+        Task SaveAsync(string path, IEnumerable<MidiEvent> events,
+                CancellationToken)
+
+    MidiGenerationMetadata   string Architecture, TokenizerVersion;
+                             int TicksPerQuarterNote, MaximumContextEvents,
+                             VocabularySize, MaximumTokensPerEvent;
+                             string BaseGraphFileName, TokenGraphFileName
+
+TicksPerQuarterNote is the resolution of EVERYTHING the model produces -- 480
+for the published model of this family -- and it is stated on the model rather
+than on each event, because every event of one piece shares it.
+
+MidiEvent -- ONE MUSICAL EVENT, READY TO PLAY
+- - - - - - - - - - - - - - - - - - - - - - -
+    MidiEventKind Kind    Note, ProgramChange, ControlChange, Tempo,
+                          TimeSignature, KeySignature
+    long Tick             ABSOLUTE ticks from the start of the piece
+    long HorizonTicks     how far the piece is settled; see THE ORDER below
+    int  Track            from nought; one per instrumental part
+    int  Channel          0 to 15, or MidiEvent.NoChannel (-1)
+    int  NoteNumber       Note: the pitch, 0 to 127, 60 is middle C
+    int  Velocity         Note: how hard it is struck, 1 to 127
+    long DurationTicks    Note: how long it sounds; always above nought
+    int  Program          ProgramChange: the instrument, 0 to 127
+    int  Controller       ControlChange: which controller, 0 to 127
+    int  Value            ControlChange: what it is set to, 0 to 127
+    double BeatsPerMinute Tempo: quarter notes per minute
+    long MicrosecondsPerQuarterNote   Tempo: the same, in a file's own unit
+    int  Numerator        TimeSignature: the 3 of 3/4
+    int  Denominator      TimeSignature: the 4 of 3/4; a power of two
+    int  SharpsOrFlats    KeySignature: -7 to 7, sharps above nought
+    bool IsMinor          KeySignature: a minor key rather than a major one
+
+PROPERTIES THAT DO NOT APPLY TO THE KIND ARE NOUGHT, and Channel is NoChannel
+for the three kinds that belong to no channel. Switch on Kind and read the ones
+that belong to it. The six static factories -- Note, ProgramChange,
+ControlChange, Tempo, TempoFromMicroseconds, TimeSignature and KeySignature --
+build one by hand and validate every range, throwing
+ArgumentOutOfRangeException for anything outside it.
+
+A NOTE CARRIES ITS OWN LENGTH. There is no note-off event to pair up, so
+nothing can be left hanging and a player never has to match one event with
+another.
+
+THE CHANNEL CONVENTION. Channels are numbered 0 TO 15, which is how the MIDI
+wire format numbers them and how the model emits them, and channel 9 is
+percussion. MANY PLAYERS AND MUSIC LIBRARIES NUMBER CHANNELS 1 TO 16: for one
+of those, pass Channel PLUS ONE. It is one line and it is the commonest thing
+to get wrong.
+
+THE ORDER EVENTS ARRIVE IN, and the guarantee you can build on. The model
+places each event at a whole BEAT plus an offset inside that beat. The beat
+only ever moves forward; the offset inside a beat is absolute and CAN step
+backwards. So the absolute ticks are non-decreasing BEAT BY BEAT and NOT event
+by event: two events on the same beat can arrive with the later one first. What
+every event does carry is HorizonTicks -- NO EVENT YIELDED AFTER THIS ONE WILL
+HAVE A Tick BELOW THIS NUMBER. A player streaming a piece that is still being
+written can sound everything up to the horizon and hold the rest. HorizonTicks
+is never above Tick and is usually below it.
+
+MidiGenerationOptions -- WHAT TO GENERATE
+- - - - - - - - - - - - - - - - - - - - -
+    int  MaximumEvents  = 512    events, not seconds; it may stop sooner
+    double Temperature  = 1.0    below one is more predictable
+    double TopP         = 0.98   1 keeps every token
+    int  TopK           = 20     ONE MAKES IT GREEDY and reproducible
+    long?  Seed         = null   null -> from the clock; set it to hear the
+                                 same piece again
+    IReadOnlyList<int> Instruments = null   General MIDI program numbers
+    int?  DrumKit       = null   the percussion channel's program number
+    int?  BeatsPerMinute = null  1 to 383
+    int?  TimeSignatureNumerator / TimeSignatureDenominator
+    int?  KeySignatureSharpsOrFlats  -7 to 7
+    bool  KeySignatureIsMinor = false
+    MidiScore Prompt    = null   a piece to CONTINUE
+    int  PromptEventLimit = 4096
+    bool ReduceRepeatedChanges = true
+    bool AllowControlChange    = true
+    bool IncludePromptEvents   = true
+
+THERE ARE TWO WAYS TO START IT OFF AND THEY ARE ALTERNATIVES: either DESCRIBE
+the piece (instruments, drum kit, tempo, time and key signature) or hand it a
+piece to CONTINUE through Prompt. Setting both is refused with
+ArgumentException rather than quietly resolved.
+
+THE SAME SEED AND THE SAME SETTINGS GIVE THE SAME PIECE, on every machine: the
+stream of random numbers is this library's own and does not change between
+framework releases. TopK = 1 draws no random number at all.
+
+IncludePromptEvents defaults to true so that an `await foreach` is the WHOLE
+piece from its first event -- the instruments, tempo and signatures you asked
+for are real musical events, and a player fed only what the model added would
+get a piece with no tempo and no instruments.
+
+NAMING INSTRUMENTS ALSO CONSTRAINS THE MODEL: it then may not choose
+instruments of its own or write on a channel that was not asked for. Leaving
+Instruments empty lets it choose the instrumentation itself, which it does
+well. AllowControlChange = false makes a plainer piece and generates it faster,
+because those events are not spent.
+
+A NOTE ON GREEDY GENERATION. TopK = 1 sounds like the safe setting and is not
+the one to use for music: taking the most likely answer every time makes a
+model of this family repeat itself, and a greedy piece can spend hundreds of
+events setting itself up before it starts. Greedy is for reproducing a result
+exactly; the defaults are for making music.
+
+SAVING A STANDARD MIDI FILE
+- - - - - - - - - - - - - -
+    MidiScore score = model.ToScore(events);       // or SaveAsync directly
+    await model.SaveAsync("/tmp/piece.mid", events);
+
+    byte[] bytes = MidiFile.Write(score);
+    MidiScore again = MidiFile.Read(bytes);
+    await MidiFile.WriteAsync("/tmp/piece.mid", score);
+    MidiScore fromDisk = await MidiFile.ReadAsync("/tmp/piece.mid");
+
+MidiScore carries TicksPerQuarterNote, Events (sorted by position), TrackCount,
+LengthInTicks and DurationInSeconds(), which follows the piece's own tempo
+changes from beginning to end. MidiFile.Write has an overload taking a
+runningStatus flag, which decides whether a repeated channel message may leave
+its status byte out; every reader understands the shorthand, so leave it alone
+unless you want every byte spelled out.
+
+ToScore IS NOT THE SAME AS THE EVENT STREAM, and the difference is one
+streaming cannot avoid: the model's own tokenizer shortens a note that the next
+note of the same pitch cuts off, and that needs the future. ToScore does it; a
+player sounding the stream holds such a note a little longer than the saved
+file does. It is inaudible on most material and it is stated so that a
+byte-for-byte comparison of the two does not surprise you.
+
+CONTINUING A PIECE
+- - - - - - - - - -
+    MidiScore existing = await MidiFile.ReadAsync("/music/opening.mid");
+
+    MidiGenerationOptions options = new MidiGenerationOptions
+    {
+        Prompt = existing,
+        MaximumEvents = 512,
+    };
+
+    await foreach (MidiEvent e in model.GenerateAsync(options))
+    {
+        // the prompt's own events first, then what the model adds
+    }
+
+The prompt is read through the model's own tokenizer, so what the model sees is
+what it was trained to see. A file this library did not write is read too --
+anything it has no event for (pitch bends, aftertouch, lyrics, track names,
+system-exclusive data) is stepped over and dropped.
+
+OnnxCausalLmModel AND IOnnxCausalLmModel -- TEXT
+-------------------------------------------------
+    static Task<IOnnxCausalLmModel> LoadFromDirectoryAsync(
+            string bundleDirectory, OnnxRunnerOptions options = null,
+            CancellationToken)
+    static Task<IOnnxCausalLmModel> LoadFromFilesAsync(
+            IReadOnlyDictionary<string, string> files,
+            OnnxRunnerOptions options = null, CancellationToken)
+
+WHAT IT EXPECTS TO FIND is a bundle holding a generation configuration
+(genai_config.json), the graph that configuration names, any side file holding
+the weights beside it, and a GPT-2 style byte-level byte-pair tokenizer --
+vocab.json and merges.txt, plus tokenizer_config.json and
+special_tokens_map.json where the publisher wrote them. EVERYTHING the driver
+does is read out of that configuration: the graph's file name, every tensor
+name, the cache-name patterns, the layer, head and key-value-head counts, the
+head size, the context length and the token numbers that begin and end a
+sequence.
+
+WHAT COMES BACK IS AN IRunningModel, the same contract the GGUF road hands
+back, so an application can hold either in one variable and use the same
+GenerationOptions, SamplingOptions, GenerationUpdate, GenerationResult,
+FinishReason and GenerationStatistics types.
+
+    IOnnxCausalLmModel : IRunningModel
+        CausalLmMetadata  Metadata      { get; }
+        OnnxRunnerOptions RunnerOptions { get; }
+
+    CausalLmMetadata   string Architecture, ModelFileName, TokenizerKind;
+                       int LayerCount, HeadCount, KeyValueHeadCount, HeadSize,
+                       HiddenSize (-1 when the bundle states none),
+                       ContextLength, VocabularySize,
+                       BeginningOfSequenceTokenId (-1 when none);
+                       IReadOnlyList<int> EndOfSequenceTokenIds;
+                       int PaddingTokenId (-1 when none), MergeCount
+
+WHAT OF THE CONTRACT IS IMPLEMENTED:
+
+    TokenizeAsync / DetokenizeAsync   through the bundle's own tokenizer,
+                                      honouring addSpecialTokens (what the
+                                      bundle says about a beginning token) and
+                                      parseSpecialTokens
+    GenerateAsync / GenerateToEndAsync  with the existing GenerationOptions
+                                      and SamplingOptions
+    ClearCacheAsync                   completes at once -- see below
+    Details / Options                 filled in from the bundle. Options
+                                      carries the three settings the shared
+                                      contract has a place for (the graph's
+                                      path, the thread count in use, the
+                                      context length); RunnerOptions is what
+                                      the graph was really loaded with
+    ChatTemplateDialect               Auto, because the enumeration has no
+                                      "none" and chat is refused anyway
+
+WHAT IS REFUSED, each with a NotSupportedException whose message NAMES THE
+MEMBER and says why:
+
+    ChatAsync, ChatToEndAsync, RenderChatPromptAsync
+        a bundle carries no chat template and this driver applies none, so a
+        conversation is YOURS to render into a prompt and pass to
+        GenerateAsync
+    EmbedAsync
+        a decoder graph answers with one score per token of the vocabulary and
+        hands back no hidden state to pool into a vector
+    SetLoraAdaptersAsync
+        an adapter is applied to a checkpoint's weights as they load, and a
+        graph's weights are already baked into it
+    GenerationOptions.Grammar, .JsonSchema and .JsonMode
+        constraining output needs a grammar engine, which this driver does not
+        carry. The three are refused when the request is validated, so an
+        options object carrying one fails immediately rather than generating
+        something unconstrained
+
+EVERY SAMPLING SETTING IS IMPLEMENTED -- Temperature (nought or below is
+greedy), TopK, TopP, MinP, TypicalP, RepeatPenalty with RepeatLastN,
+PresencePenalty, FrequencyPenalty and Seed -- and the stages run in the same
+order the native road runs them, so one SamplingOptions means one thing on both
+roads. Only GREEDY output is claimed to match another engine's.
+
+EVERY REQUEST EVALUATES ITS WHOLE PROMPT. There is no prefix cache between
+requests on this road: the key/value cache belongs to one generation and is let
+go when it ends. A growing conversation therefore re-reads its history every
+turn, and ClearCacheAsync has nothing to clear and completes at once. That is
+the one place where this road costs more than the GGUF road on the same
+conversation.
+
+    await using IOnnxCausalLmModel model =
+        await OnnxCausalLmModel.LoadFromDirectoryAsync("/models/example-onnx");
+
+    Console.WriteLine(model.Metadata.TokenizerKind);   // GPT-2 byte-level BPE
+    Console.WriteLine(model.Metadata.ContextLength);
+
+    GenerationOptions options = new GenerationOptions
+    {
+        MaxTokens = 128,
+        Sampling = new SamplingOptions { Temperature = 0f },
+    };
+
+    await foreach (GenerationUpdate update in
+        model.GenerateAsync("the prompt", options))
+    {
+        if (!update.IsFinal) Console.Write(update.Text);
+    }
+
+AN EMPTY PROMPT is not an error: a prompt that tokenizes to nothing starts from
+the token the bundle says a sequence begins with, and is refused only when the
+bundle names none.
+
+FOUR THINGS END A GENERATION -- an end-of-sequence token, a stop sequence, the
+token limit, and the context filling up -- and cancellation is honoured between
+steps. The end-of-sequence token is not part of what the generation returns,
+which is what the GGUF road does too.
+
+TOKENIZERS. A GPT-2 style byte-level byte-pair tokenizer is what this driver
+reads, and it is written out in managed code here: the byte table, the
+pre-tokenizer's rule and the merges, with added tokens matched as text before
+anything else. A bundle carrying a tokenizer of another kind -- a SentencePiece
+model with no byte-level pair beside it, a single tokenizer.json, or none at
+all -- is refused by the name of what was found. So is an added token asking
+for a matching rule this library does not implement.
+
+LOADING BY PATH, AND THE TWO PACKAGES TOGETHER
+-----------------------------------------------
+EVERY LOAD ON THIS ROAD TAKES PATHS, and working those paths out is YOUR
+business. This package knows nothing about model stores and a model store knows
+nothing about this package: that is deliberate, and it is the same seam the
+GGUF road has.
+
+The separate CodeBrix.Ollama.ModelManager package is what obtains a bundle and
+resolves it to files on disk. ITS ResolveAsync HANDS BACK A NAME AND A PATH FOR
+EACH FILE, and the pair form of the load methods here is what takes them -- no
+copies are made and nothing is laid out first, even though the store keeps
+every file under a digest rather than under the publisher's name for it:
+
+    using CodeBrix.Ollama.ModelManager;
+    using CodeBrix.Ollama.ModelRunner;
+
+    using ModelStore store = new ModelStore();
+
+    // ModelManager's side: a bundle it holds, resolved to files.
+    ResolvedModel resolved =
+        await store.ResolveAsync("example/midi-model:onnx");
+
+    Dictionary<string, string> files = new Dictionary<string, string>();
+    foreach (ResolvedFile file in resolved.Files)
+        files[file.Name] = file.BlobPath;
+
+    // ModelRunner's side: the paths, and nothing else.
+    await using IMidiGenerationModel model =
+        await MidiGenerationModel.LoadFromFilesAsync(files);
+
+    await foreach (MidiEvent e in model.GenerateAsync()) { /* ... */ }
+
+THE ONLY PLACE THE TWO PACKAGES MEET IS THE LINES ABOVE, in your own code.
+Neither package references the other -- not as a NuGet dependency, not in a
+signature -- and that is a rule rather than an accident. A dictionary of
+strings is the whole of the seam.
+
+If the bundle's files are already laid out as a directory, whether by the
+store's own MaterializeAsync or because you downloaded them yourself, use
+LoadFromDirectoryAsync instead and pass the directory.
+
+THE TWO PACKAGES ARE VERSIONED AND RELEASED TOGETHER, ALWAYS. They are packed
+in the same minute and published at the same version, and AN APPLICATION THAT
+USES BOTH MUST INSTALL THEM AT THE SAME VERSION. They carry one shared assembly
+inside each package rather than depending on a third package, so a mixture
+BUILDS WITHOUT COMPLAINT and then fails at run time -- and when it does, the
+failure is an InvalidOperationException at the first call that reaches the
+shared code, naming both packages and telling you to install one version of
+each. If you see that message, that is what it means.
+
+STREAMING MIDI TO A PLAYER
+--------------------------
+EVENTS ARRIVE AS THEY ARE GENERATED. GenerateAsync hands over each event the
+moment its last token is chosen, so a streaming player can be fed from an
+`await foreach` and start sounding the beginning of a piece whose end does not
+exist yet.
+
+A MODEL MAY WELL WRITE MUSIC MORE SLOWLY THAN IT IS PLAYED, and that is
+expected rather than a problem to design around: the CONSUMER buffers enough of
+the song before it starts playing. It is never a reason not to stream the
+events as they are made -- buffering a few seconds of music while the generator
+works ahead is what makes a piece start in a second rather than a minute, and
+the buffer you need depends on your own machine and settings, so measure it.
+
+Below is the whole of the consumer-side loop, written against a GENERIC
+streaming player -- one that takes note-with-duration, tempo and channel
+events at absolute ticks, which is what most of them take. Nothing in this
+package knows about any player; this is your code, and it is short on purpose:
+
+    // `player` is your own streaming MIDI player. This example assumes the
+    // common shape: it is told the resolution once, then fed events at
+    // ABSOLUTE ticks, and it numbers channels 1 to 16 (hence the + 1).
+    player.Start(model.Metadata.TicksPerQuarterNote);
+
+    long buffered = 0;
+    const long BufferTicks = 480 * 8;      // eight quarter notes of music
+
+    await foreach (MidiEvent e in
+        model.GenerateAsync(options, cancellationToken))
+    {
+        switch (e.Kind)
+        {
+            case MidiEventKind.Note:
+                player.AppendNote(e.Tick, e.Channel + 1, e.NoteNumber,
+                                  e.Velocity, e.DurationTicks);
+                break;
+            case MidiEventKind.ProgramChange:
+                player.AppendProgram(e.Tick, e.Channel + 1, e.Program);
+                break;
+            case MidiEventKind.ControlChange:
+                player.AppendControl(e.Tick, e.Channel + 1, e.Controller,
+                                     e.Value);
+                break;
+            case MidiEventKind.Tempo:
+                player.AppendTempo(e.Tick, e.BeatsPerMinute);
+                break;
+        }
+
+        // Only what is below the horizon is settled, so that is what may be
+        // played. Start once enough of it has accumulated.
+        player.SettledThrough(e.HorizonTicks);
+
+        if (buffered == 0 && e.HorizonTicks >= BufferTicks)
+        {
+            buffered = e.HorizonTicks;
+            player.Play();
+        }
+    }
+
+    player.Complete();
+
+THREE THINGS IN THAT LOOP ARE THE WHOLE STORY: `e.Channel + 1` for a player
+that numbers channels from one; `e.HorizonTicks` rather than `e.Tick` as the
+point the player may sound up to, because ticks are non-decreasing beat by beat
+and not event by event; and starting playback once enough has accumulated
+rather than on the first event. Time signatures and key signatures are notation
+rather than sound and most players ignore them; pass them on if yours does not.
+
+CANCELLING STOPS THE GENERATION between token steps. Everything already handed
+over stays handed over, the model is immediately usable again, and ToScore over
+what you collected still gives a playable, saveable piece.
+
+WHAT IS SUPPORTED AND WHAT IS REFUSED
+-------------------------------------
+EVERY REFUSAL IS AT LOAD, AND EVERY REFUSAL NAMES WHAT IT REFUSED. A graph that
+loads will run; there is no class of graph that loads and then fails halfway
+through a decode because of something the engine could have seen at the start.
+The exception is ModelLoadException and the message names the node, the
+operator and the domain where those apply, and lists what the engine does
+implement where that helps.
+
+    OPERATORS      37 of them: the standard set a decoder of this kind uses,
+                   plus the contributed operators the model builders and
+                   quantizers emit -- MatMulNBits, GroupQueryAttention,
+                   SkipSimplifiedLayerNormalization,
+                   SimplifiedLayerNormalization, DynamicQuantizeLinear and
+                   MatMulInteger. An operator the engine does not implement is
+                   refused by name, with its domain, at the node that uses it.
+    OPERATOR SETS  ai.onnx 13 to 23. An older set is REFUSED rather than run:
+                   several operators changed meaning at 13 without changing
+                   shape, so running an opset-12 graph under the newer meaning
+                   would give a wrong answer silently. A newer set is refused
+                   until its semantics have been checked.
+    DOMAINS        a graph may DECLARE a contributed domain it never uses; the
+                   refusal is at the node, not at the declaration.
+    ELEMENT TYPES  float, int64, int32 and bool at the graph's own edge. A
+                   16-BIT FLOAT WEIGHT IS WIDENED as the model is read,
+                   because that is a storage format rather than a compute
+                   format; a 16-bit float input or output is refused, because
+                   the graph would then be computing something else. The two
+                   8-bit quantized types are refused at the edge for the
+                   reason given above. Anything else is refused by name.
+    ATTRIBUTES     an attribute a kernel does not implement is REFUSED, not
+                   ignored: an attribute quietly dropped changes what the
+                   graph computes, and the difference then shows up as a wrong
+                   number rather than as an error.
+    QUANTIZED
+    WEIGHTS        stay PACKED in memory for the life of the model. A block is
+                   turned back into floats inside the loop that multiplies it,
+                   so a four-bit graph holds four-bit weights and a load does
+                   not quietly expand them.
+    BUNDLE SHAPES  the text driver refuses, by the name the configuration gives
+                   it, an encoder, an encoder-decoder, a vision, speech,
+                   audio or embedding block, and a decoder made of a pipeline
+                   of several graphs. The MIDI driver refuses a bundle whose
+                   config.json describes something other than a MIDI model of
+                   the family it drives, and one missing either graph.
+
+AT RUN TIME the two things that can go wrong are InferenceException -- shapes
+that do not agree, an index outside its tensor, a graph output nothing produced,
+or a second run started while one is in flight -- and the ordinary
+ArgumentException for an input that is missing, is not one the graph declares,
+or carries the wrong element type. ObjectDisposedException after disposal.
+
+HOW CLOSE THE NUMBERS ARE
+-------------------------
+Three things are worth knowing before you compare this engine's output with
+another runtime's, and none of them needs a number to be useful.
+
+A FULL-PRECISION GRAPH AGREES ESSENTIALLY EXACTLY. The difference is the last
+bits of a floating-point sum, which is what any two matrix libraries differ by,
+and the token or event chosen is the same one.
+
+A GRAPH WITH QUANTIZED WEIGHTS AGREES CLOSELY TOO -- the weights are the same
+bytes in both runtimes and both turn them back into floats the same way. Weight
+quantization is the kind that is faithful across runtimes.
+
+A GRAPH THAT QUANTIZES ITS ACTIVATIONS LEGITIMATELY DIFFERS BETWEEN RUNTIMES,
+by rather more, and that is a property of the graph and not a defect in either
+engine. Such a graph takes a whole tensor's scale from that tensor's own
+largest and smallest element, so a last-bit difference anywhere moves the scale,
+which moves every value sitting halfway between two integers by a whole count,
+and a dozen layers multiply it up. If you need output that matches another
+runtime closely, quantize WEIGHTS and not activations.
+
+A GRAPH THAT ASKS FOR 8-BIT ACTIVATIONS BY REQUEST is the one case where this
+engine deliberately differs: some four-bit exports carry an attribute asking a
+runtime to quantize the activations to 8 bits as a speed trade. This engine
+READS THAT ATTRIBUTE AND KEEPS FLOATS, which is the MORE exact of the two
+answers, so its output can differ from a runtime that takes the offer -- in the
+direction of being right. There is nothing to configure; it is stated so that a
+difference against another runtime on such a graph is not mistaken for a
+defect.
+
+WHAT COMES OUT OF A REDUCED MODEL IS NOT WHAT CAME OUT OF THE ONE IT WAS MADE
+FROM. Making a model smaller is a speed and memory choice, not a transparent
+one: the same prompt and the same seed can write different music or different
+text from a few events or tokens in. Measure the reduction you intend to ship
+on the inputs you care about.
+
+WHAT BELONGS TO YOU AND NOT TO THIS PACKAGE
+--------------------------------------------
+A MODEL'S PROMPT CONVENTIONS ARE THE APPLICATION'S. Some text models are
+trained on text reshaped in a particular way -- a marker written in place of
+every newline is the usual example -- and the driver applies none of it and
+undoes none of it: it tokenizes what you give it and detokenizes what the model
+wrote. Apply the convention before you call GenerateAsync and undo it on the
+way out. The driver deliberately knows nothing about any publisher's, because
+the moment it knew one it would be wrong for the next.
+
+TURNING GENERATED NOTATION TEXT INTO MUSIC IS ANOTHER LIBRARY'S JOB. A text
+model that writes a notation format writes TEXT, and this package hands you
+that text; converting it into MIDI, rendering it or playing it belongs
+elsewhere, and this package neither does it nor names a library that does.
+
+CHOOSING A MODEL, AND OBTAINING ONE, BELONGS TO YOUR CODE. This package takes
+paths to files that already exist. Downloading a bundle, keeping it, and
+resolving a name to files on disk are the separate
+CodeBrix.Ollama.ModelManager package's work.
+
+THREAD SAFETY ON THIS ROAD
+--------------------------
+  - ONE RUN AT A TIME PER LOADED MODEL, and a second call that arrives while
+    one is in flight is REFUSED with InferenceException rather than left to
+    wait. That is different from the GGUF road, where concurrent requests are
+    serialized behind a gate. Load a second model to run two at once; the
+    weights are not shared between instances.
+  - THE SAME GOES FOR A DRIVER: a second GenerateAsync started while one
+    enumeration is still live is refused, on both drivers.
+  - SEVERAL LOADED MODELS IN PARALLEL IS FINE. Each owns its own weights,
+    buffers and caches and they share nothing. Memory is the only limit.
+  - A RUN IS STATELESS. Two runs with the same inputs give the same outputs;
+    everything a decoder carries between steps is in the tensors YOU pass
+    back in.
+  - THE ENGINE'S OWN THREADS are inside one Run: the matrix kernels spread
+    their work over OnnxRunnerOptions.Threads and gather it again before Run
+    returns. Nothing of the engine outlives a call.
+  - DISPOSE WHAT YOU LOAD. Every loaded model holds its weights until it is
+    disposed. `await using` is one word.
+
+ERRORS ON THIS ROAD
+-------------------
+    ModelLoadException      everything refused at load: no such file; not an
+                            ONNX graph; an operator, an operator set, an
+                            element type or an attribute the engine does not
+                            implement; a graph whose nodes are out of
+                            topological order or that reads something nothing
+                            produces; a side file that is missing or that a
+                            weight points outside of; a bundle that is not the
+                            shape its driver drives; a missing graph or
+                            tokenizer
+    InferenceException      a run that could not proceed, and a second run
+                            started on a model that is already running
+    NotSupportedException   a member of IRunningModel, or a constraint setting,
+                            that a bundle cannot honour -- see the list under
+                            OnnxCausalLmModel above. It is a FRAMEWORK
+                            exception and not one of this library's, so
+                            catching ModelRunnerException does not catch it
+    ArgumentException /     a path or a name that is not set; an input missing,
+    ArgumentNullException / undeclared or of the wrong type; an option outside
+    ArgumentOutOfRange      its stated range; a MIDI value outside 0 to 127; a
+                            generation given both a prompt and a description
+    ObjectDisposedException a model used after it was disposed
+    InvalidOperationException  the mismatched-package guard described under THE
+                            TWO PACKAGES TOGETHER
+
+ModelLoadException and InferenceException are this library's own and derive
+from ModelRunnerException, so the catch-all under THE ERROR MODEL below catches
+them. NotSupportedException does not, and that is deliberate: a member a bundle
+cannot honour is a programming error to fix, not a condition to handle.
+
+RUNNING ONNX MODELS -- QUICK REFERENCE
+--------------------------------------
+INSTALLED   nothing. Managed code inside this package; no ONNX runtime, no
+            Python, no native library, no NuGet dependency; runs wherever
+            .NET 10 runs
+RAW         await using IOnnxModel m = await OnnxModel.LoadAsync(path, opts);
+            IReadOnlyDictionary<string, OnnxTensor> out = m.Run(inputs);
+MIDI        await using IMidiGenerationModel m =
+                await MidiGenerationModel.LoadFromDirectoryAsync(dir, opts);
+            await foreach (MidiEvent e in m.GenerateAsync(options)) { }
+            await m.SaveAsync(path, events);
+TEXT        await using IOnnxCausalLmModel m =
+                await OnnxCausalLmModel.LoadFromDirectoryAsync(dir, opts);
+            await foreach (GenerationUpdate u in m.GenerateAsync(prompt, o)) { }
+OPTIONS     OnnxRunnerOptions { Threads (null -> performance cores),
+            MaxThreads (null -> no ceiling; bounds only the automatic count),
+            KernelPath (Automatic), ReuseBuffers (true) }
+TENSORS     OnnxTensor.FromFloats / FromInt32 / FromInt64 / FromBooleans,
+            each (array, params long[] shape). Arrays are never copied, so a
+            `present` output goes back in as the next `past` input as is
+CHANNELS    MidiEvent.Channel is 0 to 15 (9 is percussion). ADD ONE for a
+            player that numbers them 1 to 16
+ORDER       ticks are non-decreasing BEAT BY BEAT, not event by event. Play up
+            to HorizonTicks and hold the rest
+TICKS       absolute, from the start of the piece;
+            Metadata.TicksPerQuarterNote is the resolution
+REFUSED     text: ChatAsync, ChatToEndAsync, RenderChatPromptAsync,
+            EmbedAsync, SetLoraAdaptersAsync, and GenerationOptions.Grammar /
+            .JsonSchema / .JsonMode -- all NotSupportedException by name
+GRAPHS      opsets ai.onnx 13 to 23; 37 operators; float, int64, int32 and
+            bool at the edge; everything else refused at LOAD, by name
+PAIRING     ModelManager resolves a name to paths, you hand the paths here.
+            INSTALL BOTH PACKAGES AT THE SAME VERSION
+
+COMMON PITFALLS ON THIS ROAD
+----------------------------
+ 1. DO NOT pass MidiEvent.Channel straight to a player that numbers channels
+    1 to 16. Add one. Percussion is channel 9 here and channel 10 there, and
+    the symptom is a drum kit playing melodies.
+
+ 2. DO NOT sound an event as soon as it arrives. Ticks are non-decreasing beat
+    by beat and not event by event, so an event slightly EARLIER than the last
+    one can still arrive. Play up to HorizonTicks.
+
+ 3. DO NOT refuse to stream because the model is slower than real time. That
+    is expected; buffer enough of the piece before you start playing it. A
+    generator that keeps ahead of a player after a few seconds' head start is
+    the normal case.
+
+ 4. DO NOT set TopK = 1 for music because it sounds safe. Greedy makes a model
+    of this family repeat itself. Use it to reproduce a result exactly, and
+    the defaults to make music.
+
+ 5. DO NOT expect ToScore's notes to be exactly the ones you were handed. A
+    note that a later note of the same pitch cuts short is trimmed when the
+    piece is gathered, which needs the future and so cannot happen in the
+    stream.
+
+ 6. DO NOT copy a `present` output before feeding it back as `past`. The
+    tensor already owns its array and nothing will write to it again;
+    copying a key/value cache is the most expensive thing you can do here for
+    no benefit at all.
+
+ 7. DO NOT write to an array you handed in while a run is in flight. Tensors
+    do not copy, in either direction.
+
+ 8. DO NOT call Run on a model that is already running. It is refused with
+    InferenceException, not queued. Load a second model.
+
+ 9. DO NOT expect chat, embeddings, LoRA adapters or grammar-constrained
+    output from an ONNX bundle. Each is refused with a NotSupportedException
+    naming it; render a conversation into a prompt yourself and call
+    GenerateAsync.
+
+10. DO NOT expect a conversation on this road to reuse the last turn's work.
+    Every request evaluates its whole prompt, and ClearCacheAsync has nothing
+    to clear.
+
+11. DO NOT install the two CodeBrix.Ollama packages at different versions. It
+    builds cleanly and then fails at run time with a message saying exactly
+    this.
+
+12. DO NOT compare this engine's output with another runtime's on a graph that
+    quantizes its ACTIVATIONS and read the difference as a defect. Compare on
+    a full-precision or weight-quantized graph, where the two agree closely.
+
+13. DO NOT apply a model's prompt conventions in the driver's name. If a model
+    wants its newlines written as a marker, your code writes them and your
+    code puts them back; the driver does neither.
+
+14. DO NOT hand a GGUF file to OnnxModel or an .onnx file to ModelRunner
+    .LoadAsync. They are two roads through one package and neither reads the
+    other's format; each says so.
+
+
+THREADS: HOW MANY ARE USED, AND HOW TO CONTROL IT
+=================================================
+This section is about HOW MANY THREADS THE ARITHMETIC RUNS ON, on both roads
+through this package, and how to decide that number. It is not about which of
+YOUR threads may call what -- that is THE THREADING MODEL, under THE CACHE,
+CANCELLATION AND THREADS below. Everything here is a LOAD-TIME setting: it is
+fixed when the model is loaded and does not change while it runs.
+
+If you read nothing else: SAY NOTHING AND THE LIBRARY PICKS A GOOD NUMBER. Set
+Threads when you know the machine. Set MaxThreads when you do not.
+
+THE TWO ENGINES AND THEIR OPTIONS
+---------------------------------
+Each road has its own options object, and a name means the same thing on both.
+
+    GGUF ROAD -- ModelRunner.LoadAsync(ModelRunnerOptions)
+
+        int? Threads       threads for GENERATION: one token at a time, the
+                           whole model read for each one
+        int? BatchThreads  threads for PROMPT PROCESSING: the prompt's tokens
+                           evaluated together, before the first token comes
+                           out. null follows Threads
+        int? MaxThreads    a ceiling on what the library picks BY ITSELF.
+                           null (the default) means no ceiling
+
+    ONNX ROAD -- OnnxModel.LoadAsync, .LoadFromDirectoryAsync and
+                 .LoadFromFilesAsync; MidiGenerationModel
+                 .LoadFromDirectoryAsync and .LoadFromFilesAsync;
+                 OnnxCausalLmModel.LoadFromDirectoryAsync and
+                 .LoadFromFilesAsync -- ALL OF THEM take the same
+                 OnnxRunnerOptions
+
+        int? Threads       threads the matrix kernels spread their work over.
+                           This road has ONE count: a prompt and a generated
+                           token are the same graph run with more or fewer
+                           rows
+        int? MaxThreads    the same ceiling, with the same meaning
+
+EVERY ONNX ENTRY POINT TAKES THE SAME OPTIONS OBJECT, and the two drivers hand
+it on to every graph they load -- a MIDI bundle is two graphs and both get it.
+There is no thread setting anywhere else: GenerationOptions, SamplingOptions
+and MidiGenerationOptions have nothing to say about threads, and
+QuantizeOptions.Threads is a different thing altogether -- it belongs to
+rewriting a file at a smaller type, not to running a model.
+
+WHAT "UNSET" RESOLVES TO
+------------------------
+Leave Threads null and the library asks the operating system about the
+processor. THE RULE is:
+
+    the PERFORMANCE cores      where the processor has two kinds of core --
+                               fast ones and efficient ones -- and the
+                               operating system says which is which
+    the PHYSICAL cores         where the cores are all alike (hyperthreads are
+                               not cores and are not counted)
+    the LOGICAL processors     where neither can be found out
+
+THE TWO ROADS DO NOT APPLY THE SAME PART OF THAT RULE, and the difference is
+deliberate:
+
+    ModelRunnerOptions.Threads (GGUF)       the PHYSICAL core count
+    ModelRunnerOptions.BatchThreads (GGUF)  whatever Threads resolved to
+    OnnxRunnerOptions.Threads (ONNX)        the PERFORMANCE core count where
+                                            the processor states one, and the
+                                            physical count where it does not
+
+On a processor whose cores are all alike the two roads agree: one thread per
+physical core. On a processor that mixes fast and efficient cores they differ
+-- the GGUF road uses every physical core, the ONNX road uses the fast ones
+only. That is not an oversight. Each engine was measured on such a processor
+and they behave differently, which is what the next part is about.
+
+WHY THE NUMBERS ARE WHAT THEY ARE
+---------------------------------
+Two things decide what a thread is worth.
+
+THE SLOWEST PIECE SETS THE PACE. Where a matrix multiply is cut into equal
+pieces, one per thread, it is not finished until its last piece is. Put a
+thread on a core that runs at two-thirds the speed of the others and every fast
+thread waits for it, so the whole multiply takes longer than it would have with
+fewer threads and none of them slow. That is what the managed ONNX engine does,
+and it is exactly why its default counts only the fast cores. The native engine
+behind the GGUF road divides its work differently, and measuring it on the same
+kind of processor found the opposite: it is FASTER using every physical core
+than using the fast ones alone. So its default counts them all.
+
+MEMORY BANDWIDTH IS THE OTHER CEILING. Generating one token reads the whole
+model once, so generation is limited by how fast memory can be read rather than
+by arithmetic -- especially on a small model. Past a handful of threads the
+memory is already saturated and another thread buys very little; the curve
+flattens rather than climbing. This is why a big thread count is not a big
+speed-up, and why the difference between one good count and another is a few
+per cent.
+
+AND HYPERTHREADS ARE NOT CORES. Two hardware threads on one core share its
+arithmetic units and its cache, so one thread per LOGICAL processor is asking
+half of them to fight the other half for the same memory. On BOTH roads that is
+measurably worse than one thread per physical core -- not slightly worse but a
+large fraction of the speed, and erratic from one run to the next. The library
+never does this by itself. You can, by setting Threads to the logical count. Do
+not.
+
+THE THREE WAYS TO CONTROL IT
+----------------------------
+ 1. SAY NOTHING -- leave Threads, BatchThreads and MaxThreads all null. This is
+    right for most applications. The library reads the processor and picks the
+    count above, on whatever machine your application lands on.
+
+ 2. SET Threads -- you know the machine and want an exact number. It is used
+    EXACTLY as you wrote it: never clamped, never lowered, never checked
+    against the machine. Threads = 16 on a four-core machine really does start
+    sixteen threads, and they really do fight each other. Use this when the
+    process shares the machine with something else, when you are pinning a
+    benchmark, or when you have measured the target and know better than the
+    default.
+
+ 3. SET MaxThreads -- you ship to machines you have never seen and want to
+    bound what the library does on the biggest of them. It says "use what this
+    machine has, but never more than this". A count cannot say that: Threads =
+    8 oversubscribes a four-core machine and wastes a sixty-four-core one.
+
+WHAT EACH ONE GIVES, on three machines. "Hybrid laptop" means a processor with
+eight fast cores and eight efficient ones, sixteen physical in all.
+
+    WHAT YOU SET               4-CORE      HYBRID LAPTOP    64-CORE
+                               MACHINE     (8 fast, 8 slow) SERVER
+    nothing, GGUF road            4              16            64
+    nothing, ONNX road            4               8            64
+    Threads = 8                   8               8             8
+    MaxThreads = 8, GGUF road     4               8             8
+    MaxThreads = 8, ONNX road     4               8             8
+    Threads = 8 and MaxThreads=2  8               8             8
+
+The last row is the precedence rule in one line: the cap did nothing, because
+Threads was set.
+
+THE PRECEDENCE RULE, EXACTLY
+----------------------------
+  - AN EXPLICIT Threads ALWAYS WINS. It is used as it stands and MaxThreads is
+    ignored for it, even when it is larger than MaxThreads and larger than the
+    machine.
+  - ON THE GGUF ROAD AN EXPLICIT BatchThreads ALWAYS WINS the same way, for
+    prompt processing. With BatchThreads null, prompt processing uses whatever
+    Threads resolved to -- so a cap reaches prompt processing only through the
+    generation count it follows, and never over an explicit BatchThreads.
+  - MaxThreads BOUNDS ONLY THE AUTOMATIC CHOICE: the resolved count is the
+    SMALLER of what the processor suggests and MaxThreads. A MaxThreads larger
+    than what the machine has changes nothing at all.
+  - MaxThreads = 1 IS LEGAL and means one thread.
+  - AN INVALID VALUE IS REFUSED BEFORE ANYTHING IS LOADED, and the message
+    names the property:
+
+        GGUF road    a Threads, BatchThreads or MaxThreads below 1 is
+                     ArgumentException. For the cap the message is
+                     "ModelRunnerOptions.MaxThreads must be at least 1; leave
+                     it null for no cap."
+        ONNX road    a Threads or MaxThreads below 1 is
+                     ArgumentOutOfRangeException. For the cap the message
+                     names it: "OnnxRunnerOptions.MaxThreads must be at least
+                     one; leave it null for no cap."
+
+    Nothing has been allocated and no model file has been opened by the time
+    either is thrown.
+
+AFTER A LOAD, THE ONNX ROAD TELLS YOU WHAT IT CHOSE. IOnnxModel.Options
+.Threads, IMidiGenerationModel.Options.Threads and IOnnxCausalLmModel
+.RunnerOptions.Threads are the RESOLVED count: a real number, never null, with
+the cap already applied. The GGUF road's IRunningModel.Options is the options
+object you handed in, so Threads there is still null if you left it null.
+
+WHAT THIS LIBRARY DELIBERATELY DOES NOT DO
+------------------------------------------
+  - IT NEVER LOWERS THE COUNT BECAUSE A MODEL IS SMALL. There is no adaptive
+    rule anywhere: a 100M model and a 30B model on the same machine get the
+    same number of threads unless you say otherwise. If you know your models
+    are small and you want fewer threads, MaxThreads is the setting for it.
+  - IT NEVER RAISES A COUNT YOU GAVE IT, and never clamps one down.
+  - IT DOES NOT TELL YOU THE DETECTED CORE COUNTS. No public member answers
+    "how many performance cores has this machine?", so "the smaller of the
+    fast-core count and 8" is not something your code can work out. MaxThreads
+    is how you say it: it is the way to use this library's own detection.
+  - IT DOES NOT CHANGE THE COUNT AFTER A LOAD. To run the same model at a
+    different count, load it again.
+  - A THREAD COUNT NEVER CHANGES WHAT IS PRODUCED. The same prompt with the
+    same sampling settings gives the same tokens at 4 threads and at 16; only
+    the time differs. Sampling above temperature 0 varies between runs at any
+    thread count, for reasons that have nothing to do with threads.
+
+HOW TO CHOOSE A NUMBER
+----------------------
+MEASURE ON THE MACHINE THAT MATTERS. It takes a minute and it answers the
+question for that machine better than any rule can. This program loads one
+model once per thread count and prints tokens a second, for generation and for
+prompt processing:
+
+    using System;
+    using System.Threading.Tasks;
+    using CodeBrix.Ollama.ModelRunner;
+
+    string path = "/models/my-model-q4_k_m.gguf";
+    string prompt = "Write one paragraph about the sea.";
+
+    GenerationOptions options = new GenerationOptions
+    {
+        MaxTokens = 128,
+        Sampling = new SamplingOptions { Temperature = 0f },  // reproducible
+    };
+
+    foreach (int threads in new[] { 4, 8, 12, 16 })
+    {
+        await using IRunningModel model = await ModelRunner.LoadAsync(
+            new ModelRunnerOptions
+            {
+                ModelPath = path,
+                ContextSize = 2048,
+                Threads = threads,
+                BatchThreads = threads,
+            });
+
+        await model.GenerateToEndAsync(prompt, options);   // warm-up, ignored
+        await model.ClearCacheAsync();
+
+        GenerationResult result =
+            await model.GenerateToEndAsync(prompt, options);
+
+        GenerationStatistics statistics = result.Statistics;
+        double generated = statistics.TokensPerSecond;
+        double prompted = statistics.PromptTokens
+            / statistics.PromptDuration.TotalSeconds;
+
+        Console.WriteLine(
+            $"{threads,3} threads: {generated,8:F1} tokens/s generated, " +
+            $"{prompted,9:F1} tokens/s prompt");
+    }
+
+The same shape works on the ONNX road: load with OnnxCausalLmModel
+.LoadFromDirectoryAsync(dir, new OnnxRunnerOptions { Threads = threads }) and
+read the same GenerationStatistics off the final update of GenerateAsync.
+
+Run each count a few times and take the MEDIAN rather than the best: one run on
+a busy machine tells you about the machine's other work. Ignore differences
+under about five per cent.
+
+THE RULES OF THUMB, from the measurements the defaults above were chosen on:
+
+  - NEVER MORE THREADS THAN THE MACHINE HAS PHYSICAL CORES. This is the one
+    that actually costs: past that point both engines lose a large fraction of
+    their speed and become erratic run to run. It is also the easy mistake to
+    make, because Environment.ProcessorCount reports the LOGICAL count.
+  - ON THE GGUF ROAD, MORE CORES KEPT PAYING almost to the physical count, on
+    every model measured -- a few hundred million to two billion parameters,
+    full precision and four-bit alike. The last quarter of the cores is worth
+    only a few per cent either way, so anything from about three-quarters of
+    the physical count up to it is a good answer, and the default is the
+    physical count.
+  - ON THE ONNX ROAD the curve flattens after a handful of threads, and on a
+    processor that mixes fast and efficient cores, threads beyond the fast
+    cores do not pay. The default is therefore the performance-core count.
+  - PROMPT PROCESSING AND GENERATION DO NOT PEAK AT THE SAME COUNT. A prompt
+    does real arithmetic on many tokens at once and usually keeps scaling a
+    little longer than generation does -- but not on every model: one of the
+    models measured processed prompts a third FASTER on half its cores. That
+    is what BatchThreads is for, and it is worth one measurement if your
+    prompts are long.
+  - HALVING THE COUNT COSTS LESS THAN YOU WOULD EXPECT. On every model
+    measured, half the cores gave roughly nine-tenths of the speed of all of
+    them. Leaving cores for the rest of your application is cheap; taking more
+    threads than there are cores is not.
+
+EXAMPLES, ONE PER CASE, ON BOTH ROADS
+-------------------------------------
+SAY NOTHING -- the default, and the right answer for most applications.
+
+    using System.Threading.Tasks;
+    using CodeBrix.Ollama.ModelRunner;
+
+    await using IRunningModel gguf = await ModelRunner.LoadAsync(
+        new ModelRunnerOptions
+        {
+            ModelPath = "/models/my-model-q4_k_m.gguf",
+            ContextSize = 4096,
+        });
+
+    await using IOnnxCausalLmModel onnx =
+        await OnnxCausalLmModel.LoadFromDirectoryAsync("/models/my-bundle");
+
+AN EXACT COUNT -- you know the machine, and you are leaving it room for the
+rest of your application.
+
+    await using IRunningModel gguf = await ModelRunner.LoadAsync(
+        new ModelRunnerOptions
+        {
+            ModelPath = "/models/my-model-q4_k_m.gguf",
+            ContextSize = 4096,
+            Threads = 6,        // generation
+            BatchThreads = 8,   // prompt processing, measured separately
+        });
+
+    await using IMidiGenerationModel midi =
+        await MidiGenerationModel.LoadFromDirectoryAsync(
+            "/models/midi-bundle", new OnnxRunnerOptions { Threads = 6 });
+
+A CEILING -- you ship to machines you have never seen.
+
+    await using IRunningModel gguf = await ModelRunner.LoadAsync(
+        new ModelRunnerOptions
+        {
+            ModelPath = "/models/my-model-q4_k_m.gguf",
+            ContextSize = 4096,
+            MaxThreads = 8,     // all four on a 4-core box, 8 on a big server
+        });
+
+    await using IOnnxModel graph = await OnnxModel.LoadAsync(
+        "/models/my-graph.onnx", new OnnxRunnerOptions { MaxThreads = 8 });
+
+    // What it settled on, on THIS machine. Never null after a load.
+    System.Console.WriteLine(graph.Options.Threads);
+
+ONE THREAD -- a background job that must not disturb anything else.
+
+    await using IRunningModel quiet = await ModelRunner.LoadAsync(
+        new ModelRunnerOptions
+        {
+            ModelPath = "/models/my-model-q4_k_m.gguf",
+            ContextSize = 2048,
+            MaxThreads = 1,     // or Threads = 1; both give one thread here
+        });
+
+PITFALLS ABOUT THREADS
+----------------------
+ 1. DO NOT SET Threads TO Environment.ProcessorCount. That is the LOGICAL
+    count, which on a hyperthreaded processor is twice the number of cores.
+    Both engines are measurably slower there, and erratic. If you want "as many
+    as this machine can use", set nothing at all.
+
+ 2. DO NOT EXPECT MaxThreads TO DO ANYTHING ONCE Threads IS SET. It bounds the
+    library's own choice and nothing else. Setting both and then wondering why
+    the ceiling was ignored is the commonest mistake with it; if you want a
+    ceiling, leave Threads null.
+
+ 3. DO NOT ASSUME 16 THREADS BEATS 8 -- OR THAT 8 BEATS 16. Which is faster
+    depends on the road, the model and the processor, and between two sensible
+    counts the difference is usually a few per cent. Measure, or leave it
+    alone.
+
+ 4. DO NOT CHANGE THE OPTIONS OBJECT AFTER THE LOAD AND EXPECT ANYTHING TO
+    HAPPEN. The count is fixed when the model is loaded. Load again to change
+    it.
+
+ 5. DO NOT READ IRunningModel.Options.Threads AS "THE COUNT IN USE". On the
+    GGUF road that property is the object you handed in, so it is null if you
+    left it null. The ONNX road's Options.Threads IS the resolved count.
+
+ 6. DO NOT REACH FOR THREADS TO GET REPRODUCIBILITY, OR BLAME THEM FOR THE LACK
+    OF IT. The thread count does not change which tokens come out. Temperature
+    does; set it to 0 for anything you will test.
+
+ 7. DO NOT CONFUSE QuantizeOptions.Threads WITH THESE. That one belongs to
+    rewriting a file at a smaller type and has a default of its own; see
+    QUANTIZING A GGUF MODEL.
+
+
 THE CACHE, CANCELLATION AND THREADS
 ===================================
 
@@ -988,6 +2380,9 @@ THE THREADING MODEL
     cache, and they share only the native library and the log handler. Memory
     is the only limit.
   - THE LOG HANDLER IS PROCESS-WIDE, and may be called on any engine thread.
+  - THE ONNX ROAD HAS ITS OWN RULES and one of them is different: a second run
+    on a loaded ONNX model is REFUSED rather than serialized behind a gate.
+    THREAD SAFETY ON THIS ROAD, under RUNNING ONNX MODELS, has the whole of it.
 
 
 LOGGING
@@ -1056,7 +2451,9 @@ THE SETTINGS THAT MATTER, in order of effect:
     UseExtraBufferTypes  false when memory is tight; measured: same tokens per
                     second, half the load time, and one large buffer saved
     Threads         defaults to the PHYSICAL core count, which is usually
-                    right; lower it when the process shares the machine
+                    right; lower it when the process shares the machine, or
+                    set MaxThreads when you do not know the machine. THREADS:
+                    HOW MANY ARE USED, AND HOW TO CONTROL IT has the whole of it
     GpuLayers       null lets the engine offload everything where there is an
                     accelerator. 0 pins everything to the CPU, which is what
                     a CPU-only build does anyway
@@ -1307,12 +2704,19 @@ Exception. Catch the base type to catch all of it.
                                  path; the engine would not read the file as a
                                  model; no inference context could be created;
                                  a chat dialect was named with no template
-                                 behind it; an adapter would not load or apply
+                                 behind it; an adapter would not load or apply;
+                                 a quantization the engine refused. ON THE ONNX
+                                 ROAD it is also every graph or bundle the
+                                 managed engine refuses to load, naming what
+                                 it refused
       InferenceException         a decode failed, was aborted, or ran out of
                                  context memory; a prompt longer than the
                                  context; an empty prompt; an embedding input
                                  that is too long, tokenizes to nothing, or
-                                 comes from a model with no embedding output
+                                 comes from a model with no embedding output.
+                                 ON THE ONNX ROAD it is a run that could not
+                                 proceed and a second run started while one is
+                                 in flight
       ChatTemplateException      a chat template would not parse or would not
                                  render this request; the Native dialect was
                                  asked to render tools
@@ -1324,11 +2728,18 @@ Exception. Catch the base type to catch all of it.
 Framework exceptions you will also see: ArgumentNullException (a null options
 object, prompt, request, token list, input list or adapter list),
 ArgumentException (an option out of range, a LoraAdapterOptions with no path,
-a blank probe path), ObjectDisposedException (any member after Dispose, and an
+a blank probe path, a quantization whose two paths name one file),
+ArgumentOutOfRangeException (a quantization type the engine does not write),
+FileNotFoundException and DirectoryNotFoundException (a quantization's input
+file and its output's directory), ObjectDisposedException (any member after Dispose, and an
 enumeration that was open when the model was disposed),
 OperationCanceledException, InvalidOperationException (calling a member of a
-model from inside an await foreach over that same model), and IOException and
-UnauthorizedAccessException from the file system, unwrapped.
+model from inside an await foreach over that same model; and, on either road,
+the mismatched-package guard described under RUNNING ONNX MODELS),
+NotSupportedException (a member of IRunningModel, or a constraint setting, that
+an ONNX bundle cannot honour -- it is a framework exception and this catch-all
+does NOT catch it), and IOException and UnauthorizedAccessException from the
+file system, unwrapped.
 
 MOST MESSAGES CARRY THE ENGINE'S OWN LAST WORDS. The engine reports the real
 reason for a failed load or decode only through its log, so the library keeps
@@ -1725,6 +3136,11 @@ PERFORMANCE TIPS
   - QUANTIZE THE CACHE, NOT THE ATTENTION, FIRST. KeyCacheType and
     ValueCacheType Q8_0 halve the cache for very little accuracy; changing
     FlashAttention away from Auto rarely helps and sometimes fails the load.
+  - LEAVE THE THREAD COUNT ALONE UNLESS YOU HAVE MEASURED, and if you ship to
+    machines you have never seen, set MaxThreads rather than Threads: a count
+    that suits a big server oversubscribes a small one. THREADS: HOW MANY ARE
+    USED, AND HOW TO CONTROL IT has the rule, the precedence and a program
+    that measures your own machine in a minute.
 
 
 COMMON PITFALLS TO AVOID
@@ -1788,6 +3204,35 @@ COMMON PITFALLS TO AVOID
 14. DO NOT forget to dispose. An IRunningModel holds the weights, a context, a
     thread and possibly a mapped file. `await using` is one word.
 
+15. DO NOT expect a CancellationToken to stop a quantization that has started.
+    The native quantizer cannot be interrupted, so the token is honoured
+    before the engine is asked and not after; the call runs to the end. It is
+    the one place in this package where a token does less than it looks like
+    it does, and it is documented rather than papered over.
+
+16. DO NOT quantize an already-quantized file to save a step. It needs
+    AllowRequantize, and what comes out is measurably worse than quantizing
+    the F16 or BF16 file once. Keep the unquantized file if you can.
+
+17. DO NOT hand QuantizeAsync the same path twice. An output that names the
+    input is ArgumentException, not an in-place rewrite; a quantization reads
+    one file and writes another, and the input is never modified.
+
+18. DO NOT mix the two roads. ModelRunner.LoadAsync reads a GGUF file and
+    OnnxModel.LoadAsync reads an ONNX graph; neither reads the other's format,
+    and each says so when it is handed the wrong one. RUNNING ONNX MODELS has
+    fourteen more pitfalls that belong to that road alone.
+
+19. DO NOT install this package and CodeBrix.Ollama.ModelManager at different
+    versions. They are released together and must be installed together; a
+    mixture builds without complaint and then fails at run time with a message
+    telling you to do exactly this.
+
+20. DO NOT SET Threads TO Environment.ProcessorCount, and do not expect
+    MaxThreads to do anything once Threads is set. Those are the two mistakes
+    that cost real speed; THREADS: HOW MANY ARE USED, AND HOW TO CONTROL IT
+    has seven more pitfalls that belong to the thread settings on both roads.
+
 
 WHAT THIS PACKAGE DOES NOT DO
 =============================
@@ -1797,6 +3242,10 @@ Do NOT reach for this package to:
     here: this package takes a path to a file that already exists. That is the
     separate CodeBrix.Ollama.ModelManager package, whose ResolveAsync hands
     you exactly the path this one wants.
+  - CONVERT a checkpoint into a GGUF file, or put a file it wrote away as a
+    model. It quantizes a GGUF file that already exists, and hands back a
+    path; converting a publisher's checkpoint and storing the result belong to
+    CodeBrix.Ollama.ModelManager.
   - Talk to `ollama serve`, or be talked to. It is not a server and it has no
     client: no listener, no port, no /api/chat, no keep-alive, no model
     unloading protocol. It does not need Ollama installed and never looks for
@@ -1809,6 +3258,16 @@ Do NOT reach for this package to:
     reserved for that path; nothing uses it in this version.
   - QUANTIZE, CONVERT OR WRITE a model file. The engine can do it; none of it
     is exposed here. No safetensors, no GGUF writing, no re-quantization.
+    Nothing here writes an ONNX graph either: the ONNX road READS a graph and
+    runs it, and making one smaller is the separate
+    CodeBrix.Ollama.ModelManager package's work.
+  - TRAIN, FINE-TUNE OR RUN AN ONNX GRAPH ON AN ACCELERATOR. The managed ONNX
+    interpreter is CPU-only by design, because that is what runs everywhere
+    with nothing installed.
+  - TURN GENERATED NOTATION TEXT INTO MUSIC. A text model that writes a
+    notation format writes TEXT and this package hands you the text; turning
+    it into MIDI belongs to another library. The MIDI driver here generates
+    MIDI events directly, from a MIDI model, and is a different thing.
   - SAVE OR RESTORE a session. There is no state serialization on the
     contract: a conversation is the messages you hold, not a blob the library
     hands back.
@@ -1821,8 +3280,10 @@ Do NOT reach for this package to:
 This package IS for: loading a GGUF file into your own process; completing a
 prompt; holding a conversation through the model's own chat template, with
 reasoning and tool calls separated out for you; embedding text; constraining
-output to a grammar or a JSON schema; tokenizing; and reading everything the
-engine knows about a model file.
+output to a grammar or a JSON schema; tokenizing; reading everything the engine
+knows about a model file; and -- on the other road, with nothing installed at
+all -- running an ONNX graph, generating streamed MIDI music from a MIDI model,
+and generating text from an ONNX text bundle.
 
 
 TROUBLESHOOTING
@@ -1885,9 +3346,27 @@ A request seems to hang
 
 Generation is much slower than expected
     Check GetNativeRuntimeInfo().SystemInfo for the CPU features in use and
-    Devices for what the engine can see. Then check Threads (the default is
-    the physical core count) and whether the machine is paging -- a model that
-    does not fit runs at disk speed, not processor speed.
+    Devices for what the engine can see. Then check Threads -- if your code
+    sets it at all, and especially if it sets it to
+    Environment.ProcessorCount, which is the LOGICAL count and is measurably
+    worse than leaving it alone; see THREADS: HOW MANY ARE USED, AND HOW TO
+    CONTROL IT. Then check whether the machine is paging -- a model that does
+    not fit runs at disk speed, not processor speed.
+
+"...this engine does not implement the operator '...'"
+    An ONNX graph asking for something the managed interpreter does not
+    implement, refused at load with the node, the operator and the domain
+    named, and a list of what it does implement. Nothing is half-loaded; see
+    WHAT IS SUPPORTED AND WHAT IS REFUSED under RUNNING ONNX MODELS.
+
+"...was built against CodeBrix.Ollama.Core contract revision N, but contract
+revision M was loaded"
+    The two CodeBrix.Ollama packages are installed at different versions.
+    Install both at the same version. Nothing else causes this message.
+
+An ONNX conversation re-reads its whole history every turn
+    It is meant to. There is no prefix cache on that road and ClearCacheAsync
+    has nothing to clear; the GGUF road is the one with the cache.
 
 
 WORKING EXAMPLES ON GITHUB
@@ -1957,6 +3436,22 @@ Feature-to-test-file map:
   Finding and checking the native library
     https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelRunner.Tests/Native/NativeLibraryLoaderTests.cs
 
+  ON THE ONNX ROAD -- loading a graph, the three load forms, every refusal,
+  and running one against recorded answers
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelRunner.Tests/Onnx/OnnxModelTests.cs
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelRunner.Tests/Onnx/OnnxSessionTests.cs
+
+  Generating MIDI: the whole driver over a small model, the streaming
+  behaviours, and the Standard MIDI File round trip
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelRunner.Tests/Drivers/SkyTnt/MidiGenerationModelTests.cs
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelRunner.Tests/Midi/MidiFileTests.cs
+
+  Generating text from an ONNX bundle, including every refusal by name
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelRunner.Tests/Drivers/CausalLm/OnnxCausalLmModelTests.cs
+
+  Both packages used together, which is the only place they meet
+    https://github.com/ellisnet/CodeBrix.Ollama/tree/main/tests/CodeBrix.Ollama.EndToEnd.Tests
+
 
 QUICK REFERENCE CARD
 ====================
@@ -1980,11 +3475,16 @@ CHAT        ChatAsync(request, ct) / ChatToEndAsync(request, ct)
             RenderChatPromptAsync(request, ct)      the prompt, no generation
 OTHER       TokenizeAsync, DetokenizeAsync, EmbedAsync,
             SetLoraAdaptersAsync, ClearCacheAsync
+QUANTIZE    QuantizeResult r = await ModelRunner.QuantizeAsync(
+                inPath, outPath, GgufQuantizationType.Q4_K_M);
+            nothing installed; byte for byte the engine's own tool's output;
+            QuantizeOptions { Threads 0, AllowRequantize false, Pure false };
+            the token is honoured BEFORE the engine starts, not during
 OPTIONS     ModelPath, LoadMode (MemoryMap), ContextSize, GpuLayers, Threads,
-            BatchSize 2048 / PhysicalBatchSize 512, KeyCacheType /
-            ValueCacheType, UseExtraBufferTypes (true), EmbeddingsMode,
-            EmbeddingPooling, ChatTemplateDialect, OllamaTemplate,
-            JinjaTemplate, LoadProgress
+            BatchThreads, MaxThreads, BatchSize 2048 / PhysicalBatchSize 512,
+            KeyCacheType / ValueCacheType, UseExtraBufferTypes (true),
+            EmbeddingsMode, EmbeddingPooling, ChatTemplateDialect,
+            OllamaTemplate, JinjaTemplate, LoadProgress
 SAMPLING    Ollama's defaults: temperature 0.8, top-k 40, top-p 0.9,
             repeat penalty 1.1 over the last 64 generated tokens.
             Temperature 0 is greedy and reproducible
@@ -1997,11 +3497,23 @@ STREAMING   every update until IsFinal; the final one carries FinishReason,
 THREADS     one worker thread per model; requests serialized; tokenize,
             detokenize and render do not wait; never call a member from
             inside that model's own await foreach
+HOW MANY    say nothing -> GGUF one per PHYSICAL core, ONNX one per
+            PERFORMANCE core; Threads (and BatchThreads) -> used EXACTLY, cap
+            ignored; MaxThreads -> a ceiling on the library's own choice only.
+            Below 1 is refused by name. Never set Threads to
+            Environment.ProcessorCount. See THREADS: HOW MANY ARE USED, AND
+            HOW TO CONTROL IT
 ERRORS      ModelRunnerException: NativeLibraryException, ModelLoadException,
-            InferenceException, ChatTemplateException, GrammarException
+            InferenceException, ChatTemplateException, GrammarException.
+            NotSupportedException (the ONNX road's refusals) is a FRAMEWORK
+            exception and is not under that base type
+ONNX        the other road, with nothing installed and no native library:
+            OnnxModel (tensors in, tensors out), MidiGenerationModel (streamed
+            MIDI events) and OnnxCausalLmModel (text, as IRunningModel). See
+            RUNNING ONNX MODELS, which has a quick reference of its own
 MANAGER     CodeBrix.Ollama.ModelManager is a separate package, with its own
             AGENT-README, that turns a model NAME into the file path this
-            package loads.
+            package loads. INSTALL BOTH AT THE SAME VERSION.
 
 
 ================================================================================

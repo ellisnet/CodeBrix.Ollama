@@ -84,6 +84,13 @@ internal static unsafe class ParameterMapper
                 + $"leave it null to take {nameof(ModelRunnerOptions.Threads)}.", nameof(options));
         }
 
+        if (options.MaxThreads.HasValue && options.MaxThreads.Value < 1)
+        {
+            throw new ArgumentException(
+                $"{nameof(ModelRunnerOptions)}.{nameof(ModelRunnerOptions.MaxThreads)} must be at least 1; "
+                + "leave it null for no cap.", nameof(options));
+        }
+
         if (!File.Exists(options.ModelPath))
         {
             throw new ModelLoadException($"There is no model file at '{options.ModelPath}'.");
@@ -170,9 +177,8 @@ internal static unsafe class ParameterMapper
         parameters.NSeqMax = options.MaxSequences;
         parameters.NRsSeq = options.RecurrentStateSnapshots;
 
-        int threads = ResolveThreads(options);
-        parameters.NThreads = threads;
-        parameters.NThreadsBatch = options.BatchThreads ?? threads;
+        parameters.NThreads = ResolveThreads(options);
+        parameters.NThreadsBatch = ResolveBatchThreads(options);
 
         parameters.FlashAttnType = MapFlashAttention(options.FlashAttention);
         parameters.TypeK = MapCacheType(options.KeyCacheType, parameters.TypeK);
@@ -194,14 +200,37 @@ internal static unsafe class ParameterMapper
         return parameters;
     }
 
-    /// <summary>The thread count a context should run with.</summary>
+    /// <summary>The thread count a context should generate with.</summary>
     /// <param name="options">The options.</param>
     /// <returns>The count, never below one.</returns>
-    public static int ResolveThreads(ModelRunnerOptions options)
-    {
-        if (options.Threads.HasValue) return Math.Max(1, options.Threads.Value);
-        return Math.Max(1, EnginePhysicalCores.Count());
-    }
+    /// <remarks>
+    /// <see cref="ModelRunnerOptions.Threads"/> is used exactly as it stands and
+    /// <see cref="ModelRunnerOptions.MaxThreads"/> is ignored for it; a cap bounds only the physical-core
+    /// count this falls back to. See <see cref="EngineThreadCount"/>, which is the one place the rule is
+    /// written.
+    /// </remarks>
+    public static int ResolveThreads(ModelRunnerOptions options) =>
+        ResolveThreads(options, EnginePhysicalCores.Count());
+
+    /// <summary>
+    /// The thread count a context should generate with, against a stated detected count, which is how the
+    /// rule is exercised against a processor other than the one the code is running on.
+    /// </summary>
+    /// <param name="options">The options.</param>
+    /// <param name="detected">What the processor suggests when the options state no count.</param>
+    /// <returns>The count, never below one.</returns>
+    public static int ResolveThreads(ModelRunnerOptions options, int detected) =>
+        EngineThreadCount.Resolve(options.Threads, options.MaxThreads, detected);
+
+    /// <summary>The thread count a context should process a prompt with.</summary>
+    /// <param name="options">The options.</param>
+    /// <returns>The count, never below one.</returns>
+    /// <remarks>
+    /// <see cref="ModelRunnerOptions.BatchThreads"/> is used exactly as it stands; with none stated this is
+    /// whatever <see cref="ResolveThreads(ModelRunnerOptions)"/> answered, cap and all.
+    /// </remarks>
+    public static int ResolveBatchThreads(ModelRunnerOptions options) =>
+        options.BatchThreads ?? ResolveThreads(options);
 
     /// <summary>Maps the public load mode onto the engine's.</summary>
     /// <param name="mode">The mode.</param>

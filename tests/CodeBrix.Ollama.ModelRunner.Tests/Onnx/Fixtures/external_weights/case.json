@@ -1,0 +1,28 @@
+{
+  "name": "external_weights",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "x",
+      "type": "float",
+      "shape": [
+        2,
+        12
+      ],
+      "file": "in_x.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        2,
+        20
+      ],
+      "file": "out_y.bin"
+    }
+  ],
+  "external": "model.onnx.data",
+  "note": "Its weights are in a side file, which is how a model too large for one message stores them."
+}

@@ -1,0 +1,92 @@
+# oracle-converter.patch - the RECORDED patch that turns the inference engine's own
+# convert_hf_to_gguf.py into the test ORACLE for CodeBrix.Ollama.ModelManager's
+# "PyTorch checkpoint -> GGUF" conversion.
+#
+#   Upstream project : llama.cpp (ggml-org/llama.cpp), MIT
+#   Tag              : b10221
+#   Commit           : 815a2a5915f22ce6a760c676389c5dfe8535c08f
+#   Applies to       : a pristine checkout of that tag, from its root
+#                        git apply oracle-converter.patch
+#                        patch -p1 < oracle-converter.patch
+#   Touches          : conversion/base.py ONLY, and inside it ONLY tokenizer LOADING
+#                      and the pre-tokenizer RECOGNITION TABLE. It does not touch any
+#                      tensor, metadata or vocabulary-WRITING code, so when our GGUF
+#                      and the oracle's disagree, this patch is the LAST suspect.
+#   Prerequisite     : sentencepiece must be importable in the interpreter that runs
+#                      the converter. _create_vocab_sentencepiece imports it before it
+#                      checks whether tokenizer.model exists, so without the module
+#                      EVERY Llama checkpoint dies with ModuleNotFoundError, which
+#                      LlamaModel.set_vocab does not catch.
+#
+# HUNK 1 - conversion/base.py, TextModel.get_vocab_base
+#   (a) trust_remote_code=True on AutoTokenizer.from_pretrained.
+#       MuPT ships a custom tokenizer class (tokenization_mupt.MuPTTokenizer, named by
+#       tokenizer_config.json's auto_map), and transformers refuses to execute repository
+#       code unless it is told to. Unpatched, the converter dies with
+#         ValueError: The repository ... contains custom code which must be executed to
+#         correctly load the model. ... Please pass the argument `trust_remote_code=True`.
+#       The class it then loads is the GPT-2 byte-level BPE verbatim (same regex,
+#       same bytes_to_unicode, merges from merges.txt), so nothing about the vocabulary
+#       changes - it is only allowed to be read.
+#   (b) tokenizer.vocab -> tokenizer.get_vocab().
+#       `vocab` is a property of PreTrainedTokenizerFast ONLY, where it is defined as
+#       `return self.get_vocab()`. MuPT has no tokenizer.json, so AutoTokenizer can only
+#       build the SLOW tokenizer, which has get_vocab() but no `vocab`; unpatched, the
+#       converter dies with
+#         AttributeError: MuPTTokenizer has no attribute vocab
+#       For every fast tokenizer the two expressions are the same object, so this hunk
+#       changes the result for no checkpoint that converts today; it only lets a
+#       slow-tokenizer checkpoint through.
+#
+# HUNK 2 - conversion/base.py, TextModel.get_vocab_base_pre
+#   TWO pre-tokenizer fingerprints added to the recognition table as "gpt-2".
+#   get_vocab_base_pre encodes a fixed check text, hashes the token IDs and looks the
+#   hash up; the hash depends on the VOCABULARY, so any vocabulary not already in the
+#   table is refused with NotImplementedError. Both hashes were read off that refusal.
+#     73c29a8d8ef59108724c8a748d0718b1f1fcd7446bb119a6fde4b599d26d7797
+#       m-a-p/MuPT-v1-8192-190M. "gpt-2" is the correct answer and not a convenience:
+#       tokenization_mupt.py carries the GPT-2 pre-tokenizer regex character for
+#       character with add_prefix_space=False, and the engine's own GPT-2 pre-tokenizer
+#       reproduces the Python tokenizer's ids exactly over six probe strings, multi-byte
+#       UTF-8 and runs of whitespace included.
+#     2fe3e357fc832a625c11f8e1d788f33953e34ff1b35e7d501ebabbfab3695c12
+#       the synthetic fixture vocabulary that generate_fixtures.py trains, beside this
+#       file. It is a byte-level BPE of 320 tokens - 256 byte symbols, four specials and
+#       sixty merges - built the GPT-2 way, so "gpt-2" is again the right answer. Every
+#       fixture variant shares one vocabulary and therefore one hash.
+#   Both entries are placed directly after openai-community/gpt2, among the other
+#   "gpt-2" entries.
+#
+--- a/conversion/base.py
++++ b/conversion/base.py
+@@ -1344,13 +1344,13 @@
+         toktypes: list[int] = []
+ 
+         from transformers import AutoTokenizer
+-        tokenizer = AutoTokenizer.from_pretrained(self.dir_model)
+-        vocab_size = self.hparams.get("vocab_size", len(tokenizer.vocab))  # ty: ignore[unresolved-attribute]
+-        assert max(tokenizer.vocab.values()) < vocab_size  # ty: ignore[unresolved-attribute]
++        tokenizer = AutoTokenizer.from_pretrained(self.dir_model, trust_remote_code=True)
++        vocab_size = self.hparams.get("vocab_size", len(tokenizer.get_vocab()))  # ty: ignore[unresolved-attribute]
++        assert max(tokenizer.get_vocab().values()) < vocab_size  # ty: ignore[unresolved-attribute]
+ 
+         tokpre = self.get_vocab_base_pre(tokenizer)
+ 
+-        reverse_vocab = {id_: encoded_tok for encoded_tok, id_ in tokenizer.vocab.items()}  # ty: ignore[unresolved-attribute]
++        reverse_vocab = {id_: encoded_tok for encoded_tok, id_ in tokenizer.get_vocab().items()}  # ty: ignore[unresolved-attribute]
+         added_vocab = tokenizer.get_added_vocab()  # ty: ignore[unresolved-attribute]
+ 
+         added_tokens_decoder = tokenizer.added_tokens_decoder  # ty: ignore[unresolved-attribute]
+@@ -1493,6 +1493,12 @@
+         if chkhsh == "3ce83efda5659b07b1ad37ca97ca5797ea4285d9b9ab0dc679e4a720c9da7454":
+             # ref: https://huggingface.co/openai-community/gpt2
+             res = "gpt-2"
++        if chkhsh == "73c29a8d8ef59108724c8a748d0718b1f1fcd7446bb119a6fde4b599d26d7797":
++            # ref: https://huggingface.co/m-a-p/MuPT-v1-8192-190M
++            res = "gpt-2"
++        if chkhsh == "2fe3e357fc832a625c11f8e1d788f33953e34ff1b35e7d501ebabbfab3695c12":
++            # ref: CodeBrix.Ollama.ModelManager.Tests, Convert/Fixtures/generate_fixtures.py
++            res = "gpt-2"
+         if chkhsh == "32d85c31273f8019248f2559fed492d929ea28b17e51d81d3bb36fff23ca72b3":
+             # ref: https://huggingface.co/stabilityai/stablelm-2-zephyr-1_6b
+             res = "stablelm2"

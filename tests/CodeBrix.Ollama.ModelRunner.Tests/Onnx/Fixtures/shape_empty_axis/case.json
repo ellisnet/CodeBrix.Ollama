@@ -1,0 +1,26 @@
+{
+  "name": "shape_empty_axis",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        2,
+        0,
+        4
+      ],
+      "file": "in_a.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "int64",
+      "shape": [
+        3
+      ],
+      "file": "out_y.bin"
+    }
+  ]
+}

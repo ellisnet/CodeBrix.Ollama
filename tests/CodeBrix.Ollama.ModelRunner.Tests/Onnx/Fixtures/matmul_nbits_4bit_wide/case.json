@@ -1,0 +1,26 @@
+{
+  "name": "matmul_nbits_4bit_wide",
+  "opset": 21,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        3,
+        128
+      ],
+      "file": "in_a.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        3,
+        40
+      ],
+      "file": "out_y.bin"
+    }
+  ]
+}

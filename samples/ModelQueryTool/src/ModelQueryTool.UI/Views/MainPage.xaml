@@ -4,6 +4,7 @@
     xmlns:d="clr-namespace:Microsoft.UI.Xaml.Data;assembly=CodeBrix.Platform.UI"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:vm="clr-namespace:ModelQueryTool.ViewModels;assembly=ModelQueryTool.Core"
+    xmlns:term="using:CodeBrix.Platform.UI.TerminalView"
     xmlns:local="using:ModelQueryTool.Views"
     FontFamily="{StaticResource RobotoFont}"
     Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
@@ -12,10 +13,43 @@
         <vm:MainViewModel />
     </Page.DataContext>
 
-    <Grid>
-        <TextBlock Text="{d:Binding Greeting}"
-                   FontSize="24"
-                   HorizontalAlignment="Center"
-                   VerticalAlignment="Center" />
+    <Grid Background="#FF000000">
+        <Grid.RowDefinitions>
+            <!-- The terminal needs a bounded star cell: its grid follows the control's size -->
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <term:TerminalControl x:Name="Terminal" Grid.Row="0" Margin="4" />
+
+        <!-- The thin status bar along the bottom: collapsed unless something long is running -->
+        <Grid Grid.Row="1"
+              Visibility="{d:Binding StatusBarVisibility}"
+              Background="#FF14171C"
+              Padding="12,6,12,8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                <TextBlock Text="{d:Binding StatusCaption}"
+                           FontSize="11.5"
+                           Foreground="#FFB6BDC8"
+                           Margin="0,0,0,4"
+                           TextTrimming="CharacterEllipsis" />
+                <ProgressBar Height="4"
+                             Minimum="0"
+                             Maximum="100"
+                             Value="{d:Binding StatusProgress}"
+                             IsIndeterminate="{d:Binding IsStatusIndeterminate}" />
+            </StackPanel>
+
+            <Button Grid.Column="1"
+                    Content="Cancel"
+                    Margin="12,0,0,0"
+                    VerticalAlignment="Center"
+                    Command="{d:Binding CancelCommand}" />
+        </Grid>
     </Grid>
 </Page>

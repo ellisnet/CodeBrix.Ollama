@@ -87,6 +87,7 @@ public sealed unsafe class ParameterMapperTests
     [InlineData("context")]
     [InlineData("threads")]
     [InlineData("batchThreads")]
+    [InlineData("maxThreads")]
     public void Validate_refuses_a_count_the_engine_cannot_use(string which)
     {
         //Arrange
@@ -99,6 +100,7 @@ public sealed unsafe class ParameterMapperTests
             case "context": options.ContextSize = 0; break;
             case "threads": options.Threads = 0; break;
             case "batchThreads": options.BatchThreads = 0; break;
+            case "maxThreads": options.MaxThreads = 0; break;
         }
 
         //Act
@@ -106,6 +108,36 @@ public sealed unsafe class ParameterMapperTests
 
         //Assert
         act.Should().Throw<ArgumentException>();
+    }
+
+    /// <summary>A cap below one is refused by name, so the message says which property to fix.</summary>
+    /// <param name="cap">The cap that cannot be met.</param>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void Validate_refuses_a_thread_cap_below_one_and_names_it(int cap)
+    {
+        //Arrange
+        ModelRunnerOptions options = Minimal();
+        options.MaxThreads = cap;
+
+        //Act
+        Action act = () => ParameterMapper.Validate(options);
+
+        //Assert
+        act.Should().Throw<ArgumentException>().Which.Message.Should().Contain("MaxThreads");
+    }
+
+    /// <summary>A cap of one is the smallest one a caller can ask for, and it is accepted.</summary>
+    [Fact]
+    public void Validate_accepts_a_thread_cap_of_one()
+    {
+        //Arrange
+        ModelRunnerOptions options = Minimal();
+        options.MaxThreads = 1;
+
+        //Act and assert
+        ParameterMapper.Validate(options);
     }
 
     /// <summary>An adapter whose file is not there is a load problem.</summary>
@@ -308,7 +340,11 @@ public sealed unsafe class ParameterMapperTests
         ((IntPtr)mapped.AbortCallbackData).Should().NotBe(IntPtr.Zero);
     }
 
-    /// <summary>With no thread count asked for, the physical core count is used.</summary>
+    /// <summary>
+    /// With no thread count asked for and no cap, the PHYSICAL core count is used - not the performance-core
+    /// count the managed ONNX engine defaults to, because the native engine was measured on a processor with
+    /// two kinds of core and is faster on every physical core than on the fast ones alone.
+    /// </summary>
     [Fact]
     public void ResolveThreads_falls_back_to_the_physical_core_count()
     {
@@ -336,6 +372,115 @@ public sealed unsafe class ParameterMapperTests
         ParameterMapper.ResolveThreads(options).Should().Be(3);
     }
 
+    /// <summary>A cap bounds the count the library works out for itself.</summary>
+    [Fact]
+    public void ResolveThreads_bounds_the_automatic_count_by_the_cap()
+    {
+        //Arrange
+        ModelRunnerOptions options = Minimal();
+        options.MaxThreads = 4;
+
+        //Act and assert
+        ParameterMapper.ResolveThreads(options, 16).Should().Be(4);
+    }
+
+    /// <summary>A cap larger than the machine changes nothing: a small machine still gets what it has.</summary>
+    [Fact]
+    public void ResolveThreads_with_a_cap_above_the_core_count_changes_nothing()
+    {
+        //Arrange
+        ModelRunnerOptions options = Minimal();
+        options.MaxThreads = 64;
+
+        //Act and assert
+        ParameterMapper.ResolveThreads(options, 4).Should().Be(4);
+    }
+
+    /// <summary>A cap of one really does mean one thread.</summary>
+    [Fact]
+    public void ResolveThreads_with_a_cap_of_one_gives_one_thread()
+    {
+        //Arrange
+        ModelRunnerOptions options = Minimal();
+        options.MaxThreads = 1;
+
+        //Act and assert
+        ParameterMapper.ResolveThreads(options, 16).Should().Be(1);
+    }
+
+    /// <summary>An explicit count always wins, and the cap has nothing to say about it.</summary>
+    [Fact]
+    public void ResolveThreads_lets_an_explicit_count_win_over_the_cap()
+    {
+        //Arrange
+        ModelRunnerOptions options = Minimal();
+        options.Threads = 32;
+        options.MaxThreads = 4;
+
+        //Act and assert
+        ParameterMapper.ResolveThreads(options, 16).Should().Be(32);
+    }
+
+    /// <summary>The cap is never applied to a real machine's count from below: it only ever lowers it.</summary>
+    [Fact]
+    public void ResolveThreads_with_a_cap_never_raises_the_count()
+    {
+        //Arrange
+        ModelRunnerOptions options = Minimal();
+        options.MaxThreads = 64;
+
+        //Act
+        int capped = ParameterMapper.ResolveThreads(options);
+        int uncapped = ParameterMapper.ResolveThreads(Minimal());
+
+        //Assert
+        capped.Should().Be(uncapped);
+    }
+
+    /// <summary>Prompt-processing threads follow the generation threads unless they are set.</summary>
+    [Fact]
+    public void ResolveBatchThreads_follows_the_generation_threads()
+    {
+        //Arrange
+        ModelRunnerOptions options = Minimal();
+        options.Threads = 5;
+
+        //Act and assert
+        ParameterMapper.ResolveBatchThreads(options).Should().Be(5);
+    }
+
+    /// <summary>A prompt-processing count that was asked for is used as it stands.</summary>
+    [Fact]
+    public void ResolveBatchThreads_uses_the_count_the_options_name()
+    {
+        //Arrange
+        ModelRunnerOptions options = Minimal();
+        options.Threads = 5;
+        options.BatchThreads = 9;
+
+        //Act and assert
+        ParameterMapper.ResolveBatchThreads(options).Should().Be(9);
+    }
+
+    /// <summary>
+    /// The cap reaches prompt processing through the generation count it follows, and is ignored once the
+    /// prompt-processing count is stated for itself.
+    /// </summary>
+    [Fact]
+    public void ResolveBatchThreads_takes_the_cap_only_through_the_count_it_follows()
+    {
+        //Arrange
+        ModelRunnerOptions followed = Minimal();
+        followed.MaxThreads = 1;
+        ModelRunnerOptions stated = Minimal();
+        stated.MaxThreads = 1;
+        stated.BatchThreads = 12;
+
+        //Act and assert
+        ParameterMapper.ResolveBatchThreads(followed).Should().Be(1);
+        ParameterMapper.ResolveBatchThreads(stated).Should().Be(12);
+    }
+
     /// <summary>Batch threads follow the generation threads unless they are set.</summary>
     [Fact]
     public void BuildContextParams_defaults_batch_threads_to_the_generation_threads()
@@ -350,6 +495,42 @@ public sealed unsafe class ParameterMapperTests
 
         //Assert
         mapped.NThreadsBatch.Should().Be(4);
+    }
+
+    /// <summary>A cap reaches both thread fields of the context the engine is handed.</summary>
+    [Fact]
+    public void BuildContextParams_carries_the_thread_cap_into_both_thread_counts()
+    {
+        //Arrange
+        NativeLibraryLoader.EnsureLoaded();
+        ModelRunnerOptions options = Minimal();
+        options.MaxThreads = 1;
+
+        //Act
+        LlamaContextParams mapped = ParameterMapper.BuildContextParams(options, null, false, null);
+
+        //Assert
+        mapped.NThreads.Should().Be(1);
+        mapped.NThreadsBatch.Should().Be(1);
+    }
+
+    /// <summary>A cap does nothing to the counts a caller stated for itself.</summary>
+    [Fact]
+    public void BuildContextParams_lets_stated_counts_win_over_the_cap()
+    {
+        //Arrange
+        NativeLibraryLoader.EnsureLoaded();
+        ModelRunnerOptions options = Minimal();
+        options.Threads = 7;
+        options.BatchThreads = 11;
+        options.MaxThreads = 2;
+
+        //Act
+        LlamaContextParams mapped = ParameterMapper.BuildContextParams(options, null, false, null);
+
+        //Assert
+        mapped.NThreads.Should().Be(7);
+        mapped.NThreadsBatch.Should().Be(11);
     }
 
     /// <summary>

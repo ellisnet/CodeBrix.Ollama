@@ -1,0 +1,24 @@
+{
+  "name": "constantofshape_zero_default",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "s",
+      "type": "int64",
+      "shape": [
+        1
+      ],
+      "file": "in_s.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        4
+      ],
+      "file": "out_y.bin"
+    }
+  ]
+}

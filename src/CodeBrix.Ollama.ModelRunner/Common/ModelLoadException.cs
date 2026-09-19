@@ -4,7 +4,8 @@ namespace CodeBrix.Ollama.ModelRunner;
 
 /// <summary>
 /// Thrown when a model file, a projector or an adapter cannot be loaded: the file is missing, is not a GGUF
-/// file, uses an architecture the engine does not know, or does not fit in memory.
+/// file, uses an architecture the engine does not know, or does not fit in memory. A quantization that the
+/// engine refuses fails the same way and for the same kinds of reason, so it carries this exception too.
 /// </summary>
 public class ModelLoadException : ModelRunnerException
 {

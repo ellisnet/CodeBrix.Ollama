@@ -1,0 +1,36 @@
+{
+  "name": "equal_int64_broadcast",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "int64",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "file": "in_a.bin"
+    },
+    {
+      "name": "b",
+      "type": "int64",
+      "shape": [
+        4
+      ],
+      "file": "in_b.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "bool",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "file": "out_y.bin"
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "name": "concat_int64",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "int64",
+      "shape": [
+        2
+      ],
+      "file": "in_a.bin"
+    },
+    {
+      "name": "b",
+      "type": "int64",
+      "shape": [
+        3
+      ],
+      "file": "in_b.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "int64",
+      "shape": [
+        5
+      ],
+      "file": "out_y.bin"
+    }
+  ]
+}

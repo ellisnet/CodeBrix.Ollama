@@ -1,0 +1,24 @@
+{
+  "name": "matmul_vector_constant",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        64
+      ],
+      "file": "in_a.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        48
+      ],
+      "file": "out_y.bin"
+    }
+  ]
+}

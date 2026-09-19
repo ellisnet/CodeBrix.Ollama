@@ -5,6 +5,7 @@
 
 using System;
 using System.Collections.Generic;
+using CodeBrix.Ollama.Core;
 
 namespace CodeBrix.Ollama.ModelManager; //was previously: onnxruntime/python/tools/quantization/onnx_model.py@v1.30.0
 

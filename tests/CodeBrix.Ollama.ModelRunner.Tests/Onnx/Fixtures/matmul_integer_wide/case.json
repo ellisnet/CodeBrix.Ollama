@@ -1,0 +1,36 @@
+{
+  "name": "matmul_integer_wide",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        1,
+        40
+      ],
+      "file": "in_a.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "product",
+      "type": "int32",
+      "shape": [
+        1,
+        33
+      ],
+      "file": "out_product.bin"
+    },
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        1,
+        33
+      ],
+      "file": "out_y.bin"
+    }
+  ],
+  "note": "A reduction longer than one vector's worth, so the wide path has a tail to finish."
+}

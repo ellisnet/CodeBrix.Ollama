@@ -1,0 +1,35 @@
+{
+  "name": "simplified_layer_normalization_inv_std",
+  "opset": 21,
+  "inputs": [
+    {
+      "name": "x",
+      "type": "float",
+      "shape": [
+        2,
+        6
+      ],
+      "file": "in_x.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        2,
+        6
+      ],
+      "file": "out_y.bin"
+    },
+    {
+      "name": "inv_std",
+      "type": "float",
+      "shape": [
+        2,
+        1
+      ],
+      "file": "out_inv_std.bin"
+    }
+  ]
+}

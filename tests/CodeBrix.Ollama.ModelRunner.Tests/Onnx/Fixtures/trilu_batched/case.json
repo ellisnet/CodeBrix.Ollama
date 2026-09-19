@@ -1,0 +1,36 @@
+{
+  "name": "trilu_batched",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        2,
+        3,
+        4,
+        4
+      ],
+      "file": "in_a.bin"
+    },
+    {
+      "name": "k",
+      "type": "int64",
+      "shape": [],
+      "file": "in_k.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        2,
+        3,
+        4,
+        4
+      ],
+      "file": "out_y.bin"
+    }
+  ]
+}

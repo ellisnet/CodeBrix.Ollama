@@ -1,0 +1,34 @@
+{
+  "name": "pow_square",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "file": "in_a.bin"
+    },
+    {
+      "name": "b",
+      "type": "float",
+      "shape": [],
+      "file": "in_b.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        2,
+        3,
+        4
+      ],
+      "file": "out_y.bin"
+    }
+  ]
+}

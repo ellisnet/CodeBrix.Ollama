@@ -6,6 +6,8 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using CodeBrix.Ollama.Core;
+using CodeBrix.Ollama.Core.Tests;
 using CodeBrix.Ollama.ModelManager.Tests;
 using SilverAssertions;
 using Xunit;

@@ -56,7 +56,7 @@
     <Product>CodeBrix.Ollama.ModelManager</Product>
     <Title>CodeBrix.Ollama.ModelManager</Title>
     <Authors>Jeremy Ellis</Authors>
-    <Description>A cross-platform .NET library that downloads and maintains a local store of LLM models. Pulls models from the Ollama registry with sha256 verification and resumable downloads, keeps them in Ollama's own on-disk blob and manifest layout, lists, shows, copies, deletes and creates models from Modelfiles, reads GGUF metadata, and resolves a model name to the GGUF file on disk for an in-process runner such as CodeBrix.Ollama.ModelRunner. Also obtains models that no such registry serves - the files of a Hugging Face repository, of any list of HTTPS addresses or of a folder on disk - into the same store, and materializes them as the publisher's own file tree. Exports a model to ONNX - passing through the graphs a publisher already ships, or running the ONNX Runtime GenAI model builder or Hugging Face Optimum in a CPython the machine already has - and keeps the result in the same store as a derived bundle with its provenance. Reduces an exported graph - dynamic INT8, or block-wise four- or eight-bit weights - into another derived bundle a few times smaller than the one it came from; the weight-only modes, and dynamic INT8 on a prepared graph, are done by the library's own managed ONNX codec and quantizer, so making an existing graph smaller needs nothing installed and writes the same bytes ONNX Runtime's own tools write. Pure managed code; no server, no native libraries. It has exactly one NuGet dependency, CodeBrix.Python, which stays inert until a Python feature is used: obtaining, listing, resolving and materializing models never load it, and neither does the managed reduction engine.</Description>
+    <Description>A cross-platform .NET library that downloads and maintains a local store of LLM models. Pulls models from the Ollama registry with sha256 verification and resumable downloads, keeps them in Ollama's own on-disk blob and manifest layout, lists, shows, copies, deletes and creates models from Modelfiles, reads GGUF metadata, and resolves a model name to the GGUF file on disk for an in-process runner such as CodeBrix.Ollama.ModelRunner. Also obtains models that no such registry serves - the files of a Hugging Face repository, of any list of HTTPS addresses or of a folder on disk - into the same store, and materializes them as the publisher's own file tree. Exports a model to ONNX - passing through the graphs a publisher already ships, or running the ONNX Runtime GenAI model builder or Hugging Face Optimum in a CPython the machine already has - and keeps the result in the same store as a derived bundle with its provenance. Reduces an exported graph - dynamic INT8, or block-wise four- or eight-bit weights - into another derived bundle a few times smaller than the one it came from; the weight-only modes, and dynamic INT8 on a prepared graph, are done by the library's own managed ONNX codec and quantizer, so making an existing graph smaller needs nothing installed and writes the same bytes ONNX Runtime's own tools write. Converts a llama-family checkpoint - safetensors or PyTorch containers, one file or several shards, with a GPT-2 byte-level or SentencePiece tokenizer - into an ordinary GGUF model in the same store, which ResolveAsync then hands to an in-process runner; that conversion is the library's own managed code as well, so it needs nothing installed and no Python at all. Stores a quantized copy of a GGUF model beside it, under a name that says which quantization it is, with the source's template, parameters and licence carried over and the provenance recorded - the quantizer itself is a delegate the application supplies, because this library depends on no inference engine. Pure managed code; no server, no native libraries. It has exactly one NuGet dependency, CodeBrix.Python, which stays inert until a Python feature is used: obtaining, listing, resolving and materializing models never load it, and neither does the GGUF conversion or the managed reduction engine.</Description>
     <Copyright>Copyright (c) 2026 Jeremy Ellis and contributors</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/ellisnet/CodeBrix.Ollama</PackageProjectUrl>
@@ -67,7 +67,7 @@
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
     <IsPackable>true</IsPackable>
-    <PackageTags>ollama;llm;gguf;model;registry;download;modelfile;huggingface;bundles;onnx;export;quantization;ai;local-ai;python;CodeBrix</PackageTags>
+    <PackageTags>ollama;llm;gguf;model;registry;download;modelfile;huggingface;bundles;onnx;export;quantization;checkpoint;safetensors;convert;ai;local-ai;python;CodeBrix</PackageTags>
   </PropertyGroup>
 
   <!--
@@ -77,6 +77,37 @@
   <ItemGroup>
     <PackageReference Include="CodeBrix.Python.MitLicenseForever" Version="1.0.260.1181" />
   </ItemGroup>
+
+  <!--
+    THE SHARED PROJECT, WHICH TRAVELS INSIDE THIS PACKAGE RATHER THAN BESIDE IT.
+
+    CodeBrix.Ollama.Core holds the code this library and CodeBrix.Ollama.ModelRunner both need - the ONNX
+    codec and its protobuf reader and writer, and the tokenizer primitives. The two libraries must never
+    depend on each other, in either direction and at either level, so the shared code cannot live in one of
+    them; and there is no third NuGet package, so it cannot be a dependency either. PrivateAssets="all"
+    keeps it out of the generated .nuspec, and the target below puts its DLL into this package's own
+    lib/net10.0/ folder beside this assembly. The ModelRunner package carries its own identical copy, and an
+    application that installs both packages at the same version ends up with exactly one of them.
+
+    The family versions every package to the minute it was built and publishes them together, so the two
+    copies match. When an application mixes versions anyway, the SDK silently keeps the higher-versioned
+    copy and the older library would otherwise die deep inside an unrelated call; CoreContract.Require, at
+    the entry points of this library that reach the shared code, turns that into a sentence that says what
+    to do. See MAINTAINER-README.txt, "THE Core PROJECT".
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\CodeBrix.Ollama.Core\CodeBrix.Ollama.Core.csproj" PrivateAssets="all" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetsForTfmSpecificBuildOutput>$(TargetsForTfmSpecificBuildOutput);IncludeCoreInPackage</TargetsForTfmSpecificBuildOutput>
+  </PropertyGroup>
+
+  <Target Name="IncludeCoreInPackage" DependsOnTargets="ResolveReferences">
+    <ItemGroup>
+      <BuildOutputInPackage Include="@(ReferenceCopyLocalPaths->WithMetadataValue('ReferenceSourceTarget', 'ProjectReference'))" />
+    </ItemGroup>
+  </Target>
 
   <!-- The Python scripts this library runs ship inside the assembly, never as files on disk. -->
   <ItemGroup>

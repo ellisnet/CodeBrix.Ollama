@@ -1,0 +1,36 @@
+{
+  "name": "gather_axis1",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        3,
+        5,
+        2
+      ],
+      "file": "in_a.bin"
+    },
+    {
+      "name": "i",
+      "type": "int64",
+      "shape": [
+        2
+      ],
+      "file": "in_i.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        3,
+        2,
+        2
+      ],
+      "file": "out_y.bin"
+    }
+  ]
+}

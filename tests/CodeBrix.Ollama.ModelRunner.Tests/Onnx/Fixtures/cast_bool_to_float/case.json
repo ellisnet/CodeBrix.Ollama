@@ -1,0 +1,26 @@
+{
+  "name": "cast_bool_to_float",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "bool",
+      "shape": [
+        2,
+        5
+      ],
+      "file": "in_a.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        2,
+        5
+      ],
+      "file": "out_y.bin"
+    }
+  ]
+}
