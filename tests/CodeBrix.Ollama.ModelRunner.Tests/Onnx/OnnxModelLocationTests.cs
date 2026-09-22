@@ -12,8 +12,8 @@ public sealed class OnnxModelLocationTests
     {
         using var scratch = new TempScratchDirectory();
         OnnxModelLocation directory = OnnxModelLocation.ForDirectory(scratch.DirectoryPath, "graphs/model.onnx");
-        Assert.Equal(scratch.Combine("graphs/weights.bin"), directory.Resolve("weights.bin"));
-        Assert.Equal(scratch.Combine("shared/weights.bin"), directory.Resolve("../shared/weights.bin"));
+        Assert.Equal(scratch.Combine(Path.Combine("graphs", "weights.bin")), directory.Resolve("weights.bin"));
+        Assert.Equal(scratch.Combine(Path.Combine("shared", "weights.bin")), directory.Resolve("../shared/weights.bin"));
         var files = new Dictionary<string, string>
         {
             ["graphs/model.onnx"] = scratch.Combine("graph-blob"),
