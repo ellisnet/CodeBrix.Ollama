@@ -384,7 +384,7 @@ public sealed class OnnxCausalLmModelTests
     {
         //Arrange
         await using IOnnxCausalLmModel model = await Load();
-        IAsyncEnumerator<GenerationUpdate> updates = model
+        await using IAsyncEnumerator<GenerationUpdate> updates = model
             .GenerateAsync(Prompt, Greedy(100), TestContext.Current.CancellationToken)
             .GetAsyncEnumerator(TestContext.Current.CancellationToken);
         await updates.MoveNextAsync();
@@ -394,7 +394,13 @@ public sealed class OnnxCausalLmModelTests
 
         //Act and assert
         await act.Should().ThrowAsync<InferenceException>();
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        Func<Task> cancelledAttempt = async () => await model.GenerateToEndAsync(Prompt, Greedy(5), cancelled.Token);
+        await cancelledAttempt.Should().ThrowAsync<OperationCanceledException>();
+        await act.Should().ThrowAsync<InferenceException>();
         await updates.DisposeAsync();
+        (await Generate(model, Prompt, Greedy(5))).Should().HaveCount(5);
     }
 
     /// <summary>Clearing the cache is allowed and does nothing, because nothing is held between requests.</summary>

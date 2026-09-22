@@ -1,3 +1,4 @@
+using System;
 using CodeBrix.Ollama.ModelRunner;
 using SilverAssertions;
 using Xunit;
@@ -10,6 +11,51 @@ namespace CodeBrix.Ollama.ModelRunner.Tests;
 /// </summary>
 public sealed class OnnxArenaTests
 {
+    /// <summary>Growing decode intermediates retain a geometric history rather than one buffer per token.</summary>
+    [Fact]
+    public void Rent_reuses_capacity_as_the_context_grows()
+    {
+        //Arrange
+        var arena = new OnnxArena(true);
+
+        //Act
+        for (int context = 1; context <= 1000; context++)
+            OnnxValue.Allocate(arena, OnnxElementType.Float, new long[] { context, 1024 }, true).Release(arena);
+
+        //Assert
+        arena.PooledCount.Should().BeLessThan(35);
+    }
+
+    /// <summary>Growth headroom is reserved for reusable intermediates.</summary>
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public void Rent_keeps_nonreused_arrays_exact(bool reuse, bool poolable)
+    {
+        //Arrange
+        var arena = new OnnxArena(reuse);
+
+        //Act
+        var value = OnnxValue.Allocate(arena, OnnxElementType.Float, new long[] { 12345 }, poolable);
+
+        //Assert
+        value.Buffer.Capacity.Should().Be(12345);
+    }
+
+    /// <summary>Even a request too large for an array must not wrap around or produce an undersized buffer.</summary>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1023)]
+    [InlineData(1024)]
+    [InlineData(int.MaxValue)]
+    public void GrowthCapacity_never_shrinks_a_request(int count) =>
+        OnnxArena.GrowthCapacity(count).Should().BeGreaterThanOrEqualTo(count);
+
+    /// <summary>Headroom is capped without an overflowing intermediate.</summary>
+    [Fact]
+    public void GrowthCapacity_caps_large_valid_requests() =>
+        OnnxArena.GrowthCapacity(Array.MaxLength - 16).Should().Be(Array.MaxLength);
+
     /// <summary>A buffer that has been let go is handed out again.</summary>
     [Fact]
     public void Rent_hands_a_returned_buffer_out_again()

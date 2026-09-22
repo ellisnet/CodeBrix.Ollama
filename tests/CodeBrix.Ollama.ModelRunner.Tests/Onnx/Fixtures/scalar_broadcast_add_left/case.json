@@ -1,0 +1,36 @@
+{
+  "name": "scalar_broadcast_add_left",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        3,
+        4097
+      ],
+      "file": "in_a.bin"
+    },
+    {
+      "name": "scalar",
+      "type": "float",
+      "shape": [
+        1,
+        1
+      ],
+      "file": "in_scalar.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        3,
+        4097
+      ],
+      "file": "out_y.bin"
+    }
+  ],
+  "note": "Seed 20260921; ONNX Runtime CPU with graph optimization disabled."
+}

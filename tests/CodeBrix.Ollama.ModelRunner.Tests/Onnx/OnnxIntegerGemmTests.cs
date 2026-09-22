@@ -27,6 +27,9 @@ public sealed class OnnxIntegerGemmTests
     [InlineData(4, 129, 3)]
     [InlineData(1, 7, 9)]
     [InlineData(2, 256, 16)]
+    [InlineData(1, 0, 5)]
+    [InlineData(3, 31, 13)]
+    [InlineData(3, 1025, 101)]
     public void Multiply_on_the_wide_path_matches_the_scalar_one(int rows, int reduction, int width)
     {
         //Arrange
@@ -107,6 +110,63 @@ public sealed class OnnxIntegerGemmTests
 
         //Assert
         many.Should().BeEquivalentTo(single);
+    }
+
+    /// <summary>Grouped columns preserve full-range products, tails, and uneven worker boundaries.</summary>
+    /// <param name="signed">Whether the activation range is signed.</param>
+    /// <param name="sharedZeroPoint">Whether every weight column shares a zero point.</param>
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void Multiply_groups_preserve_extreme_values_and_worker_boundaries(bool signed, bool sharedZeroPoint)
+    {
+        //Arrange
+        const int Rows = 3;
+        const int Reduction = 1025;
+        const int Width = 101;
+        var left = new short[Rows * Reduction];
+        for (int i = 0; i < left.Length; i++)
+            left[i] = (short)((i % 3 == 0 ? 255 : 0) - (signed ? 128 : 0));
+        var packed = new sbyte[Width * Reduction];
+        for (int i = 0; i < packed.Length; i++) packed[i] = i % 5 == 0 ? (sbyte)-128 : (sbyte)127;
+        var points = new int[Width];
+        for (int i = 0; i < Width; i++) points[i] = sharedZeroPoint || (i & 1) == 0 ? -128 : 127;
+        var zeroPoints = sharedZeroPoint ? new[] { -128 } : points;
+        int leftZeroPoint = signed ? 127 : 255;
+        var reference = Reference(left, packed, leftZeroPoint, points, Rows, Reduction, Width);
+
+        //Act and assert
+        foreach (var kind in new[] { OnnxKernelKind.Avx2, OnnxKernelKind.Vector, OnnxKernelKind.Scalar })
+        {
+            var result = new int[Rows * Width];
+            OnnxIntegerGemm.Multiply(left, packed, result, leftZeroPoint, zeroPoints,
+                Rows, Reduction, Width, kind, 8);
+            result.Should().Equal(reference);
+        }
+    }
+
+    /// <summary>Long reductions retain the specified 32-bit accumulation without saturating products.</summary>
+    [Fact]
+    public void Multiply_groups_preserve_wrapping_accumulation()
+    {
+        //Arrange
+        const int Reduction = 70001;
+        const int Width = 5;
+        var left = new short[Reduction];
+        Array.Fill(left, (short)255);
+        var packed = new sbyte[Width * Reduction];
+        Array.Fill(packed, (sbyte)127);
+        var result = new int[Width];
+        int expected = unchecked((int)((long)Reduction * 255 * 255));
+
+        //Act
+        OnnxIntegerGemm.Multiply(left, packed, result, 0, new[] { -128 },
+            1, Reduction, Width, OnnxKernelKind.Avx2, 1);
+
+        //Assert
+        result.Should().OnlyContain(value => value == expected);
     }
 
     /// <summary>

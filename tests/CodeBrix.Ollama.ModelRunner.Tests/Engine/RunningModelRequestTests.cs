@@ -74,9 +74,9 @@ public sealed class RunningModelRequestTests
         tokens[0].Should().Be(ExpectedFirstToken());
     }
 
-    /// <summary>Two enumerations of one model take their turns, and neither disturbs the other's answer.</summary>
+    /// <summary>A concurrent caller is refused promptly and cannot release the active caller's gate.</summary>
     [Fact]
-    public async Task GenerateFromTokensAsync_serialises_two_concurrent_enumerations()
+    public async Task GenerateFromTokensAsync_refuses_concurrent_enumerations_without_disturbing_the_active_one()
     {
         //Arrange
         await using IRunningModel model = await ModelRunner.LoadAsync(
@@ -84,22 +84,24 @@ public sealed class RunningModelRequestTests
 
         RunningModel engine = (RunningModel)model;
 
-        //Act
-        Task<List<int>> first = Task.Run(
-            () => DrainAsync(engine, TestContext.Current.CancellationToken),
-            TestContext.Current.CancellationToken);
-        Task<List<int>> second = Task.Run(
-            () => DrainAsync(engine, TestContext.Current.CancellationToken),
-            TestContext.Current.CancellationToken);
+        await using IAsyncEnumerator<GenerationUpdate> first = engine.GenerateFromTokensAsync(
+            EngineExpectedLogits.Prompt, Greedy(), false, TestContext.Current.CancellationToken)
+            .GetAsyncEnumerator(TestContext.Current.CancellationToken);
+        await first.MoveNextAsync();
 
-        List<int>[] both = await Task.WhenAll(first, second);
+        //Act - a different task shares the model, and must finish its refusal while first is still open.
+        Func<Task> second = async () => await Task.Run(
+            () => DrainAsync(engine, TestContext.Current.CancellationToken), TestContext.Current.CancellationToken)
+            .WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        var rejection = await second.Should().ThrowAsync<InferenceException>();
+        await second.Should().ThrowAsync<InferenceException>();
 
         //Assert
         int expected = ExpectedFirstToken();
-        both[0].Should().HaveCount(1);
-        both[1].Should().HaveCount(1);
-        both[0][0].Should().Be(expected);
-        both[1][0].Should().Be(expected);
+        rejection.Which.Message.Should().Contain("refused rather than queued");
+        first.Current.Tokens.Should().Equal(expected);
+        await first.DisposeAsync();
+        (await DrainAsync(engine, TestContext.Current.CancellationToken)).Should().Equal(expected);
 
         // The logits the context holds afterwards are still the reference ones, which they would not be if
         // the two requests had been interleaved in the context's memory.
@@ -108,6 +110,116 @@ public sealed class RunningModelRequestTests
 
         logits.Should().HaveCount(EngineExpectedLogits.Prompt.Count);
         Argmax(logits[logits.Length - 1]).Should().Be(expected);
+    }
+
+    /// <summary>Creating unused enumerables leaves the model available until enumeration actually starts.</summary>
+    [Fact]
+    public async Task GenerateFromTokensAsync_acquires_only_when_enumeration_starts()
+    {
+        //Arrange
+        await using IRunningModel model = await ModelRunner.LoadAsync(Options(), TestContext.Current.CancellationToken);
+        var engine = (RunningModel)model;
+        var unused = engine.GenerateFromTokensAsync(
+            EngineExpectedLogits.Prompt, Greedy(), false, TestContext.Current.CancellationToken);
+
+        //Act
+        var first = await DrainAsync(engine, TestContext.Current.CancellationToken);
+        var second = new List<int>();
+        await foreach (var update in unused) second.AddRange(update.Tokens);
+
+        //Assert
+        first.Should().Equal(ExpectedFirstToken());
+        second.Should().Equal(first);
+    }
+
+    /// <summary>A cancelled entrant cannot take or release another generation's ownership.</summary>
+    [Fact]
+    public async Task GenerateFromTokensAsync_cancelled_entry_leaves_the_active_generation_alone()
+    {
+        //Arrange
+        await using IRunningModel model = await ModelRunner.LoadAsync(Options(), TestContext.Current.CancellationToken);
+        var engine = (RunningModel)model;
+        await using var first = engine.GenerateFromTokensAsync(
+            EngineExpectedLogits.Prompt, Greedy(), false, TestContext.Current.CancellationToken)
+            .GetAsyncEnumerator(TestContext.Current.CancellationToken);
+        await first.MoveNextAsync();
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+
+        //Act and assert
+        Func<Task> attempt = () => DrainAsync(engine, cancelled.Token);
+        await attempt.Should().ThrowAsync<OperationCanceledException>();
+        Func<Task> busy = () => DrainAsync(engine, TestContext.Current.CancellationToken);
+        await busy.Should().ThrowAsync<InferenceException>();
+        await first.DisposeAsync();
+        (await DrainAsync(engine, TestContext.Current.CancellationToken)).Should().Equal(ExpectedFirstToken());
+    }
+
+    /// <summary>Cancelling a running native request releases its generation gate for the next caller.</summary>
+    [Fact]
+    public async Task GenerateFromTokensAsync_cancellation_releases_the_generation_gate()
+    {
+        //Arrange
+        await using IRunningModel model = await ModelRunner.LoadAsync(LongRunOptions(), TestContext.Current.CancellationToken);
+        var engine = (RunningModel)model;
+        using var cancellation = new CancellationTokenSource();
+        await using var updates = engine.GenerateFromTokensAsync(
+            EngineExpectedLogits.Prompt, LongRun(), false, cancellation.Token).GetAsyncEnumerator(cancellation.Token);
+
+        //Act
+        ValueTask<bool> step = updates.MoveNextAsync();
+        cancellation.Cancel();
+
+        //Assert
+        Func<Task> complete = async () => await step;
+        await complete.Should().ThrowAsync<OperationCanceledException>();
+        await updates.DisposeAsync();
+        (await DrainAsync(engine, TestContext.Current.CancellationToken)).Should().Equal(ExpectedFirstToken());
+    }
+
+    /// <summary>A generation that fails in native evaluation still releases its gate.</summary>
+    [Fact]
+    public async Task GenerateFromTokensAsync_failure_releases_the_generation_gate()
+    {
+        //Arrange
+        await using IRunningModel model = await ModelRunner.LoadAsync(Options(), TestContext.Current.CancellationToken);
+        var engine = (RunningModel)model;
+
+        //Act
+        Func<Task> fail = async () =>
+        {
+            await foreach (var update in engine.GenerateFromTokensAsync(
+                new[] { 4096 }, Greedy(), false, TestContext.Current.CancellationToken)) { }
+        };
+
+        //Assert
+        await fail.Should().ThrowAsync<InferenceException>();
+        (await DrainAsync(engine, TestContext.Current.CancellationToken)).Should().Equal(ExpectedFirstToken());
+    }
+
+    /// <summary>Chat refuses a busy model before rendering, and a rendering failure releases ownership.</summary>
+    [Fact]
+    public async Task ChatAsync_guards_preparation_and_releases_the_gate_when_preparation_fails()
+    {
+        //Arrange - the template fails before this tokenizer-free fixture could reach native tokenization.
+        ModelRunnerOptions options = Options();
+        options.ChatTemplateDialect = ChatTemplateDialect.Jinja;
+        options.JinjaTemplate = "{{ raise_exception('deliberate preparation failure') }}";
+        await using IRunningModel model = await ModelRunner.LoadAsync(options, TestContext.Current.CancellationToken);
+        var engine = (RunningModel)model;
+        await using var first = engine.GenerateFromTokensAsync(
+            EngineExpectedLogits.Prompt, Greedy(), false, TestContext.Current.CancellationToken)
+            .GetAsyncEnumerator(TestContext.Current.CancellationToken);
+        await first.MoveNextAsync();
+        Func<Task> chat = async () => await model.ChatToEndAsync(
+            new ChatRequest(), TestContext.Current.CancellationToken);
+
+        //Act and assert
+        await chat.Should().ThrowAsync<InferenceException>();
+        await first.DisposeAsync();
+        var failure = await chat.Should().ThrowAsync<ChatTemplateException>();
+        failure.Which.Message.Should().Contain("deliberate preparation failure");
+        (await DrainAsync(engine, TestContext.Current.CancellationToken)).Should().Equal(ExpectedFirstToken());
     }
 
     /// <summary>Disposing under an open enumeration ends it rather than freeing the context beneath it.</summary>
@@ -231,19 +343,13 @@ public sealed class RunningModelRequestTests
             Options(), TestContext.Current.CancellationToken);
 
         RunningModel engine = (RunningModel)model;
-        InvalidOperationException caught = null;
-
-        //Act
+        //Act and assert
         await foreach (GenerationUpdate update in engine.GenerateFromTokensAsync(
             EngineExpectedLogits.Prompt, Greedy(), false, TestContext.Current.CancellationToken))
         {
-            Action second = () => engine.GenerateFromTokensAsync(
-                EngineExpectedLogits.Prompt, Greedy(), false, TestContext.Current.CancellationToken);
-            caught = second.Should().Throw<InvalidOperationException>().Which;
+            Func<Task> second = () => DrainAsync(engine, TestContext.Current.CancellationToken);
+            await second.Should().ThrowAsync<InferenceException>();
         }
-
-        //Assert
-        caught.Should().NotBeNull();
     }
 
     /// <summary>A batch the engine rejects as invalid input says so in its own words.</summary>

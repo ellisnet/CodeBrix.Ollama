@@ -102,6 +102,7 @@ internal sealed class SkyTntGenerationModel : IMidiGenerationModel
         SkyTntGenerationPlan plan, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         RequireOpen();
+        cancellationToken.ThrowIfCancellationRequested();
         if (Interlocked.Exchange(ref _generating, 1) != 0)
         {
             throw new InferenceException(

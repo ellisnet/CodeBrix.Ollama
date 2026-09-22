@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace CodeBrix.Ollama.ModelRunner;
@@ -26,6 +27,8 @@ namespace CodeBrix.Ollama.ModelRunner;
 /// </remarks>
 public sealed class MidiGenerationOptions
 {
+    private long? _seed;
+
     /// <summary>
     /// How many events to generate. Default 512. A generation may stop sooner, when the model decides the
     /// piece is finished.
@@ -57,11 +60,26 @@ public sealed class MidiGenerationOptions
     public int TopK { get; set; } = 20;
 
     /// <summary>
-    /// What the stream of random numbers starts from. THE SAME SEED AND THE SAME SETTINGS GIVE THE SAME
-    /// PIECE, every time and on every machine. Unset, a seed is taken from the clock and the piece is a new
-    /// one; a caller that may want to hear a piece again should choose the seed itself and keep it.
+    /// What the stream of random numbers starts from. Set to <see langword="null"/> (the default) for a
+    /// fresh seed. A fixed seed selects a repeatable random stream; reproducing the piece also requires the
+    /// same model, settings, build and hardware, because inference arithmetic may differ between processors.
     /// </summary>
-    public long? Seed { get; set; }
+    /// <remarks>
+    /// Explicit seeds must be nonnegative. The reserved value 0xFFFFFFFF is rejected consistently with
+    /// <see cref="SamplingOptions.Seed"/>. Other nonnegative 64-bit values remain supported for MIDI.
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">The seed is negative or is 0xFFFFFFFF.</exception>
+    public long? Seed
+    {
+        get => _seed;
+        set
+        {
+            if (value < 0 || value == uint.MaxValue)
+                throw new ArgumentOutOfRangeException(nameof(Seed), value,
+                    "Seed must be nonnegative and cannot be the reserved value 0xFFFFFFFF. Use null for a fresh random seed.");
+            _seed = value;
+        }
+    }
 
     /// <summary>
     /// Which instruments the piece is for, as General MIDI program numbers (0 to 127). They are given to the

@@ -524,7 +524,8 @@ See LoRA ADAPTERS below.
 ClearCacheAsync
 ---------------
 Forgets the conversation held in the context's key/value memory, so the next
-request evaluates its whole prompt again. See THE CACHE below.
+request evaluates its whole prompt again. For native GGUF reproducibility
+comparisons, call it before EACH run being compared. See THE CACHE below.
 
 Dispose and DisposeAsync
 ------------------------
@@ -562,7 +563,7 @@ SamplingOptions -- THE DEFAULTS ARE OLLAMA'S, so a model behaves here the way
 it behaves under Ollama:
 
     float Temperature     = 0.8f   0 or less is greedy: the most likely token
-                                   every time, and reproducible
+                                   every time (see reproducibility below)
     int   TopK            = 40     0 disables
     float TopP            = 0.9f   1.0 disables
     float MinP            = 0.0f   0 disables
@@ -578,10 +579,24 @@ then the grammar, then top-k, typical-p, top-p and min-p, then temperature,
 then the draw. A chain in any other order produces different text for the same
 seed.
 
-REPRODUCIBLE OUTPUT needs Temperature 0 (which selects greedily and ignores
-the seed entirely) or a fixed Seed with the same build and hardware. Note that
-0xFFFFFFFF is the engine's own "draw a random seed" marker, so setting Seed to
-that value is not reproducible either.
+RANDOM OR FIXED IS AN EXPLICIT CHOICE:
+
+    new SamplingOptions { Seed = null }   // fresh random seed per request
+    new SamplingOptions { Seed = 1234 }   // fixed random stream
+
+null remains the default. Numeric seeds are fixed seeds: 0 through 4294967294
+are accepted. Assigning 0xFFFFFFFF (uint.MaxValue, also the result of an
+unchecked conversion of -1 to uint) throws ArgumentOutOfRangeException. Use
+null to ask for randomness; do not pass the native engine's sentinel.
+
+REPRODUCIBILITY also requires the same model, settings, build and hardware.
+For native GGUF, await ClearCacheAsync() BEFORE EACH RUN being compared and
+give the model exclusive use throughout the comparison. Cached prompt
+evaluation changes batch shapes and can change floating-point rounding.
+Temperature 0 selects greedily and ignores the seed, but it is still affected
+by inference rounding. ONNX text and MIDI generation keep no cache between
+requests. A fixed seed does not promise identical output across these runners:
+their random generators and inference implementations differ.
 
 PENALTIES SEE ONLY WHAT THIS REQUEST GENERATED, not the prompt: RepeatLastN is
 a window over the generated tokens. That is a deliberate deviation from
@@ -1361,9 +1376,9 @@ MidiGenerationOptions -- WHAT TO GENERATE
     int  MaximumEvents  = 512    events, not seconds; it may stop sooner
     double Temperature  = 1.0    below one is more predictable
     double TopP         = 0.98   1 keeps every token
-    int  TopK           = 20     ONE MAKES IT GREEDY and reproducible
-    long?  Seed         = null   null -> from the clock; set it to hear the
-                                 same piece again
+    int  TopK           = 20     ONE MAKES IT GREEDY (see reproducibility below)
+    long?  Seed         = null   null -> fresh seed; fixed -> repeatable
+                                 random stream (see reproducibility below)
     IReadOnlyList<int> Instruments = null   General MIDI program numbers
     int?  DrumKit       = null   the percussion channel's program number
     int?  BeatsPerMinute = null  1 to 383
@@ -1381,9 +1396,17 @@ the piece (instruments, drum kit, tempo, time and key signature) or hand it a
 piece to CONTINUE through Prompt. Setting both is refused with
 ArgumentException rather than quietly resolved.
 
-THE SAME SEED AND THE SAME SETTINGS GIVE THE SAME PIECE, on every machine: the
-stream of random numbers is this library's own and does not change between
-framework releases. TopK = 1 draws no random number at all.
+THE SEED SELECTS A REPEATABLE RANDOM STREAM. The stream of random numbers is
+this library's own and does not change between framework releases; inference
+arithmetic can differ between processors and builds. Reproducing a piece also
+requires the same model, settings, build and hardware. TopK = 1 draws no random
+number at all, but still depends on inference arithmetic.
+
+Set Seed = null explicitly for a fresh seed (also the default), or use a fixed
+value such as Seed = 1234. Negative MIDI seeds and the reserved value
+0xFFFFFFFF (4294967295) throw ArgumentOutOfRangeException when assigned. Other
+nonnegative 64-bit values remain supported. Text generation uses uint? seeds;
+the shared fixed-seed range is 0 through 4294967294.
 
 IncludePromptEvents defaults to true so that an `await foreach` is the WHOLE
 piece from its first event -- the instruments, tempo and signatures you asked
@@ -2335,6 +2358,15 @@ than a per-token cache and cannot drop a suffix; when one of those cannot be
 truncated the library clears it and starts the sequence again, which is
 correct but is a full re-evaluation.
 
+FOR REPRODUCIBILITY COMPARISONS, await ClearCacheAsync() before EACH native
+GGUF run. Reusing a prefix changes the batches used to evaluate a prompt, and
+floating-point rounding can change the output despite identical prompts and
+seeds. This can also affect greedy sampling. Keep the model, settings, build
+and hardware fixed, and do not let another request use the model between the
+clear and the compared run. Clearing the cache does not guarantee matching
+output across hardware or runners. Managed ONNX text and MIDI generation
+start fresh for each request, so no cache reset is needed there.
+
 CANCELLATION
 ------------
 Every member takes a CancellationToken and honours it promptly, INCLUDING
@@ -2363,25 +2395,30 @@ THE THREADING MODEL
     model's own worker thread, because an inference context is not re-entrant.
     Awaiting a member never blocks the calling thread, and nothing needs a
     synchronization context.
-  - REQUESTS ON ONE MODEL ARE SERIALIZED. A request holds a gate for its whole
-    duration -- a streaming one until the enumeration completes or is disposed
-    -- because the context's memory is request state and two interleaved
-    requests would read each other's history. Concurrent callers WAIT; they do
-    not fail, and they do not corrupt anything.
+  - ONE ACTIVE GENERATION PER MODEL. A second generation is refused with
+    InferenceException when its enumeration starts, before chat rendering or
+    tokenization. There is no built-in generation queue. The active stream
+    holds its turn until the enumeration completes or is disposed, including
+    after it yields its final update. Merely creating an enumerable does not
+    reserve the model. If an application needs a queue, it should await its
+    own semaphore around each complete generation.
+  - CACHE, EMBEDDING AND ADAPTER OPERATIONS STILL WAIT for the native model's
+    context gate when called from another call chain. A generation started
+    while one of those operations holds the gate is also refused.
   - THREE MEMBERS DO NOT WAIT: TokenizeAsync, DetokenizeAsync and
     RenderChatPromptAsync read the vocabulary and the template, not the
     context, so they stay answerable while a generation is running.
-  - DO NOT CALL THE SAME MODEL FROM INSIDE ITS OWN await foreach. A gated
-    member called from within an enumeration of GenerateAsync or ChatAsync on
-    the same instance would wait on a gate that enumeration is holding. The
-    library detects this and throws InvalidOperationException rather than
-    waiting on itself; finish the enumeration, or dispose it, first.
+  - INSIDE THE SAME MODEL'S await foreach, another generation gets the same
+    InferenceException as any concurrent generation. Cache, embedding and
+    adapter calls instead throw InvalidOperationException to prevent waiting
+    on their own enumeration. Finish or dispose the enumeration first.
   - SEVERAL MODELS IN PARALLEL IS FINE. Each has its own thread, context and
     cache, and they share only the native library and the log handler. Memory
     is the only limit.
   - THE LOG HANDLER IS PROCESS-WIDE, and may be called on any engine thread.
-  - THE ONNX ROAD HAS ITS OWN RULES and one of them is different: a second run
-    on a loaded ONNX model is REFUSED rather than serialized behind a gate.
+  - MANAGED ONNX AND NATIVE GGUF GENERATION SHARE THE SAME BUSY RULE: a second
+    generation is refused with InferenceException. Raw ONNX RunAsync also
+    refuses concurrent runs on one instance.
     THREAD SAFETY ON THIS ROAD, under RUNNING ONNX MODELS, has the whole of it.
 
 
@@ -3271,8 +3308,8 @@ Do NOT reach for this package to:
   - SAVE OR RESTORE a session. There is no state serialization on the
     contract: a conversation is the messages you hold, not a blob the library
     hands back.
-  - SERVE MANY CONVERSATIONS FROM ONE MODEL AT ONCE. Requests on one instance
-    are serialized and the cache is one conversation deep. Several instances
+  - SERVE MANY CONVERSATIONS FROM ONE MODEL AT ONCE. A second generation on
+    one instance is refused and the cache is one conversation deep. Several instances
     run in parallel happily; batching many sequences through one context is
     not in this version.
   - Offer synchronous APIs, or run on .NET below 10.0.
@@ -3338,11 +3375,17 @@ Every turn re-evaluates the whole prompt
     conversation used the same model in between, or the previous request was
     cancelled.
 
-A request seems to hang
-    Another request on the same model is still running, and requests are
-    serialized -- including a streaming one whose enumeration was never
-    finished or disposed. If the waiting call is made from inside that
-    enumeration you get InvalidOperationException instead.
+A generation reports that the model is already in use
+    Another operation holds the model, possibly a streaming generation whose
+    enumeration was never finished or disposed. Finish or dispose it first,
+    queue complete generations in your application, or use separate models
+    for parallel work. Native GGUF and managed ONNX both refuse a second
+    concurrent generation with InferenceException.
+
+A cache, embedding or adapter operation seems to hang
+    These native operations wait for an active generation to finish or dispose
+    its enumeration. Calling them from inside that enumeration instead gives
+    InvalidOperationException to prevent waiting on itself.
 
 Generation is much slower than expected
     Check GetNativeRuntimeInfo().SystemInfo for the CPU features in use and
@@ -3487,16 +3530,19 @@ OPTIONS     ModelPath, LoadMode (MemoryMap), ContextSize, GpuLayers, Threads,
             OllamaTemplate, JinjaTemplate, LoadProgress
 SAMPLING    Ollama's defaults: temperature 0.8, top-k 40, top-p 0.9,
             repeat penalty 1.1 over the last 64 generated tokens.
-            Temperature 0 is greedy and reproducible
+            Temperature 0 is greedy; Seed null is random, fixed is repeatable.
+            For comparisons keep model/settings/build/hardware fixed and clear
+            native GGUF cache before each run. Seed 0xFFFFFFFF is rejected
 TEMPLATES   Auto -> OllamaTemplate, else embedded/JinjaTemplate, else Native.
             Native cannot render tools. Think is bool?: null leaves the
             template's own default
 OUTPUT      Grammar > JsonSchema > JsonMode > ChatRequest.ResponseFormat
 STREAMING   every update until IsFinal; the final one carries FinishReason,
             Statistics and any ToolCalls
-THREADS     one worker thread per model; requests serialized; tokenize,
-            detokenize and render do not wait; never call a member from
-            inside that model's own await foreach
+THREADS     native: one worker thread per model; both runners refuse concurrent
+            generation with InferenceException; finish/dispose each stream.
+            Native cache/embed/adapters wait (same-chain calls throw);
+            tokenize, detokenize and render do not take the context gate
 HOW MANY    say nothing -> GGUF one per PHYSICAL core, ONNX one per
             PERFORMANCE core; Threads (and BatchThreads) -> used EXACTLY, cap
             ignored; MaxThreads -> a ceiling on the library's own choice only.

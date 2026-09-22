@@ -18,14 +18,15 @@ namespace CodeBrix.Ollama.ModelRunner;
 /// Three rules shape the whole type. Every native call for this model is made on one thread, because a
 /// <c>llama_context</c> is not re-entrant (see <see cref="EngineWorker"/>). Every request holds a gate for
 /// its whole duration, because the context's key/value memory is request state and two interleaved requests
-/// would read each other's history. And a decode already under way is stopped through the engine's abort
+/// would read each other's history. Generation takes that gate without waiting, before prompt preparation;
+/// a busy model refuses another generation with <see cref="InferenceException"/>. A decode already under way is stopped through the engine's abort
 /// callback rather than by waiting for it, because evaluating the prompt of a large model is one call that
 /// can run for minutes (see <see cref="EngineAbortFlag"/>).
 /// </para>
 /// <para>
 /// The chat layer - <see cref="ChatAsync"/>, <see cref="ChatToEndAsync"/> and
-/// <see cref="RenderChatPromptAsync"/> - sits on top of <see cref="GenerateFromTokensAsync"/>, which is the
-/// same decode loop taking tokens that something else has already rendered and tokenized. A chat request is
+/// <see cref="RenderChatPromptAsync"/> - uses the same decode loop as <see cref="GenerateFromTokensAsync"/>,
+/// taking tokens that something else has already rendered and tokenized. A chat request is
 /// rendered by <see cref="ChatTemplateRenderer"/>, tokenized under the rule in <see cref="ChatBosRule"/>,
 /// decoded by that loop, and taken apart again by <see cref="ChatPipeline"/>.
 /// </para>
@@ -287,8 +288,8 @@ internal sealed class RunningModel : IRunningModel
         if (prompt == null) throw new ArgumentNullException(nameof(prompt));
         ThrowIfDisposed();
 
-        EngineRequestScope scope = BeginStream(nameof(GenerateAsync));
-        return GenerateTextAsync(scope, prompt, options, cancellationToken);
+        EngineRequestScope scope = BeginStream();
+        return ExclusiveGenerationAsync(scope, GenerateTextAsync(prompt, options, cancellationToken), cancellationToken);
     }
 
     /// <inheritdoc />
@@ -323,8 +324,8 @@ internal sealed class RunningModel : IRunningModel
         if (request == null) throw new ArgumentNullException(nameof(request));
         ThrowIfDisposed();
 
-        EngineRequestScope scope = BeginStream(nameof(ChatAsync));
-        return ChatStreamAsync(scope, request, cancellationToken);
+        EngineRequestScope scope = BeginStream();
+        return ExclusiveGenerationAsync(scope, ChatStreamAsync(request, cancellationToken), cancellationToken);
     }
 
     /// <inheritdoc />
@@ -537,42 +538,54 @@ internal sealed class RunningModel : IRunningModel
         // The chain is marked here rather than in the iterator below: an async method's changes to an
         // AsyncLocal are undone when its state machine returns, so a marker set inside the iterator would
         // never reach the caller that is about to enumerate it.
-        EngineRequestScope scope = BeginStream(nameof(GenerateFromTokensAsync));
+        EngineRequestScope scope = BeginStream();
 
         int[] copy = new int[promptTokens.Count];
         for (int i = 0; i < copy.Length; i++) copy[i] = promptTokens[i];
 
-        return StreamFromTokensAsync(scope, copy, options, promptHasBos, cancellationToken);
+        return ExclusiveGenerationAsync(scope,
+            StreamFromTokensAsync(copy, options, promptHasBos, cancellationToken), cancellationToken);
     }
 
-    private async IAsyncEnumerable<GenerationUpdate> StreamFromTokensAsync(
+    private async IAsyncEnumerable<T> ExclusiveGenerationAsync<T>(
         EngineRequestScope scope,
-        int[] promptTokens,
-        GenerationOptions options,
-        bool promptHasBos,
+        IAsyncEnumerable<T> updates,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        // Acquire before chat rendering or tokenization can queue work on the native thread. Acquisition
+        // belongs to enumeration, so creating an enumerable without reading it never occupies the model.
+        ThrowIfDisposed();
+        if (!await gate.WaitAsync(0, cancellationToken).ConfigureAwait(false))
+            throw new InferenceException(
+                "This model is already in use. A second generation is refused rather than queued; finish or"
+                + " dispose the active enumeration, or load another model instance to generate concurrently.");
         scope.StreamHoldsTheGate = true;
         try
         {
             ThrowIfDisposed();
-
-            int[] tokens = await worker
-                .RunAsync(() => ApplyBeginningOfSequenceRule(promptTokens, promptHasBos))
-                .ConfigureAwait(false);
-
-            await foreach (GenerationUpdate update in
-                DecodeAsync(tokens, options, cancellationToken).ConfigureAwait(false))
-            {
+            await foreach (T update in updates.WithCancellation(cancellationToken).ConfigureAwait(false))
                 yield return update;
-            }
         }
         finally
         {
             scope.StreamHoldsTheGate = false;
             gate.Release();
         }
+    }
+
+    private async IAsyncEnumerable<GenerationUpdate> StreamFromTokensAsync(
+        int[] promptTokens,
+        GenerationOptions options,
+        bool promptHasBos,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        int[] tokens = await worker
+            .RunAsync(() => ApplyBeginningOfSequenceRule(promptTokens, promptHasBos))
+            .ConfigureAwait(false);
+
+        await foreach (GenerationUpdate update in
+            DecodeAsync(tokens, options, cancellationToken).ConfigureAwait(false))
+            yield return update;
     }
 
     /// <summary>
@@ -597,7 +610,6 @@ internal sealed class RunningModel : IRunningModel
     }
 
     private async IAsyncEnumerable<ChatUpdate> ChatStreamAsync(
-        EngineRequestScope scope,
         ChatRequest request,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
@@ -629,7 +641,7 @@ internal sealed class RunningModel : IRunningModel
         // The chat layer owns the beginning-of-sequence decision outright, so the decode loop is told the
         // prompt already carries whatever it needs and adds nothing of its own.
         await foreach (GenerationUpdate update in
-            StreamFromTokensAsync(scope, tokens, options, true, cancellationToken).ConfigureAwait(false))
+            StreamFromTokensAsync(tokens, options, true, cancellationToken).ConfigureAwait(false))
         {
             ChatPipelineOutput step = pipeline.Add(update.Text);
 
@@ -731,38 +743,21 @@ internal sealed class RunningModel : IRunningModel
     }
 
     private async IAsyncEnumerable<GenerationUpdate> GenerateTextAsync(
-        EngineRequestScope scope,
         string prompt,
         GenerationOptions options,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        scope.StreamHoldsTheGate = true;
-        try
+        // llama.cpp's own front ends tokenize a raw completion prompt with add_special and parse_special
+        // both true: the vocabulary's add_bos flag decides whether a beginning-of-sequence token is added.
+        int[] tokens = await worker.RunAsync(() =>
         {
-            ThrowIfDisposed();
+            cancellationToken.ThrowIfCancellationRequested();
+            return NativeText.Tokenize(vocab, prompt, true, true);
+        }).ConfigureAwait(false);
 
-            // llama.cpp's own front ends tokenize a raw completion prompt with add_special and parse_special
-            // both true: the vocabulary's add_bos flag then decides whether a beginning-of-sequence token is
-            // added, and any special-token text written into the prompt is recognized as that token rather
-            // than escaped. Nothing is prepended afterwards, so the duplicated-BOS pitfall cannot arise here.
-            int[] tokens = await worker.RunAsync(() =>
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                return NativeText.Tokenize(vocab, prompt, true, true);
-            }).ConfigureAwait(false);
-
-            await foreach (GenerationUpdate update in
-                DecodeAsync(tokens, options, cancellationToken).ConfigureAwait(false))
-            {
-                yield return update;
-            }
-        }
-        finally
-        {
-            scope.StreamHoldsTheGate = false;
-            gate.Release();
-        }
+        await foreach (GenerationUpdate update in
+            DecodeAsync(tokens, options, cancellationToken).ConfigureAwait(false))
+            yield return update;
     }
 
     private async IAsyncEnumerable<GenerationUpdate> DecodeAsync(
@@ -1407,17 +1402,14 @@ internal sealed class RunningModel : IRunningModel
     /// <summary>
     /// Marks this call chain as streaming from this model and hands back the marker the enumeration flips.
     /// </summary>
-    /// <param name="member">The streaming member being entered, for the message of a refusal.</param>
     /// <returns>The marker, which is this chain's existing one when it already has one for this model.</returns>
-    /// <exception cref="InvalidOperationException">This chain is already streaming from this model.</exception>
-    private EngineRequestScope BeginStream(string member)
+    private EngineRequestScope BeginStream()
     {
         EngineRequestScope current = Scope.Value;
         if (current != null && ReferenceEquals(current.Model, this))
         {
-            // An inner stream of the same model - the chat layer's own call into the decode loop - shares
-            // the chain's marker, so that the caller of the outer enumeration sees the gate being held.
-            ThrowIfStreaming(member);
+            // Reuse the caller-visible marker. The gate refuses overlapping enumerations when they start;
+            // merely constructing a second enumerable does not change the active one's ownership.
             return current;
         }
 

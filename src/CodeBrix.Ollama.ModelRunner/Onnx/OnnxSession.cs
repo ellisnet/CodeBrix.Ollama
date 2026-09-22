@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -26,6 +27,7 @@ internal sealed class OnnxSession : IOnnxModel
     private readonly OnnxExecutionPlan _plan;
     private readonly OnnxExecutionSettings _settings;
     private readonly OnnxArena _arena;
+    private readonly OnnxTimingReport _timing;
     private int _running;
     private int _disposed;
 
@@ -38,6 +40,7 @@ internal sealed class OnnxSession : IOnnxModel
         _plan = plan;
         _settings = settings;
         _arena = new OnnxArena(options.ReuseBuffers);
+        _timing = OnnxTimingReport.FromEnvironment(plan);
         Options = options;
     }
 
@@ -65,9 +68,16 @@ internal sealed class OnnxSession : IOnnxModel
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
 
-        foreach (OnnxPlanSlot slot in _plan.Slots) slot.Initializer = null;
-        foreach (OnnxPlanNode node in _plan.Nodes) node.State = null;
-        _arena.Clear();
+        try
+        {
+            _timing?.Write();
+        }
+        finally
+        {
+            foreach (OnnxPlanSlot slot in _plan.Slots) slot.Initializer = null;
+            foreach (OnnxPlanNode node in _plan.Nodes) node.State = null;
+            _arena.Clear();
+        }
     }
 
     /// <summary>Releases the weights and the pooled buffers.</summary>
@@ -104,6 +114,9 @@ internal sealed class OnnxSession : IOnnxModel
     private IReadOnlyDictionary<string, OnnxTensor> RunPlan(
         IReadOnlyDictionary<string, OnnxTensor> inputs, CancellationToken cancellationToken)
     {
+        long runStart = _timing == null ? 0 : Stopwatch.GetTimestamp();
+        long kernelTicks = 0;
+        int contextLength = _timing == null ? -1 : OnnxTimingReport.ContextLength(inputs);
         OnnxPlanSlot[] slots = _plan.Slots;
         OnnxValue[] values = new OnnxValue[slots.Length];
 
@@ -125,7 +138,14 @@ internal sealed class OnnxSession : IOnnxModel
 
             try
             {
+                long nodeStart = _timing == null ? 0 : Stopwatch.GetTimestamp();
                 node.Kernel.Run(context);
+                if (_timing != null)
+                {
+                    long elapsed = Stopwatch.GetTimestamp() - nodeStart;
+                    kernelTicks += elapsed;
+                    _timing.Node(i, contextLength, elapsed);
+                }
             }
             catch (Exception exception) when (exception is not ModelRunnerException
                 and not OperationCanceledException and not OutOfMemoryException)
@@ -147,7 +167,13 @@ internal sealed class OnnxSession : IOnnxModel
             }
         }
 
-        return Collect(values);
+        IReadOnlyDictionary<string, OnnxTensor> result = Collect(values);
+        if (_timing != null)
+        {
+            _timing.Run(contextLength, Stopwatch.GetTimestamp() - runStart, kernelTicks);
+        }
+
+        return result;
     }
 
     private void BindInputs(IReadOnlyDictionary<string, OnnxTensor> inputs, OnnxValue[] values)

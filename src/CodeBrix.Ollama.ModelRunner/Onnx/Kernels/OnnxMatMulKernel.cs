@@ -116,7 +116,9 @@ internal sealed class OnnxMatMulKernel : OnnxKernel
             rows, reduction, packed.Width, context.Settings.Kernel, context.Settings.Threads);
     }
 
-    private static void RunGeneral(OnnxOperatorContext context, OnnxValue left, OnnxValue right)
+    internal static void RunGeneral(
+        OnnxOperatorContext context, OnnxValue left, OnnxValue right,
+        bool transposeRight = false, float? rightScale = null)
     {
         if (right.ElementType != OnnxElementType.Float)
         {
@@ -134,6 +136,11 @@ internal sealed class OnnxMatMulKernel : OnnxKernel
         bool rightWasVector = right.Rank == 1;
         long[] leftShape = leftWasVector ? new long[] { 1, left.Shape[0] } : left.Shape;
         long[] rightShape = rightWasVector ? new long[] { right.Shape[0], 1 } : right.Shape;
+        if (transposeRight)
+        {
+            rightShape = (long[])rightShape.Clone();
+            (rightShape[^2], rightShape[^1]) = (rightShape[^1], rightShape[^2]);
+        }
 
         int rows = (int)leftShape[leftShape.Length - 2];
         int reduction = (int)leftShape[leftShape.Length - 1];
@@ -175,9 +182,9 @@ internal sealed class OnnxMatMulKernel : OnnxKernel
             {
                 for (int index = worker; index < batches; index += workers)
                 {
-                    OnnxGemm.Multiply(
+                    Multiply(
                         a, leftOffsets[index], b, rightOffsets[index], c, index * stride,
-                        rows, reduction, width, kind, 1);
+                        rows, reduction, width, kind, 1, transposeRight, rightScale);
                 }
             });
 
@@ -186,10 +193,22 @@ internal sealed class OnnxMatMulKernel : OnnxKernel
 
         for (int index = 0; index < batches; index++)
         {
-            OnnxGemm.Multiply(
+            Multiply(
                 a, leftOffsets[index], b, rightOffsets[index], c, index * stride,
-                rows, reduction, width, kind, threads);
+                rows, reduction, width, kind, threads, transposeRight, rightScale);
         }
+    }
+
+    private static void Multiply(
+        float[] a, int aOffset, float[] b, int bOffset, float[] c, int cOffset,
+        int rows, int reduction, int width, OnnxKernelKind kind, int threads,
+        bool transposeRight, float? rightScale)
+    {
+        if (transposeRight)
+            OnnxTransposedGemm.Multiply(
+                a, aOffset, b, bOffset, c, cOffset, rows, reduction, width, kind, threads, rightScale);
+        else
+            OnnxGemm.Multiply(a, aOffset, b, bOffset, c, cOffset, rows, reduction, width, kind, threads);
     }
 
     private static long[] Leading(long[] shape)

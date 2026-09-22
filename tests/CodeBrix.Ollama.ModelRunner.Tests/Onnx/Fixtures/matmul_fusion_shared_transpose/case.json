@@ -1,0 +1,70 @@
+{
+  "name": "matmul_fusion_shared_transpose",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        2,
+        3,
+        5,
+        17
+      ],
+      "file": "in_a.bin"
+    },
+    {
+      "name": "b",
+      "type": "float",
+      "shape": [
+        1,
+        3,
+        9,
+        17
+      ],
+      "file": "in_b.bin"
+    },
+    {
+      "name": "scale",
+      "type": "float",
+      "shape": [],
+      "file": "in_scale.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        2,
+        3,
+        5,
+        9
+      ],
+      "file": "out_y.bin"
+    },
+    {
+      "name": "t",
+      "type": "float",
+      "shape": [
+        1,
+        3,
+        17,
+        9
+      ],
+      "file": "out_t.bin"
+    },
+    {
+      "name": "retained",
+      "type": "float",
+      "shape": [
+        1,
+        3,
+        17,
+        9
+      ],
+      "file": "out_retained.bin"
+    }
+  ],
+  "note": "Seed 20260921; ONNX Runtime CPU with graph optimization disabled."
+}

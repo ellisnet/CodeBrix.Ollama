@@ -1178,6 +1178,9 @@ typed.graph.input.append(helper.make_tensor_value_info("a", TensorProto.UINT8, [
 with open(os.path.join(REFUSALS, "uint8_input.onnx"), "wb") as handle:
     handle.write(typed.SerializeToString())
 
+from generate_fusion_fixtures import generate as generate_fusion_fixtures
+cases.extend(generate_fusion_fixtures())
+
 with open(os.path.join(HERE, "cases.json"), "w") as handle:
     json.dump({"cases": sorted(cases),
                "refusals": sorted(refusals, key=lambda entry: entry["name"])}, handle, indent=2)

@@ -8,7 +8,8 @@ namespace CodeBrix.Ollama.ModelRunner;
 /// </summary>
 /// <remarks>
 /// <para>
-/// A streaming request holds the model's request gate from the first token to the last. A caller that
+/// A streaming request holds the model's request gate from prompt preparation until its enumeration
+/// completes or is disposed. A caller that
 /// reaches back into the same model from inside its own <c>await foreach</c> would therefore wait on a gate
 /// only that same call chain can release: a deadlock with nothing to time out. The engine marks the chain
 /// instead. The marker is put in place by the synchronous method that hands back the enumerable - an

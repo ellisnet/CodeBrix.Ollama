@@ -57,11 +57,19 @@ internal static class OnnxElementwise
         {
             case OnnxElementType.Float:
                 if (TOperation.CanVectorize
-                    && context.Settings.Kernel != OnnxKernelKind.Scalar
-                    && OnnxShape.SameShape(left.Shape, right.Shape))
+                    && context.Settings.Kernel != OnnxKernelKind.Scalar)
                 {
-                    BinaryFloatVector<TOperation>(left.Floats, right.Floats, result.Floats, result.Count);
-                    return;
+                    if (OnnxShape.SameShape(left.Shape, right.Shape))
+                    {
+                        BinaryFloatVector<TOperation>(left.Floats, right.Floats, result.Floats, result.Count);
+                        return;
+                    }
+
+                    if (left.Count == 1 || right.Count == 1)
+                    {
+                        BinaryFloatScalar<TOperation>(left, right, result);
+                        return;
+                    }
                 }
 
                 BinaryTyped<TOperation, float>(left, right, result, shape);
@@ -343,6 +351,29 @@ internal static class OnnxElementwise
         for (; i < total; i++)
         {
             c[i] = TOperation.Apply(a[i], b[i]);
+        }
+    }
+
+    private static void BinaryFloatScalar<TOperation>(OnnxValue left, OnnxValue right, OnnxValue result)
+        where TOperation : IOnnxBinaryOperation<float>, IOnnxVectorOperation
+    {
+        bool scalarLeft = left.Count == 1;
+        float scalar = scalarLeft ? left.Floats[0] : right.Floats[0];
+        float[] source = scalarLeft ? right.Floats : left.Floats;
+        float[] target = result.Floats;
+        Vector<float> broadcast = new Vector<float>(scalar);
+        int width = Vector<float>.Count;
+        int i = 0;
+        for (; i + width <= result.Count; i += width)
+        {
+            Vector<float> values = new Vector<float>(source, i);
+            (scalarLeft ? TOperation.Apply(broadcast, values) : TOperation.Apply(values, broadcast))
+                .CopyTo(target, i);
+        }
+
+        for (; i < result.Count; i++)
+        {
+            target[i] = scalarLeft ? TOperation.Apply(scalar, source[i]) : TOperation.Apply(source[i], scalar);
         }
     }
 

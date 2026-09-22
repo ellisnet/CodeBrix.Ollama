@@ -33,11 +33,15 @@ public sealed class OnnxBlockGemmTests
     [InlineData(4, 128, 256, 9, 1, true)]
     [InlineData(4, 256, 512, 2, 3, true)]
     [InlineData(4, 32, 70, 5, 2, true)]
+    [InlineData(4, 32, 72, 13, 1, true)]
+    [InlineData(4, 128, 1024, 13, 1, false)]
     [InlineData(8, 16, 64, 5, 1, true)]
     [InlineData(8, 32, 128, 7, 2, true)]
     [InlineData(8, 32, 128, 7, 2, false)]
     [InlineData(8, 128, 256, 9, 3, true)]
     [InlineData(8, 32, 70, 5, 2, true)]
+    [InlineData(8, 32, 72, 13, 1, true)]
+    [InlineData(8, 128, 1024, 13, 1, false)]
     public void Multiply_agrees_with_double_precision_on_every_path(
         int bits, int blockSize, int reduction, int width, int rows, bool zeroPoints)
     {
@@ -110,6 +114,41 @@ public sealed class OnnxBlockGemmTests
 
         //Assert
         many.Should().BeEquivalentTo(single);
+    }
+
+    /// <summary>Grouping decode columns across uneven worker boundaries preserves every output bit.</summary>
+    /// <param name="bits">The number of bits per weight.</param>
+    /// <param name="floatingZeroPoints">Whether zero points are floating point or packed integers.</param>
+    [Theory]
+    [InlineData(4, false)]
+    [InlineData(4, true)]
+    [InlineData(8, false)]
+    [InlineData(8, true)]
+    public void Multiply_decode_groups_preserve_bias_and_zero_points(int bits, bool floatingZeroPoints)
+    {
+        //Arrange
+        var bias = Left(1, 101, 37);
+        var weight = Build(bits, 128, 1024, 101, true, bias);
+        if (floatingZeroPoints)
+        {
+            var points = Left(101, weight.BlockCount, 38);
+            weight = new OnnxBlockQuantizedWeight(weight.Packed, weight.Scales, null, points, bias,
+                weight.Reduction, weight.Width, weight.Bits, weight.BlockSize);
+        }
+
+        var left = Left(1, 1024, 39);
+        var single = new float[101];
+        var many = new float[101];
+        var reference = Reference(left, weight, 1);
+
+        //Act
+        OnnxBlockGemm.Multiply(left, weight, single, 1, OnnxKernelKind.Avx2, 1);
+        OnnxBlockGemm.Multiply(left, weight, many, 1, OnnxKernelKind.Avx2, 8);
+
+        //Assert
+        many.Should().Equal(single);
+        for (int i = 0; i < many.Length; i++)
+            Math.Abs(many[i] - reference[i]).Should().BeLessThan(1e-3 * (1 + Math.Abs(reference[i])));
     }
 
     /// <summary>A bias is added to every column of the result, on every path.</summary>
@@ -188,7 +227,9 @@ public sealed class OnnxBlockGemmTests
     [InlineData(8, 32, 256)]
     [InlineData(8, 128, 512)]
     [InlineData(4, 32, 70)]
+    [InlineData(4, 32, 72)]
     [InlineData(8, 32, 70)]
+    [InlineData(8, 32, 72)]
     public void Multiply_of_many_rows_gives_what_the_rows_give_one_at_a_time(
         int bits, int blockSize, int reduction)
     {

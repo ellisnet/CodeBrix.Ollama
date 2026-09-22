@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 
 namespace CodeBrix.Ollama.ModelRunner;
 
@@ -86,7 +87,23 @@ internal sealed class OnnxConcatKernel : OnnxKernel
 
         Array target = result.Buffer.Data;
         long block = joined * inner;
-        for (int o = 0; o < outer; o++)
+        if (outer > 1 && result.Count >= 256 * 1024 && context.Settings.Threads > 1)
+        {
+            int workers = Math.Min(outer, context.Settings.Threads);
+            int chunk = (outer + workers - 1) / workers;
+            Parallel.For(0, workers, new ParallelOptions { MaxDegreeOfParallelism = workers }, worker =>
+                Copy(context, target, block, inner, worker * chunk, Math.Min(outer, (worker + 1) * chunk)));
+            return;
+        }
+
+        Copy(context, target, block, inner, 0, outer);
+    }
+
+    private static void Copy(OnnxOperatorContext context, Array target, long block, int inner, int start, int end)
+    {
+        OnnxValue first = context.RequireInput(0);
+        int axis = OnnxShape.NormalizeAxis((long)context.State, first.Rank, context.Node.Describe());
+        for (int o = start; o < end; o++)
         {
             long at = o * block;
             for (int i = 0; i < context.InputCount; i++)

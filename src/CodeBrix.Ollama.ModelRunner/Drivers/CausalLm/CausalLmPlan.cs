@@ -15,8 +15,6 @@ namespace CodeBrix.Ollama.ModelRunner;
 /// </remarks>
 internal sealed class CausalLmPlan
 {
-    private const uint DrawAFreshSeed = 0xFFFFFFFFu;
-
     private CausalLmPlan(
         int? maximumTokens, IReadOnlyList<string> stopSequences, SamplingOptions sampling, ulong seed)
     {
@@ -89,9 +87,8 @@ internal sealed class CausalLmPlan
 
         SamplingOptions sampling = Copy(settings.Sampling ?? new SamplingOptions());
 
-        //The one value the native half of this library reads as "draw a fresh seed" is read the same way
-        //here, so that the same number means the same thing on both routes.
-        ulong seed = sampling.Seed.HasValue && sampling.Seed.Value != DrawAFreshSeed
+        //Only null requests randomness; SamplingOptions rejects the native engine's numeric sentinel.
+        ulong seed = sampling.Seed.HasValue
             ? sampling.Seed.Value
             : Fresh();
 
@@ -112,8 +109,7 @@ internal sealed class CausalLmPlan
         Seed = sampling.Seed,
     };
 
-    //The value the native half of this library reads as "draw a fresh seed" is not reproducible there
-    //either, so it is treated here as what it says rather than as a number.
+    //A fresh stream for an explicitly unset seed, independent of the framework's sampling algorithm.
     private static ulong Fresh()
     {
         Random source = Random.Shared;

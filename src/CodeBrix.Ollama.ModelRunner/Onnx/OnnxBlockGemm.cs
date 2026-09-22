@@ -149,7 +149,22 @@ internal static class OnnxBlockGemm
             // rows would not pay for writing a column out and reading it back. The column is read straight
             // into the multiply, which is also what keeps a four-bit weight four bits wide.
             float[] block = wide ? null : new float[weight.BlockSize];
-            for (int j = firstColumn; j < lastColumn; j++)
+            int first = firstColumn;
+            if (wide && (k & 7) == 0)
+            {
+                for (; first + 4 <= lastColumn; first += 4)
+                {
+                    for (int row = 0; row < m; row++)
+                    {
+                        if (weight.Bits == 8)
+                            FourColumns8Wide(a, row * k, weight, c, row * n + first, first);
+                        else
+                            FourColumnsWide(a, row * k, weight, c, row * n + first, first);
+                    }
+                }
+            }
+
+            for (int j = first; j < lastColumn; j++)
             {
                 for (int row = 0; row < m; row++)
                 {
@@ -348,6 +363,125 @@ internal static class OnnxBlockGemm
         for (; i < length; i++) sum += a[aOffset + i] * values[valuesOffset + i];
         return sum;
     }
+
+    /// <summary>
+    /// Four output columns share each activation load and keep four independent accumulation chains.
+    /// Every column still sums in the same order as DotWide; no weight expansion or activation quantization.
+    /// </summary>
+    private static void FourColumnsWide(
+        float[] a, int aOffset, OnnxBlockQuantizedWeight weight, float[] c, int target, int column)
+    {
+        ref float pa = ref MemoryMarshal.GetArrayDataReference(a);
+        ref byte pb = ref MemoryMarshal.GetArrayDataReference(weight.Packed);
+        int blocks = weight.BlockCount;
+        int blockSize = weight.BlockSize;
+        int blobSize = weight.BlobSize;
+        int columnBytes = blocks * blobSize;
+        int firstBlob = column * columnBytes;
+        int firstScale = column * blocks;
+        Vector256<uint> mask = Vector256.Create(15u);
+        Vector256<float> sum0 = Vector256<float>.Zero;
+        Vector256<float> sum1 = Vector256<float>.Zero;
+        Vector256<float> sum2 = Vector256<float>.Zero;
+        Vector256<float> sum3 = Vector256<float>.Zero;
+
+        for (int block = 0, k0 = 0; k0 < weight.Reduction; block++, k0 += blockSize)
+        {
+            int end = Math.Min(blockSize, weight.Reduction - k0);
+            int blob = firstBlob + block * blobSize;
+            Vector256<float> scale0 = Vector256.Create(weight.Scales[firstScale + block]);
+            Vector256<float> zero0 = Vector256.Create(ZeroPoint(weight, column, block));
+            Vector256<float> scale1 = Vector256.Create(weight.Scales[firstScale + blocks + block]);
+            Vector256<float> zero1 = Vector256.Create(ZeroPoint(weight, column + 1, block));
+            Vector256<float> scale2 = Vector256.Create(weight.Scales[firstScale + 2 * blocks + block]);
+            Vector256<float> zero2 = Vector256.Create(ZeroPoint(weight, column + 2, block));
+            Vector256<float> scale3 = Vector256.Create(weight.Scales[firstScale + 3 * blocks + block]);
+            Vector256<float> zero3 = Vector256.Create(ZeroPoint(weight, column + 3, block));
+            for (int i = 0; i < end; i += 8)
+            {
+                Vector256<float> left = Vector256.LoadUnsafe(ref pa, (nuint)(aOffset + k0 + i));
+                int at = blob + (i >> 1);
+                Vector256<float> q0 = Avx.ConvertToVector256Single(
+                    Avx2.And(Avx2.ShiftRightLogicalVariable(
+                        Vector256.Create(Unsafe.ReadUnaligned<uint>(
+                            ref Unsafe.Add(ref pb, at))), NibbleShifts), mask).AsInt32());
+                sum0 = Fma.MultiplyAdd(left, (q0 - zero0) * scale0, sum0);
+                Vector256<float> q1 = Avx.ConvertToVector256Single(
+                    Avx2.And(Avx2.ShiftRightLogicalVariable(
+                        Vector256.Create(Unsafe.ReadUnaligned<uint>(
+                            ref Unsafe.Add(ref pb, at + columnBytes))), NibbleShifts), mask).AsInt32());
+                sum1 = Fma.MultiplyAdd(left, (q1 - zero1) * scale1, sum1);
+                Vector256<float> q2 = Avx.ConvertToVector256Single(
+                    Avx2.And(Avx2.ShiftRightLogicalVariable(
+                        Vector256.Create(Unsafe.ReadUnaligned<uint>(
+                            ref Unsafe.Add(ref pb, at + 2 * columnBytes))), NibbleShifts), mask).AsInt32());
+                sum2 = Fma.MultiplyAdd(left, (q2 - zero2) * scale2, sum2);
+                Vector256<float> q3 = Avx.ConvertToVector256Single(
+                    Avx2.And(Avx2.ShiftRightLogicalVariable(
+                        Vector256.Create(Unsafe.ReadUnaligned<uint>(
+                            ref Unsafe.Add(ref pb, at + 3 * columnBytes))), NibbleShifts), mask).AsInt32());
+                sum3 = Fma.MultiplyAdd(left, (q3 - zero3) * scale3, sum3);
+            }
+        }
+
+        c[target] = Vector256.Sum(sum0) + (weight.Bias == null ? 0f : weight.Bias[column]);
+        c[target + 1] = Vector256.Sum(sum1) + (weight.Bias == null ? 0f : weight.Bias[column + 1]);
+        c[target + 2] = Vector256.Sum(sum2) + (weight.Bias == null ? 0f : weight.Bias[column + 2]);
+        c[target + 3] = Vector256.Sum(sum3) + (weight.Bias == null ? 0f : weight.Bias[column + 3]);
+    }
+
+    /// <summary>
+    /// The eight-bit counterpart of FourColumnsWide. Each load reads exactly eight bytes, including at the
+    /// end of the last column, and each column preserves DotWide's accumulation order.
+    /// </summary>
+    private static void FourColumns8Wide(
+        float[] a, int aOffset, OnnxBlockQuantizedWeight weight, float[] c, int target, int column)
+    {
+        ref float pa = ref MemoryMarshal.GetArrayDataReference(a);
+        ref byte pb = ref MemoryMarshal.GetArrayDataReference(weight.Packed);
+        int blocks = weight.BlockCount;
+        int blockSize = weight.BlockSize;
+        int columnBytes = blocks * weight.BlobSize;
+        int firstBlob = column * columnBytes;
+        int firstScale = column * blocks;
+        Vector256<float> sum0 = Vector256<float>.Zero;
+        Vector256<float> sum1 = Vector256<float>.Zero;
+        Vector256<float> sum2 = Vector256<float>.Zero;
+        Vector256<float> sum3 = Vector256<float>.Zero;
+
+        for (int block = 0, k0 = 0; k0 < weight.Reduction; block++, k0 += blockSize)
+        {
+            int end = Math.Min(blockSize, weight.Reduction - k0);
+            int blob = firstBlob + block * weight.BlobSize;
+            Vector256<float> scale0 = Vector256.Create(weight.Scales[firstScale + block]);
+            Vector256<float> zero0 = Vector256.Create(ZeroPoint(weight, column, block));
+            Vector256<float> scale1 = Vector256.Create(weight.Scales[firstScale + blocks + block]);
+            Vector256<float> zero1 = Vector256.Create(ZeroPoint(weight, column + 1, block));
+            Vector256<float> scale2 = Vector256.Create(weight.Scales[firstScale + 2 * blocks + block]);
+            Vector256<float> zero2 = Vector256.Create(ZeroPoint(weight, column + 2, block));
+            Vector256<float> scale3 = Vector256.Create(weight.Scales[firstScale + 3 * blocks + block]);
+            Vector256<float> zero3 = Vector256.Create(ZeroPoint(weight, column + 3, block));
+            for (int i = 0; i < end; i += 8)
+            {
+                Vector256<float> left = Vector256.LoadUnsafe(ref pa, (nuint)(aOffset + k0 + i));
+                int at = blob + i;
+                sum0 = Fma.MultiplyAdd(left, (ReadEightBytes(ref pb, at) - zero0) * scale0, sum0);
+                sum1 = Fma.MultiplyAdd(left, (ReadEightBytes(ref pb, at + columnBytes) - zero1) * scale1, sum1);
+                sum2 = Fma.MultiplyAdd(left, (ReadEightBytes(ref pb, at + 2 * columnBytes) - zero2) * scale2, sum2);
+                sum3 = Fma.MultiplyAdd(left, (ReadEightBytes(ref pb, at + 3 * columnBytes) - zero3) * scale3, sum3);
+            }
+        }
+
+        c[target] = Vector256.Sum(sum0) + (weight.Bias == null ? 0f : weight.Bias[column]);
+        c[target + 1] = Vector256.Sum(sum1) + (weight.Bias == null ? 0f : weight.Bias[column + 1]);
+        c[target + 2] = Vector256.Sum(sum2) + (weight.Bias == null ? 0f : weight.Bias[column + 2]);
+        c[target + 3] = Vector256.Sum(sum3) + (weight.Bias == null ? 0f : weight.Bias[column + 3]);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Vector256<float> ReadEightBytes(ref byte packed, int offset) =>
+        Avx.ConvertToVector256Single(Avx2.ConvertToVector256Int32(
+            Vector128.CreateScalarUnsafe(Unsafe.ReadUnaligned<ulong>(ref Unsafe.Add(ref packed, offset))).AsByte()));
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static float DotWide(float[] a, int aOffset, OnnxBlockQuantizedWeight weight, int column)

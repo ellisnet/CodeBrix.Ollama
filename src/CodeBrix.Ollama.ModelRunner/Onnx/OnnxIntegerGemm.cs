@@ -33,9 +33,9 @@ namespace CodeBrix.Ollama.ModelRunner; //was previously: onnxruntime/core/provid
 /// is a performance question and not a correctness one.
 /// </para>
 /// <para>
-/// The products cannot overflow: each side lies in [-255, 255] once its zero point is off, so a product is at
-/// most 65,025, and a reduction of 4,096 of them is under 267 million - comfortably inside the 32-bit integer
-/// the specification promises to accumulate in.
+/// Four output columns share each activation load on AVX2. Each side lies in [-255, 255] after subtracting
+/// its zero point, so the paired products fit in 32 bits without saturation. A reduction of 4,096 elements
+/// is under 267 million; longer reductions retain the existing 32-bit wrapping accumulation.
 /// </para>
 /// </remarks>
 internal static class OnnxIntegerGemm
@@ -160,19 +160,91 @@ internal static class OnnxIntegerGemm
         int row = (int)(start / n);
         int column = (int)(start % n);
 
-        for (long index = start; index < end; index++)
+        for (long index = start; index < end;)
         {
-            int rightZeroPoint = rightZeroPoints.Length == 1 ? rightZeroPoints[0] : rightZeroPoints[column];
-            result[(int)index] = wide
-                ? DotAvx2(left, row * k, packed, column * k, k, leftZeroPoint, rightZeroPoint)
-                : DotScalar(left, row * k, packed, column * k, k, leftZeroPoint, rightZeroPoint);
+            if (wide && column + 4 <= n && index + 4 <= end)
+            {
+                FourColumnsAvx2(left, row * k, packed, column * k, result, (int)index,
+                    k, leftZeroPoint, rightZeroPoints, column);
+                index += 4;
+                column += 4;
+            }
+            else
+            {
+                int rightZeroPoint = rightZeroPoints.Length == 1 ? rightZeroPoints[0] : rightZeroPoints[column];
+                result[(int)index] = wide
+                    ? DotAvx2(left, row * k, packed, column * k, k, leftZeroPoint, rightZeroPoint)
+                    : DotScalar(left, row * k, packed, column * k, k, leftZeroPoint, rightZeroPoint);
+                index++;
+                column++;
+            }
 
-            if (++column == n)
+            if (column == n)
             {
                 column = 0;
                 row++;
             }
         }
+    }
+
+    /// <summary>
+    /// Reuses each activation load and zero-point subtraction across four columns. Products widen to
+    /// 32-bit integers without the saturation that a byte multiply-add would introduce at full range.
+    /// Worker and row boundaries are checked by Range before entering this loop.
+    /// </summary>
+    private static void FourColumnsAvx2(
+        short[] x, int xOffset, sbyte[] y, int yOffset, int[] result, int target,
+        int k, int xZeroPoint, int[] zeroPoints, int column)
+    {
+        ref short px = ref MemoryMarshal.GetArrayDataReference(x);
+        ref sbyte py = ref MemoryMarshal.GetArrayDataReference(y);
+        int z0 = zeroPoints.Length == 1 ? zeroPoints[0] : zeroPoints[column];
+        int z1 = zeroPoints.Length == 1 ? z0 : zeroPoints[column + 1];
+        int z2 = zeroPoints.Length == 1 ? z0 : zeroPoints[column + 2];
+        int z3 = zeroPoints.Length == 1 ? z0 : zeroPoints[column + 3];
+        Vector256<short> zx = Vector256.Create((short)xZeroPoint);
+        Vector256<short> zy0 = Vector256.Create((short)z0);
+        Vector256<short> zy1 = Vector256.Create((short)z1);
+        Vector256<short> zy2 = Vector256.Create((short)z2);
+        Vector256<short> zy3 = Vector256.Create((short)z3);
+        Vector256<int> sum0 = Vector256<int>.Zero;
+        Vector256<int> sum1 = Vector256<int>.Zero;
+        Vector256<int> sum2 = Vector256<int>.Zero;
+        Vector256<int> sum3 = Vector256<int>.Zero;
+
+        int i = 0;
+        for (; i + 16 <= k; i += 16)
+        {
+            Vector256<short> a = Vector256.LoadUnsafe(ref px, (nuint)(xOffset + i)) - zx;
+            int at = yOffset + i;
+            sum0 += Avx2.MultiplyAddAdjacent(a,
+                Avx2.ConvertToVector256Int16(Vector128.LoadUnsafe(ref py, (nuint)at)) - zy0);
+            sum1 += Avx2.MultiplyAddAdjacent(a,
+                Avx2.ConvertToVector256Int16(Vector128.LoadUnsafe(ref py, (nuint)(at + k))) - zy1);
+            sum2 += Avx2.MultiplyAddAdjacent(a,
+                Avx2.ConvertToVector256Int16(Vector128.LoadUnsafe(ref py, (nuint)(at + 2 * k))) - zy2);
+            sum3 += Avx2.MultiplyAddAdjacent(a,
+                Avx2.ConvertToVector256Int16(Vector128.LoadUnsafe(ref py, (nuint)(at + 3 * k))) - zy3);
+        }
+
+        int s0 = Vector256.Sum(sum0);
+        int s1 = Vector256.Sum(sum1);
+        int s2 = Vector256.Sum(sum2);
+        int s3 = Vector256.Sum(sum3);
+        for (; i < k; i++)
+        {
+            int a = x[xOffset + i] - xZeroPoint;
+            int at = yOffset + i;
+            s0 += a * (y[at] - z0);
+            s1 += a * (y[at + k] - z1);
+            s2 += a * (y[at + 2 * k] - z2);
+            s3 += a * (y[at + 3 * k] - z3);
+        }
+
+        result[target] = s0;
+        result[target + 1] = s1;
+        result[target + 2] = s2;
+        result[target + 3] = s3;
     }
 
     private static int DotScalar(

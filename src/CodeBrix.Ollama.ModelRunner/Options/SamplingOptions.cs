@@ -1,3 +1,5 @@
+using System;
+
 namespace CodeBrix.Ollama.ModelRunner;
 
 /// <summary>
@@ -6,6 +8,8 @@ namespace CodeBrix.Ollama.ModelRunner;
 /// </summary>
 public sealed class SamplingOptions
 {
+    private uint? _seed;
+
     /// <summary>
     /// Temperature. 0 selects the most likely token every time (greedy); higher values flatten the
     /// distribution. Default 0.8.
@@ -38,8 +42,24 @@ public sealed class SamplingOptions
 
     /// <summary>
     /// The random seed. <see langword="null"/> (the default) draws a fresh seed for every request; a fixed
-    /// value makes a request reproducible on the same build and hardware. The value 0xFFFFFFFF is the
-    /// engine's own "draw a random seed" marker and is therefore not reproducible either.
+    /// value selects a repeatable random stream. Reproducing output also requires the same model, settings,
+    /// build and hardware. For native GGUF generation, call <see cref="IRunningModel.ClearCacheAsync"/>
+    /// before each run being compared: cached prompt evaluation can change floating-point rounding.
     /// </summary>
-    public uint? Seed { get; set; }
+    /// <remarks>
+    /// Set this explicitly to <see langword="null"/> to request randomness. The native engine's reserved
+    /// value 0xFFFFFFFF, including an unchecked conversion of -1 to <see cref="uint"/>, is rejected.
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">The value is 0xFFFFFFFF.</exception>
+    public uint? Seed
+    {
+        get => _seed;
+        set
+        {
+            if (value == uint.MaxValue)
+                throw new ArgumentOutOfRangeException(nameof(Seed), value,
+                    "Seed 0xFFFFFFFF (an unchecked conversion of -1 to uint) is reserved. Use null for a fresh random seed.");
+            _seed = value;
+        }
+    }
 }

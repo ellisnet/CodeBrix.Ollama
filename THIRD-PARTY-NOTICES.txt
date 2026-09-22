@@ -1575,6 +1575,20 @@ WHAT IS NOT FROM ONNX RUNTIME
     comparisons on real models. Those fixtures are ours (MIT) and are generated
     from seeded random numbers; no publisher's data is among them.
 
+    PERFORMANCE REFERENCE, 2026-09-21. The managed optimization work consulted
+    ONNX Runtime commit 090f6ba1cfd6f4a0cb2481bac4b92156828a0e33, specifically
+    core/optimizer/matmul_transpose_fusion.cc and matmul_scale_fusion.cc,
+    core/mlas/lib/sqnbitgemm_kernel_avx_common_fp32.h and
+    sqnbitgemm_kernel_avx2.cpp, and contrib_ops/cpu/quantization/matmul_nbits.cc.
+    These show transpose/scale fusion and processing several quantized output
+    columns together. OnnxPlanOptimizer, OnnxMatMulFusion, OnnxTransposedGemm,
+    Kernels/OnnxFusedMatMulKernel and the four-column loop in OnnxBlockGemm are
+    original implementations of those techniques in this engine's existing
+    layouts, rather than translations of the upstream kernels. In particular,
+    scaling is applied to each right-hand value before multiplication, and
+    four-bit weights keep their existing nibble layout and accumulation order.
+    No upstream source or native binary was added to the package by this work.
+
 MODIFICATIONS MADE DURING THE PORT
     - Python and C++ became C#: dictionaries became typed collections, numpy
       array operations became loops, and the tools' own file handling was

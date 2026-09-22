@@ -1,0 +1,55 @@
+{
+  "name": "matmul_fusion_dynamic_quantize",
+  "opset": 14,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        1,
+        1,
+        64
+      ],
+      "file": "in_a.bin"
+    },
+    {
+      "name": "b",
+      "type": "float",
+      "shape": [
+        1,
+        8,
+        64
+      ],
+      "file": "in_b.bin"
+    },
+    {
+      "name": "scale",
+      "type": "float",
+      "shape": [],
+      "file": "in_scale.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        1,
+        1,
+        8
+      ],
+      "file": "out_y.bin"
+    },
+    {
+      "name": "q_float",
+      "type": "float",
+      "shape": [
+        1,
+        1,
+        8
+      ],
+      "file": "out_q_float.bin"
+    }
+  ],
+  "note": "Seed 20260921; ONNX Runtime CPU with graph optimization disabled."
+}

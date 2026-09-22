@@ -310,6 +310,16 @@ public sealed class MidiGenerationModelTests
 
         //Assert
         await act.Should().ThrowAsync<InferenceException>();
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        Func<Task> cancelledAttempt = async () =>
+        {
+            await foreach (var item in model.GenerateAsync(Greedy(2), cancelled.Token)) { }
+        };
+        await cancelledAttempt.Should().ThrowAsync<OperationCanceledException>();
+        await act.Should().ThrowAsync<InferenceException>();
+        await first.DisposeAsync();
+        (await Collect(model, Greedy(2))).Should().HaveCount(2);
     }
 
     /// <summary>

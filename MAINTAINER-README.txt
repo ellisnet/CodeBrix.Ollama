@@ -2379,6 +2379,16 @@ HOW A LOAD WORKS
     5  What comes out is an execution plan: the nodes in the order they run, a
        slot per named tensor, and the node at which each tensor is last read.
 
+    BEFORE LIFETIMES ARE ASSIGNED, OnnxPlanOptimizer combines a right-hand
+    Transpose (last two axes only), optionally followed by Mul, with MatMul.
+    Both intermediates must have one consumer and neither may be a graph
+    output. OnnxFusedMatMulKernel reads the original [N,K] rows and applies a
+    scalar scale to each value while multiplying, eliminating the full-cache
+    transpose and scale buffers. A nonscalar scale or a scale introducing a
+    broadcast axis executes the original kernels instead. Runtime ranks are
+    still validated. The metadata reports the original graph's operators;
+    timing reports identify the combined nodes as MatMulTranspose[Scale].
+
     THE LOAD COUNTS WHAT IT HAS THROWN AWAY and asks the collector for it when
     it is worth a collection (OnnxLoadReclaim, threshold 128 MiB). A load
     abandons a model's worth of memory three times over in a few hundred
@@ -2422,6 +2432,20 @@ HOW A RUN WORKS
     can be switched off (OnnxRunnerOptions.ReuseBuffers); the two settings must
     produce identical numbers, and the suite runs every oracle both ways to say
     so.
+
+    Reusable arrays of at least 1,024 elements receive 25 percent growth
+    headroom, capped without integer overflow. This prevents an increasing
+    context from retaining another exact-sized intermediate at every step.
+    Fresh element arrays use GC.AllocateUninitializedArray: every kernel must
+    overwrite or explicitly clear the values it exposes, just as it already
+    must for a reused buffer. Outputs handed to a caller remain exact-sized
+    and are never recycled. Large Concat outputs (at least 262,144 elements)
+    divide independent outer slices across the configured threads.
+
+    Scalar float broadcasting uses the portable vector arithmetic path, with
+    operand order preserved for Sub and Div. The scalar kernel setting still
+    selects scalar arithmetic. These changes, and the transpose fusion, also
+    apply to full-precision graphs; they do not require quantized weights.
 
     ONE RUN AT A TIME per loaded model, and the second caller is REFUSED rather
     than queued. Load a second model to run two at once.
@@ -2490,6 +2514,14 @@ decoder produced either way cannot be run without them.
         times slower. `bias` is implemented; `g_idx`, `weight_prepacked`, a bit
         width other than four or eight, and a block size that is not a power of
         two of at least sixteen are refused by name.
+        On AVX2 with FMA, decode calls with fewer than four input rows process
+        four output columns together when the reduction is a multiple of eight.
+        The columns share activation loads and keep independent accumulators;
+        each column keeps its original accumulation order. Remainder columns,
+        partial reductions and processors without those instructions retain
+        their existing paths. Both four-bit and eight-bit weights have this
+        grouped path; the eight-bit load reads exactly eight bytes. No extra
+        activation quantization or expansion of the stored weights is introduced.
         accuracy_level IS READ AND IGNORED, and that is the deliberate choice
         recorded as D3 in the plan. It is not a description of the weight: it is
         the LOWEST precision a runtime may compute the ACTIVATIONS at, and 4
@@ -2506,7 +2538,10 @@ decoder produced either way cannot be run without them.
         the answer is 0 and 2. A constant weight is turned round to [N, K] at
         load time and kept ONE BYTE PER ELEMENT; an unsigned weight is stored
         signed with its zero point shifted by 128, which is the same arithmetic
-        and leaves one kernel instead of four.
+        and leaves one kernel instead of four. On AVX2, four output columns
+        share each activation load and zero-point subtraction. Products widen
+        into 32-bit integers without saturation; row boundaries, worker
+        boundaries and leftover elements retain exact integer arithmetic.
   com.microsoft:GroupQueryAttention
         A whole attention block in one operator: the rotary embedding, the
         key-value cache, the causal mask, the softmax and both matrix products.
@@ -2977,8 +3012,9 @@ answers Auto because the enum has no "none" and chat is refused anyway.
 
 SAMPLING: every field of SamplingOptions is implemented - temperature (nought is
 greedy), top-k, top-p, min-p, locally typical, the repeat, presence and
-frequency penalties with their window, and the seed, including the one value the
-native engine reads as "draw a fresh seed". Only GREEDY generation is claimed to
+frequency penalties with their window, and the seed. Seed = null requests a
+fresh seed; the numeric native sentinel 0xFFFFFFFF is rejected by the shared
+SamplingOptions setter. Only GREEDY generation is claimed to
 match the other route or another engine: the draw comes from this library's own
 generator, which is not llama.cpp's, and the penalties see the tokens a request
 GENERATED and never the tokens of its prompt (the same choice the native path
@@ -3188,6 +3224,71 @@ against onnxruntime 1.30.0 on identical inputs.
                CLOSED MOST OF THAT - the load now counts what it has abandoned
                and asks for it (see HOW A LOAD WORKS) - and the figures to use
                are in PERFORMANCE BUDGETS below.
+
+PROFILING A MANAGED ONNX GRAPH
+-----------------------------
+Set CODEBRIX_OLLAMA_ONNX_TIMING_DIR to a writable directory before loading an
+ONNX model. On disposal, each loaded graph writes one onnx-timing-*.json file
+there. The file reports elapsed time for every node and graph run, and groups
+per-node time by 100-position cache-context buckets when the graph has a
+past_key_values.0.key input. Timings include buffer allocation inside kernels.
+Leave the variable unset for ordinary runs; collecting per-node timings adds
+overhead. Dispose the model to write the report.
+
+LONG-CONTEXT MANAGED PERFORMANCE, 2026-09-21
+------------------------------------------
+The Intel Core i7-12850HX investigation of the reduced SkyTNT pair measured
+1,000 Club Arrangement events, greedy sampling, seed 20260921, four threads:
+
+    original managed engine               53.29 s     peak 9.63 GiB
+    optimized managed engine, profiled    19.77 s     peak 1.44 GiB
+    optimized, two unprofiled repeats     18.83 s, 19.71 s
+                                                    peak 1.54 GiB, 1.49 GiB
+    native ONNX Runtime CPU               17.19 s
+
+All 1,000 event lines agreed exactly with the original and native runs. The
+FP32 SkyTNT pair also improved, from 66.62 s to 39.58 s, with exact event
+agreement and peak resident memory reduced from 13.97 to 3.87 GiB. A fresh
+native FP32 run took 37.66 s, with all 1,000 events matching both managed
+builds; the optimized managed run was 5.1% slower than native. These are
+whole-generation measurements after loading, without synthesis. They describe
+this model, prompt and processor, not a promise for every ONNX graph.
+
+The INT8 follow-up used the same prompt and settings on both reductions:
+
+    weight-only INT8: original 70.41 s; optimized 19.24 s, 20.25 s;
+                     native ONNX Runtime 111.73 s
+    dynamic INT8:    original 41.92 s; optimized 25.59 s;
+                     native ONNX Runtime 13.31 s
+
+All final runs preserve the original/native 1,000 event lines within each
+variant. Weight-only INT8 took 38.71 s with the general improvements before
+its new four-column kernel. Native runtime logs confirm that this weight-only
+INT8 configuration falls back to expanding weights to FP32 for each multiply.
+
+Dynamic quantization can amplify tiny floating-point reassociation into a
+different byte. An initial fused trial took 16.64-17.04 s but changed generated
+events, so plans containing DynamicQuantizeLinear retain their original
+transpose/scale/matmul operations. The final 25.59 s result keeps the new exact
+integer kernel and the general allocation, scalar broadcasting and copy gains.
+
+The changes are the arena growth policy, uninitialized primitive allocation,
+vector scalar broadcasting, right-transpose/scale fusion, four-column INT4
+and INT8 multiplication, and parallel large Concat copies described above.
+Quantized multiplication and output-cache copying remain the largest costs;
+the output-cache allocations still grow with the sum of context lengths.
+
+Validation: Release build 0 warnings/0 errors; offline runner suite 3,199
+passed and 30 gated skips. The ONNX session/fusion/block/integer subset passed
+1,118 tests with AVX2 disabled and again with all hardware intrinsics disabled.
+The AVX2/FMA path is guarded; other processors retain portable vector/scalar
+execution. Actual ARM64 and Apple Silicon performance was not measured here.
+The package still has zero NuGet dependencies and no native ONNX backend.
+
+Detailed evidence on Jeremy's machine:
+    ~/ClaudeHome/RESULT_codebrix_ollama_managed_onnx_optimizations_2026-09-21.md
+    ~/ClaudeHome/benchmarks/skytnt-managed-optimization-2026-09-21/
+
 
 PERFORMANCE BUDGETS FOR THE MANAGED ONNX ENGINE, 2026-09-18
 -----------------------------------------------------------
@@ -4197,11 +4298,27 @@ THE ENGINE (Engine/)
     reads the <function=NAME><parameter=P>...</parameter></function> form, and
     the engine chooses between it and Parsing/ToolCallParser from the template
     text. Duplicate tool names keep the first and ignore the rest.
-  - RE-ENTRANCY IS AN EXCEPTION, NOT A DEADLOCK. Calling another member of the
-    same IRunningModel from inside an await foreach over GenerateAsync or
-    ChatAsync on the same call chain throws InvalidOperationException. The
-    request gate is held across the yield, so without the AsyncLocal marker in
-    EngineRequestScope it would simply hang.
+  - ONE ACTIVE GENERATION PER INSTANCE, for native GGUF and managed ONNX.
+    Native ExclusiveGenerationAsync takes the context gate with WaitAsync(0)
+    at enumeration start, before chat preparation or tokenization. A busy
+    model throws InferenceException, on the same or another call chain. The
+    gate stays held across every yield, including the final one, and is freed
+    on completion, disposal, cancellation or failure. An unused enumerable
+    does not reserve the model. Already-cancelled entrants get cancellation
+    without disturbing the active generation, on both runners.
+  - Native cache, embedding and adapter operations still wait for the gate on
+    another call chain. From inside the same model's await foreach they throw
+    InvalidOperationException: the AsyncLocal EngineRequestScope marker
+    prevents waiting on their own enumeration. Tokenize, detokenize and
+    render do not take this gate.
+  - SEEDS: null is the default and the explicit request for a fresh seed.
+    SamplingOptions rejects uint.MaxValue (including unchecked -1). MIDI
+    rejects negative long seeds and 4294967295; its other nonnegative 64-bit
+    seeds remain valid. Validation happens on assignment, before generation.
+    Keep the native sentinel INTERNAL to EngineSamplerChain's null mapping.
+    A fixed seed selects a repeatable random stream, not identical inference
+    across hardware or runners. Native GGUF comparisons must clear the prefix
+    cache before each run: prompt batching can change rounding and output.
 
 
 CODING CONVENTIONS

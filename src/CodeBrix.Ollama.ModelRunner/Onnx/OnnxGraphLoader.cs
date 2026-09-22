@@ -92,10 +92,12 @@ internal static class OnnxGraphLoader
         int[] readers = new int[table.Length];
         OnnxPlanNode[] nodes = BuildNodes(graph, table, byName, opset, readers, reclaim);
         DropFoldedWeights(table, readers);
-        Lifetimes(table, nodes);
 
         SortedSet<string> operators = new SortedSet<string>(StringComparer.Ordinal);
         foreach (OnnxPlanNode node in nodes) operators.Add(node.OpType);
+
+        nodes = OnnxPlanOptimizer.Optimize(table, nodes);
+        Lifetimes(table, nodes);
 
         OnnxModelMetadata metadata = new OnnxModelMetadata(
             graph.Name, producerName, producerVersion, irVersion, opsets, inputs, outputs,

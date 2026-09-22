@@ -80,8 +80,17 @@ internal sealed class OnnxArena
             }
         }
 
-        return new OnnxBuffer(elementType, Allocate(elementType, count), poolable, true);
+        // A decoder grows its intermediates a position at a time. Exact-sized allocations would leave
+        // one obsolete buffer per position in the pool. Geometric growth bounds that retained history
+        // relative to the largest request, while small shape tensors and caller-owned outputs stay exact.
+        int capacity = Reuse && poolable ? GrowthCapacity(count) : count;
+        return new OnnxBuffer(elementType, Allocate(elementType, capacity), poolable, true);
     }
+
+    /// <summary>Allows gradual growth without ever overflowing or returning less than was requested.</summary>
+    internal static int GrowthCapacity(int count) => count >= 1024 && count <= Array.MaxLength
+        ? (int)Math.Min(Array.MaxLength, count + ((long)count / 4))
+        : count;
 
     /// <summary>Takes a buffer back once nothing reads it.</summary>
     /// <param name="buffer">The buffer.</param>
@@ -106,15 +115,18 @@ internal sealed class OnnxArena
     /// <summary>Allocates an array of the given element type.</summary>
     /// <param name="elementType">The element type.</param>
     /// <param name="count">How many elements.</param>
-    /// <returns>The array.</returns>
+    /// <returns>The array, whose contents must be filled before they are read.</returns>
     internal static Array Allocate(OnnxElementType elementType, int count) => elementType switch
     {
-        OnnxElementType.Float => new float[count],
-        OnnxElementType.Int64 => new long[count],
-        OnnxElementType.Int32 => new int[count],
-        OnnxElementType.Bool => new bool[count],
-        OnnxElementType.UInt8 => new byte[count],
-        OnnxElementType.Int8 => new sbyte[count],
+        // Kernels already overwrite or explicitly clear their output, since reused buffers contain old
+        // data. In particular, clearing a fresh key/value cache before Concat copies into it doubles the
+        // writes to that growing tensor. These arrays contain no managed references.
+        OnnxElementType.Float => GC.AllocateUninitializedArray<float>(count),
+        OnnxElementType.Int64 => GC.AllocateUninitializedArray<long>(count),
+        OnnxElementType.Int32 => GC.AllocateUninitializedArray<int>(count),
+        OnnxElementType.Bool => GC.AllocateUninitializedArray<bool>(count),
+        OnnxElementType.UInt8 => GC.AllocateUninitializedArray<byte>(count),
+        OnnxElementType.Int8 => GC.AllocateUninitializedArray<sbyte>(count),
         _ => throw new ArgumentOutOfRangeException(
             nameof(elementType), elementType, Unknown),
     };
