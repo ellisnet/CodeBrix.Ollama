@@ -583,7 +583,7 @@ public sealed class ModelStoreReduceTests
         OnnxReduce.RunOverrideForTesting = (mode, options, inputPath, outputPath) =>
         {
             long size = writtenBytes > 0 ? writtenBytes : Math.Max(1L, new FileInfo(inputPath).Length / 4);
-            File.WriteAllBytes(outputPath, new byte[size]);
+            File.WriteAllBytes(outputPath, OnnxTestGraph.Bytes(size));
             return Task.FromResult(new OnnxReduceRun(
                 "onnxruntime", "1.30.0", new[] { outputPath }, size));
         };
@@ -633,10 +633,10 @@ public sealed class ModelStoreReduceTests
             Path.Combine(root, "model.safetensors"), "the checkpoint the graphs came from",
             TestContext.Current.CancellationToken);
         await File.WriteAllBytesAsync(
-            Path.Combine(root, "onnx", "model_base.onnx"), new byte[BaseGraphBytes],
+            Path.Combine(root, "onnx", "model_base.onnx"), OnnxTestGraph.Bytes(BaseGraphBytes),
             TestContext.Current.CancellationToken);
         await File.WriteAllBytesAsync(
-            Path.Combine(root, "onnx", "model_token.onnx"), new byte[TokenGraphBytes],
+            Path.Combine(root, "onnx", "model_token.onnx"), OnnxTestGraph.Bytes(TokenGraphBytes),
             TestContext.Current.CancellationToken);
 
         var options = new ImportOptions

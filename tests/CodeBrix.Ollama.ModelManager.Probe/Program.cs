@@ -197,7 +197,7 @@ internal static class Program
             File.WriteAllText(Path.Combine(source, "config.json"), "{\"architectures\":[\"LlamaForCausalLM\"]}\n");
             File.WriteAllText(Path.Combine(source, "LICENSE"), "The terms of this probe's imaginary model.\n");
             File.WriteAllBytes(Path.Combine(source, "model.safetensors"), new byte[] { 9, 9, 9, 9 });
-            File.WriteAllBytes(Path.Combine(source, "onnx", "model.onnx"), new byte[] { 1, 2, 3, 4, 5 });
+            File.WriteAllBytes(Path.Combine(source, "onnx", "model.onnx"), new byte[] { 8, 9, 58, 0 });
 
             using var modelStore = new ModelStore(new ModelStoreOptions { StoreDirectory = store });
 

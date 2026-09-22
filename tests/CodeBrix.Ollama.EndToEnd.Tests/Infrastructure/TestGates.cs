@@ -8,6 +8,9 @@ namespace CodeBrix.Ollama.EndToEnd.Tests;
 /// </summary>
 public static class TestGates
 {
+    /// <summary>Enables the local multi-gigabyte MuseCoco checkpoint staging and generation test.</summary>
+    public const string RunMuseCocoTests = "CODEBRIX_OLLAMA_RUN_MUSECOCO_TESTS";
+
     /// <summary>
     /// The gate every test in this project carries. Nothing here downloads, converts or loads a model unless
     /// it is set to "1".

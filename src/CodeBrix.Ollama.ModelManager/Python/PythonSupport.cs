@@ -86,9 +86,9 @@ public static class PythonSupport
     /// the rest of the application. Disposing a <see cref="ModelStore"/> does not call it either.
     /// </para>
     /// <para>
-    /// A consumer who never calls it is still safe: when this library owns the interpreter it also asks
-    /// the embedding layer to bound its own process-exit shutdown, so a process that simply ends does
-    /// end.
+    /// When this library owns the interpreter it also requests bounded process-exit shutdown from the
+    /// embedding layer. Call this method explicitly for reliable teardown after native Python modules
+    /// such as torch; their finalization can interact with process shutdown beyond that fallback's scope.
     /// </para>
     /// </remarks>
     public static void Shutdown() => PythonHost.Shutdown();

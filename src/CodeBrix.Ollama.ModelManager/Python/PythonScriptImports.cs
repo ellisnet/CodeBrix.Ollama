@@ -32,6 +32,11 @@ internal static class PythonScriptImports
         "optimum",
         "os",
         "sys",
+        "argparse",
+        "json",
+        "math",
+        "numpy",
+        "torch",
     };
 
     /// <summary>

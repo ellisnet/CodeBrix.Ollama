@@ -246,11 +246,11 @@ public sealed class ModelStoreExportTests
         await File.WriteAllTextAsync(
             Path.Combine(root, "model.safetensors"), "the checkpoint the graphs came from",
             TestContext.Current.CancellationToken);
-        await File.WriteAllTextAsync(
-            Path.Combine(root, "onnx", "model_base.onnx"), "the base graph",
+        await File.WriteAllBytesAsync(
+            Path.Combine(root, "onnx", "model_base.onnx"), OnnxTestGraph.Bytes(64),
             TestContext.Current.CancellationToken);
-        await File.WriteAllTextAsync(
-            Path.Combine(root, "onnx", "model_token.onnx"), "the token graph",
+        await File.WriteAllBytesAsync(
+            Path.Combine(root, "onnx", "model_token.onnx"), OnnxTestGraph.Bytes(32),
             TestContext.Current.CancellationToken);
 
         var options = new ImportOptions

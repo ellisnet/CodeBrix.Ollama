@@ -175,6 +175,13 @@ own tooling, deciding anything about a licence, or any HTTP server.
   graph's own metadata, and a decoder's key/value cache fed from one step to the next without a
   byte being copied. Full-precision and quantized graphs alike; a four-bit graph keeps four-bit
   weights in memory
+* **MuseCoco text or attributes to MIDI** (`MuseCocoTextModel`, `MuseCocoMusicModel`),
+  including optional custom BERT prompting and independently selected FP32, INT8 or INT4 models.
+  ModelManager stages and quantizes them; ModelRunner executes them entirely in managed .NET.
+  `GenerateStreamingAsync` releases MIDI events after each completed bar so playback can begin
+  while later bars are generated; `GenerateAsync` returns the completed score and token statistics.
+  See [the MuseCoco guide](MUSECOCO-README.txt) for staging, consumer examples, bundle formats,
+  fidelity and performance results.
 * **Generating MIDI music from an ONNX music model** (`MidiGenerationModel`), streamed as it is
   written: every event carries its absolute position in ticks, a note carries its own length, and
   each one says how far the piece is settled - so an application can start playing the beginning

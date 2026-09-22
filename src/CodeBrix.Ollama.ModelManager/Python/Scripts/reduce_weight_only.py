@@ -6,7 +6,7 @@
 # the tool's own default - so Gather stays as it is and the embedding tables keep their precision.
 #
 # The caller sets: input_path, output_path, bits, block_size, is_symmetric, accuracy_level (below zero
-# for "let the runtime choose") and use_external_data. Nothing outside the output path is written.
+# for "let the runtime choose"), nodes_to_exclude and use_external_data. Nothing outside the output path is written.
 import os
 
 import onnx
@@ -21,7 +21,7 @@ config = DefaultWeightOnlyQuantConfig(
     bits=bits,
 )
 
-quantizer = MatMulNBitsQuantizer(model=onnx.load(input_path), algo_config=config)
+quantizer = MatMulNBitsQuantizer(model=onnx.load(input_path), algo_config=config, nodes_to_exclude=nodes_to_exclude)
 quantizer.process()
 quantizer.model.save_model_to_file(output_path, use_external_data)
 

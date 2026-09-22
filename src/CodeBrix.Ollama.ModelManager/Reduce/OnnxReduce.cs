@@ -332,132 +332,54 @@ internal static class OnnxReduce
         return ordered;
     }
 
-    /// <summary>
-    /// Whether one of a bundle's files holds the weights of a graph that is being reduced. ONNX's own
-    /// convention names such a file after the graph it belongs to - <c>model.onnx.data</c>,
-    /// <c>model.onnx_data</c> - so a file that begins with a selected graph's name belongs to it and is
-    /// replaced along with it.
-    /// </summary>
-    /// <param name="path">The file to judge, as the bundle spells it.</param>
-    /// <param name="graphPath">The graph's path, as the bundle spells it.</param>
-    /// <returns><see langword="true"/> when the file holds that graph's weights.</returns>
-    internal static bool IsExternalDataFor(string path, string graphPath)
-    {
-        if (string.IsNullOrEmpty(path) || string.IsNullOrEmpty(graphPath))
-        {
-            return false;
-        }
-
-        return path.Length > graphPath.Length
-            && path.StartsWith(graphPath, StringComparison.OrdinalIgnoreCase)
-            && (path[graphPath.Length] == '.' || path[graphPath.Length] == '_');
-    }
-
-    /// <summary>
-    /// The files a reduction carries through unchanged: everything the source holds except the graphs
-    /// being reduced, the files holding those graphs' weights, and the checkpoints an export already
-    /// replaced. A configuration, a tokenizer, a model card or a graph nobody asked to reduce is part of
-    /// using the model, so it stays.
-    /// </summary>
-    /// <param name="files">The source bundle's files.</param>
-    /// <param name="selected">The graphs being reduced.</param>
-    /// <returns>The files to carry through, in the order the bundle holds them.</returns>
+    /// <summary>Preserves unselected graphs and every weight file they actually reference.</summary>
     internal static IReadOnlyList<ResolvedFile> CompanionFiles(
-        IReadOnlyList<ResolvedFile> files, IReadOnlyList<string> selected)
+        IReadOnlyList<ResolvedFile> files, IReadOnlyList<string> selected,
+        IReadOnlyDictionary<string, HashSet<string>> references)
     {
         var kept = new List<ResolvedFile>();
         if (files == null)
         {
             return kept;
         }
-
+        var replaced = new HashSet<string>(selected, StringComparer.Ordinal);
+        var retainedWeights = new HashSet<string>(StringComparer.Ordinal);
+        foreach (KeyValuePair<string, HashSet<string>> graph in references)
+        {
+            if (replaced.Contains(graph.Key))
+            {
+                replaced.UnionWith(graph.Value);
+            }
+            else
+            {
+                retainedWeights.UnionWith(graph.Value);
+            }
+        }
         foreach (ResolvedFile file in files)
         {
-            if (IsReplaced(file.Name, selected) || OnnxExport.IsSupersededCheckpoint(file.Name))
+            if (retainedWeights.Contains(file.Name)
+                || (!replaced.Contains(file.Name) && !OnnxExport.IsSupersededCheckpoint(file.Name)))
             {
-                continue;
+                kept.Add(file);
             }
-            kept.Add(file);
         }
         return kept;
     }
 
-    /// <summary>
-    /// Whether a file is one of the graphs being reduced, or holds one of their weights.
-    /// </summary>
-    /// <param name="path">The file to judge.</param>
-    /// <param name="selected">The graphs being reduced.</param>
-    /// <returns><see langword="true"/> when the reduction writes this file itself.</returns>
-    private static bool IsReplaced(string path, IReadOnlyList<string> selected)
+    /// <summary>Measures the graph and its distinct referenced weight files.</summary>
+    internal static async Task<long> MeasureGraphAsync(
+        string path, CancellationToken cancellationToken = default, string bundleRoot = null)
     {
-        foreach (string graph in selected)
-        {
-            if (string.Equals(path, graph, StringComparison.Ordinal) || IsExternalDataFor(path, graph))
-            {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /// <summary>
-    /// The size of a graph on disk: the file itself and any file of weights written beside it.
-    /// </summary>
-    /// <param name="path">The absolute path of the graph.</param>
-    /// <returns>The total size in bytes, or 0 when the file is not there.</returns>
-    internal static long MeasureGraph(string path)
-    {
-        var file = new FileInfo(path);
-        if (!file.Exists)
+        if (!File.Exists(path))
         {
             return 0;
         }
-
-        long total = file.Length;
-        string folder = file.DirectoryName;
-        if (string.IsNullOrEmpty(folder))
+        long total = new FileInfo(path).Length;
+        foreach (string side in await OnnxExternalFiles.PathsAsync(path, cancellationToken, bundleRoot).ConfigureAwait(false))
         {
-            return total;
+            total += new FileInfo(side).Length;
         }
-
-        foreach (string candidate in Directory.GetFiles(folder, file.Name + "*"))
-        {
-            if (!string.Equals(candidate, file.FullName, StringComparison.Ordinal)
-                && IsExternalDataFor(Path.GetFileName(candidate), file.Name))
-            {
-                total += new FileInfo(candidate).Length;
-            }
-        }
-
         return total;
-    }
-
-    /// <summary>
-    /// The absolute paths of the files of weights written beside a graph.
-    /// </summary>
-    /// <param name="path">The absolute path of the graph.</param>
-    /// <returns>The side files, which is usually none.</returns>
-    internal static IReadOnlyList<string> ExternalDataPaths(string path)
-    {
-        var found = new List<string>();
-        var file = new FileInfo(path);
-        string folder = file.DirectoryName;
-
-        if (!file.Exists || string.IsNullOrEmpty(folder))
-        {
-            return found;
-        }
-
-        foreach (string candidate in Directory.GetFiles(folder, file.Name + "*"))
-        {
-            if (!string.Equals(candidate, file.FullName, StringComparison.Ordinal)
-                && IsExternalDataFor(Path.GetFileName(candidate), file.Name))
-            {
-                found.Add(candidate);
-            }
-        }
-
-        return found;
     }
 
     /// <summary>
@@ -472,10 +394,14 @@ internal static class OnnxReduce
     /// paid only by the models that have such a file. The graph itself is still a link.
     /// </remarks>
     /// <param name="path">The absolute path of the graph that is about to be read.</param>
-    internal static void UnlinkExternalData(string path)
+    /// <param name="cancellationToken">Cancels external-file reads.</param>
+    /// <param name="bundleRoot">The enclosing bundle for resolving relative external paths.</param>
+    internal static async Task UnlinkExternalDataAsync(
+        string path, CancellationToken cancellationToken = default, string bundleRoot = null)
     {
-        foreach (string side in ExternalDataPaths(path))
+        foreach (string side in await OnnxExternalFiles.PathsAsync(path, cancellationToken, bundleRoot).ConfigureAwait(false))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             string copy = side + ".copying";
             try
             {
@@ -558,6 +484,7 @@ internal static class OnnxReduce
         return new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["mode"] = mode.ToString(),
+            ["nodesToExclude"] = System.Text.Json.JsonSerializer.Serialize(CopyNodeExclusions(options)),
             ["engine"] = engine.ToString(),
             ["requestedEngine"] = options.Engine.ToString(),
             ["preprocess"] = PreprocessesFor(mode, options) ? "true" : "false",
@@ -584,6 +511,7 @@ internal static class OnnxReduce
     /// <param name="outputPath">The absolute path to write the reduced graph to.</param>
     /// <param name="stageDirectory">A folder the preparation pass may write its intermediate graph into.</param>
     /// <param name="cancellationToken">A token that cancels the wait for the interpreter.</param>
+    /// <param name="bundleRoot">The enclosing bundle for resolving relative external paths.</param>
     /// <returns>What the tool reported.</returns>
     /// <exception cref="PythonNotAvailableException">There is no usable CPython.</exception>
     /// <exception cref="PythonModuleNotInstalledException">A module the engine needs is not installed.</exception>
@@ -598,7 +526,8 @@ internal static class OnnxReduce
         string inputPath,
         string outputPath,
         string stageDirectory,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string bundleRoot = null)
     {
         Func<ReduceMode, ReduceOptions, string, string, Task<OnnxReduceRun>> replacement = RunOverrideForTesting;
         if (replacement != null)
@@ -608,7 +537,7 @@ internal static class OnnxReduce
 
         if (engine == ReduceEngine.Managed)
         {
-            return await RunManagedAsync(mode, options, inputPath, outputPath, cancellationToken)
+            return await RunManagedAsync(mode, options, inputPath, outputPath, cancellationToken, bundleRoot)
                 .ConfigureAwait(false);
         }
 
@@ -617,14 +546,14 @@ internal static class OnnxReduce
         if (mode == ReduceMode.PreprocessOnly)
         {
             return await RunPreprocessAsync(
-                pythonOptions, inputPath, outputPath, cancellationToken).ConfigureAwait(false);
+                pythonOptions, inputPath, outputPath, cancellationToken, bundleRoot).ConfigureAwait(false);
         }
 
         if (PreprocessesFor(mode, options))
         {
             Directory.CreateDirectory(stageDirectory);
             quantizerInput = Path.Combine(stageDirectory, Path.GetFileName(inputPath));
-            await RunPreprocessAsync(pythonOptions, inputPath, quantizerInput, cancellationToken)
+            await RunPreprocessAsync(pythonOptions, inputPath, quantizerInput, cancellationToken, bundleRoot)
                 .ConfigureAwait(false);
         }
 
@@ -632,7 +561,8 @@ internal static class OnnxReduce
         {
             ["input_path"] = quantizerInput,
             ["output_path"] = outputPath,
-            ["use_external_data"] = UseExternalData(MeasureGraph(quantizerInput))
+            ["use_external_data"] = UseExternalData(await MeasureGraphAsync(quantizerInput, cancellationToken, quantizerInput == inputPath ? bundleRoot : stageDirectory).ConfigureAwait(false)),
+            ["nodes_to_exclude"] = CopyNodeExclusions(options).ToArray()
         };
 
         string scriptName;
@@ -665,6 +595,7 @@ internal static class OnnxReduce
     /// <param name="inputPath">The absolute path of the graph to reduce.</param>
     /// <param name="outputPath">The absolute path to write the reduced graph to.</param>
     /// <param name="cancellationToken">A token that cancels the reads and writes.</param>
+    /// <param name="bundleRoot">The enclosing bundle for resolving relative external paths.</param>
     /// <returns>What the engine wrote.</returns>
     /// <exception cref="NotSupportedException">The mode, or something in the graph, is outside what it covers.</exception>
     /// <remarks>
@@ -676,7 +607,8 @@ internal static class OnnxReduce
         ReduceOptions options,
         string inputPath,
         string outputPath,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string bundleRoot)
     {
         if (mode == ReduceMode.PreprocessOnly)
         {
@@ -686,7 +618,7 @@ internal static class OnnxReduce
 
         //Measured before anything is read in, because it is the same number the Python engine measures to
         //decide the same thing, and the two engines have to decide it the same way.
-        long graphBytes = MeasureGraph(inputPath);
+        long graphBytes = await MeasureGraphAsync(inputPath, cancellationToken, bundleRoot).ConfigureAwait(false);
 
         OnnxModel model = await OnnxModel.ReadAsync(inputPath, cancellationToken).ConfigureAwait(false);
         if (HasExternalTensors(model))
@@ -696,7 +628,7 @@ internal static class OnnxReduce
 
         if (mode == ReduceMode.DynamicInt8)
         {
-            OnnxDynamicQuantizer.Process(model, DynamicOptionsFor());
+            OnnxDynamicQuantizer.Process(model, DynamicOptionsFor(options));
         }
         else
         {
@@ -715,7 +647,7 @@ internal static class OnnxReduce
 
         var files = new List<string> { outputPath };
         long total = new FileInfo(outputPath).Length;
-        foreach (string side in ExternalDataPaths(outputPath))
+        foreach (string side in await OnnxExternalFiles.PathsAsync(outputPath, cancellationToken).ConfigureAwait(false))
         {
             files.Add(side);
             total += new FileInfo(side).Length;
@@ -731,20 +663,40 @@ internal static class OnnxReduce
     /// <param name="options">The options the caller gave.</param>
     /// <returns>The settings to quantize with.</returns>
     internal static OnnxWeightOnlyQuantizationOptions WeightOnlyOptionsFor(ReduceMode mode, ReduceOptions options)
-        => new OnnxWeightOnlyQuantizationOptions
+    {
+        var mapped = new OnnxWeightOnlyQuantizationOptions
         {
             Bits = BitsFor(mode),
             BlockSize = options.BlockSize,
             IsSymmetric = options.IsSymmetric,
             AccuracyLevel = options.AccuracyLevel,
         };
+        mapped.NodesToExclude.UnionWith(CopyNodeExclusions(options));
+        return mapped;
+    }
 
-    /// <summary>
-    /// The managed dynamic settings this library's dynamic mode maps to, which are the tools' own defaults and the
-    /// same two operator types the Python engine is asked for.
-    /// </summary>
-    /// <returns>The settings to quantize with.</returns>
-    internal static OnnxDynamicQuantizationOptions DynamicOptionsFor() => new OnnxDynamicQuantizationOptions();
+    internal static OnnxDynamicQuantizationOptions DynamicOptionsFor(ReduceOptions options = null)
+    {
+        var mapped = new OnnxDynamicQuantizationOptions();
+        mapped.NodesToExclude.UnionWith(CopyNodeExclusions(options));
+        return mapped;
+    }
+
+    internal static List<string> CopyNodeExclusions(ReduceOptions options)
+    {
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        foreach (string name in options?.NodesToExclude ?? Array.Empty<string>())
+        {
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                throw new ArgumentException("Excluded ONNX node names must not be null or blank.", nameof(options));
+            }
+            names.Add(name);
+        }
+        var ordered = new List<string>(names);
+        ordered.Sort(StringComparer.Ordinal);
+        return ordered;
+    }
 
     /// <summary>
     /// Whether any of a model's tensors keeps its bytes in a file beside the graph.
@@ -795,19 +747,21 @@ internal static class OnnxReduce
     /// <param name="inputPath">The absolute path of the graph to prepare.</param>
     /// <param name="outputPath">The absolute path to write the prepared graph to.</param>
     /// <param name="cancellationToken">A token that cancels the wait for the interpreter.</param>
+    /// <param name="bundleRoot">The enclosing bundle for resolving relative external paths.</param>
     /// <returns>What the tool reported.</returns>
     /// <exception cref="ModelManagerException">The prepared graph is too large to write.</exception>
     private static async Task<OnnxReduceRun> RunPreprocessAsync(
         PythonOptions pythonOptions,
         string inputPath,
         string outputPath,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string bundleRoot = null)
     {
         var parameters = new Dictionary<string, object>(StringComparer.Ordinal)
         {
             ["input_path"] = inputPath,
             ["output_path"] = outputPath,
-            ["use_external_data"] = UseExternalData(MeasureGraph(inputPath))
+            ["use_external_data"] = UseExternalData(await MeasureGraphAsync(inputPath, cancellationToken, bundleRoot).ConfigureAwait(false))
         };
 
         IReadOnlyDictionary<string, object> reported = await PythonHost.RunScriptAsync(

@@ -1,7 +1,7 @@
 namespace CodeBrix.Ollama.ModelManager;
 
 /// <summary>
-/// How a model is turned into ONNX. Three of the four are real routes; the fourth picks between them.
+/// How a model is turned into ONNX, or how a route is selected automatically.
 /// </summary>
 public enum ExportRoute
 {
@@ -34,5 +34,20 @@ public enum ExportRoute
     /// model the builder does not write. It needs Python with <c>optimum</c>, <c>onnx</c>, <c>torch</c>
     /// and <c>transformers</c> installed.
     /// </summary>
-    Optimum = 3
+    Optimum = 3,
+
+    /// <summary>
+    /// Export a MuseCoco causal linear-attention music checkpoint to an FP32 recurrent ONNX
+    /// bundle, including its attribute schema and REMIGEN2 vocabulary. Requires Python with
+    /// torch, numpy and onnx. Does not execute publisher code. Quantize the result separately
+    /// with <see cref="IModelStore.ReduceOnnxAsync"/>.
+    /// </summary>
+    MuseCocoMusic = 4,
+
+    /// <summary>
+    /// Export MuseCoco's fine-tuned <c>BertForAttributModel</c>, including its sixty custom
+    /// classifiers, attribute schema and WordPiece tokenizer, to an FP32 ONNX bundle.
+    /// Requires Python with torch, numpy and onnx; does not execute publisher code.
+    /// </summary>
+    MuseCocoText = 5
 }

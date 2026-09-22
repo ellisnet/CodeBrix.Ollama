@@ -1,0 +1,24 @@
+{
+  "name": "erf_float",
+  "opset": 17,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        14
+      ],
+      "file": "in_a.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        14
+      ],
+      "file": "out_y.bin"
+    }
+  ]
+}

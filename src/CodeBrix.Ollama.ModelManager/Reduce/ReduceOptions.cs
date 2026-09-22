@@ -107,4 +107,12 @@ public sealed class ReduceOptions
     /// bundle that ships several graphs can have one of them reduced and stay complete.
     /// </remarks>
     public IReadOnlyList<string> Files { get; set; }
+
+    /// <summary>
+    /// ONNX node names to leave at their original precision. Applies to dynamic INT8 and both
+    /// weight-only modes, with either engine. Names are ordinal and case-sensitive; unnamed nodes
+    /// cannot be excluded. Null or an empty list excludes nothing. When preprocessing is enabled,
+    /// names refer to the prepared graph. The chosen names are recorded in bundle provenance.
+    /// </summary>
+    public IReadOnlyList<string> NodesToExclude { get; set; }
 }

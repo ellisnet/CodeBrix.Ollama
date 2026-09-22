@@ -27,6 +27,9 @@ internal static class PythonScripts
     /// </summary>
     internal const string ExportOptimum = "export_optimum.py";
 
+    /// <summary>The fixed exporters for MuseCoco music and attribute BERT checkpoints.</summary>
+    internal const string ExportMuseCoco = "export_musecoco.py";
+
     /// <summary>
     /// The script that prepares an exported graph for quantization.
     /// </summary>

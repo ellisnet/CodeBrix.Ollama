@@ -96,7 +96,7 @@ internal sealed class SkyTntGenerator
     {
         int rowLength = _tokenizer.MaximumTokensPerEvent;
         List<int[]> sequence = Window(plan.PromptRows);
-        SkyTntRandom random = new SkyTntRandom(plan.Seed);
+        GenerationRandom random = new GenerationRandom(plan.Seed);
 
         //The beat every event is placed on is a RUNNING TOTAL of the distances the events state, and the
         //prompt's own events move it along whether or not the caller asked to see them.

@@ -384,6 +384,15 @@ public sealed class ModelStore : IModelStore, IDisposable
             route = OnnxExport.ChooseRoute(layers.BundleFiles, configJson);
         }
 
+        if (!Enum.IsDefined(route))
+        {
+            throw new ArgumentOutOfRangeException(nameof(options), "Unknown ONNX export route.");
+        }
+        if (OnnxExport.IsMuseCoco(route) && !string.Equals(effective.Precision, "fp32", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ArgumentException("MuseCoco exports FP32. Use ReduceOnnxAsync afterward for INT8 or INT4.", nameof(options));
+        }
+
         IReadOnlyDictionary<string, string> settings = OnnxExport.SettingsFor(route, effective);
 
         if (route == ExportRoute.PublisherOnnx)
@@ -469,7 +478,15 @@ public sealed class ModelStore : IModelStore, IDisposable
         IProgress<PullProgress> progress,
         CancellationToken cancellationToken)
     {
-        IReadOnlyList<ResolvedFile> files = OnnxExport.PassThroughFiles(layers.BundleFiles);
+        RequireCoreContract();
+        Dictionary<string, HashSet<string>> references = await OnnxExternalFiles
+            .ReadBundleAsync(layers.BundleFiles, cancellationToken).ConfigureAwait(false);
+        var weights = new HashSet<string>(StringComparer.Ordinal);
+        foreach (HashSet<string> graphWeights in references.Values)
+        {
+            weights.UnionWith(graphWeights);
+        }
+        IReadOnlyList<ResolvedFile> files = OnnxExport.PassThroughFiles(layers.BundleFiles, weights);
         if (!OnnxExport.HasOnnxFiles(files))
         {
             throw new InvalidOperationException(
@@ -515,6 +532,15 @@ public sealed class ModelStore : IModelStore, IDisposable
         }
 
         IReadOnlyList<string> selected = OnnxReduce.SelectFiles(layers.BundleFiles, effective.Files);
+        OnnxReduce.CopyNodeExclusions(effective);
+        if (effective.Mode == ReduceMode.PreprocessOnly && effective.NodesToExclude != null && effective.NodesToExclude.Count != 0)
+        {
+            throw new ArgumentException("NodesToExclude applies to quantization, not PreprocessOnly.", nameof(options));
+        }
+        Dictionary<string, HashSet<string>> references = await OnnxExternalFiles
+            .ReadBundleAsync(layers.BundleFiles, cancellationToken).ConfigureAwait(false);
+        IReadOnlyList<ResolvedFile> companions = OnnxReduce.CompanionFiles(layers.BundleFiles, selected, references);
+        var companionNames = new HashSet<string>(companions.Select(file => file.Name), StringComparer.Ordinal);
 
         //Resolved before anything is laid out: whether the graphs have been prepared decides which engine can take
         //them, and that is read from the stored blobs themselves - a few hundred bytes each, whatever they weigh.
@@ -556,6 +582,18 @@ public sealed class ModelStore : IModelStore, IDisposable
                 cancellationToken).ConfigureAwait(false);
 
             long sourceBytes = 0;
+            var measured = new HashSet<string>(selected, StringComparer.Ordinal);
+            foreach (string graph in selected)
+            {
+                measured.UnionWith(references[graph]);
+            }
+            foreach (ResolvedFile file in layers.BundleFiles)
+            {
+                if (measured.Contains(file.Name))
+                {
+                    sourceBytes += file.Size;
+                }
+            }
             long reducedBytes = 0;
             string tool = engine == ReduceEngine.Managed ? OnnxReduce.ManagedTool : OnnxReduce.Tool;
             string toolVersion = null;
@@ -569,17 +607,22 @@ public sealed class ModelStore : IModelStore, IDisposable
                 string to = Path.Combine(output, relativePath.Replace('/', Path.DirectorySeparatorChar));
                 Directory.CreateDirectory(Path.GetDirectoryName(to));
 
-                sourceBytes += OnnxReduce.MeasureGraph(from);
-
                 //The tools read a graph's weights through the ONNX package, which refuses a file of
                 //weights that has more than one link to its content; the layout above made links.
-                OnnxReduce.UnlinkExternalData(from);
+                if (engine == ReduceEngine.Python)
+                {
+                    await OnnxReduce.UnlinkExternalDataAsync(from, cancellationToken, input).ConfigureAwait(false);
+                }
 
                 OnnxReduceRun run = await OnnxReduce.RunAsync(
-                    _options.Python, engine, effective.Mode, effective, from, to, stage, cancellationToken)
+                    _options.Python, engine, effective.Mode, effective, from, to, stage, cancellationToken, input)
                     .ConfigureAwait(false);
 
-                reducedBytes += run.TotalBytes;
+                bool renamed = await OnnxExternalFiles.AvoidCollisionsAsync(to, output, companionNames, cancellationToken)
+                    .ConfigureAwait(false);
+                reducedBytes += renamed
+                    ? await OnnxReduce.MeasureGraphAsync(to, cancellationToken, output).ConfigureAwait(false)
+                    : run.TotalBytes;
                 tool = run.Tool ?? tool;
                 toolVersion = run.ToolVersion ?? toolVersion;
 
@@ -589,8 +632,7 @@ public sealed class ModelStore : IModelStore, IDisposable
             }
 
             Report(progress, "collecting");
-            CarryThroughFiles(OnnxReduce.CompanionFiles(layers.BundleFiles, selected), input, output,
-                cancellationToken);
+            CarryThroughFiles(companions, input, output, cancellationToken);
 
             IReadOnlyDictionary<string, string> settings =
                 OnnxReduce.SettingsFor(effective.Mode, engine, effective, selected);

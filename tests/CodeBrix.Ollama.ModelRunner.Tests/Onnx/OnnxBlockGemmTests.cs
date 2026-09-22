@@ -42,6 +42,10 @@ public sealed class OnnxBlockGemmTests
     [InlineData(8, 32, 70, 5, 2, true)]
     [InlineData(8, 32, 72, 13, 1, true)]
     [InlineData(8, 128, 1024, 13, 1, false)]
+    [InlineData(4, 128, 1024, 33, 11, true)]
+    [InlineData(8, 128, 1024, 33, 11, true)]
+    [InlineData(4, 32, 101, 23, 9, false)]
+    [InlineData(8, 32, 101, 23, 9, false)]
     public void Multiply_agrees_with_double_precision_on_every_path(
         int bits, int blockSize, int reduction, int width, int rows, bool zeroPoints)
     {

@@ -25,7 +25,8 @@ Entry 17 covers the GPT-2 byte-level tokenizer as Hugging Face's transformers
 library writes it, which ModelRunner's managed tokenizer ports so that
 generating TEXT from an ONNX bundle needs nothing installed either. Entry 1 covers a second port in the same library:
 llama.cpp's own checkpoint converter, which is Python, ported so that turning a
-checkpoint into a GGUF file needs nothing installed either.
+checkpoint into a GGUF file needs nothing installed either. Entries 18-20 cover
+MuseCoco decoding, architecture data, sinusoidal positions and BERT WordPiece.
 
 Four distinct things in this repository come from other people today, and all
 four are covered below. They are a way of grouping what is here, not the list
@@ -2003,6 +2004,117 @@ If you have any questions about any third-party code referenced here, or if you
 believe that any third-party code has been included in CodeBrix.Ollama in
 error, please open a new issue at:
 https://github.com/ellisnet/CodeBrix.Ollama/issues
+
+================================================================================
+
+================================================================================
+18. Microsoft Corporation - Muzic / MuseCoco (MIT)
+================================================================================
+Project: https://github.com/microsoft/muzic
+Commit: 2b8739671ba06f819f31f568b8a79da581aaf6f9
+Copyright (c) Microsoft Corporation.
+
+Source: musecoco/2-attribute2music_model/midiprocessor/enc_remigen2_utils.py,
+vocab_manager.py and linear_mask/interactive_dict_v5_1billion.py
+  -> ModelRunner/Drivers/MuseCoco/Remigen2Reader.cs and Remigen2Decoder.cs:
+     REMIGEN2 vocabulary arithmetic, note/meta decoding and incomplete-ending
+     cleanup, shared by completed-score and streaming decoding and translated
+     into the repository's MIDI contracts. Uses the existing managed MIDI
+     writer, not miditoolkit. Adds input validation and an explicit refusal for
+     more melodic instruments than the MIDI channel contract can represent.
+Source: MuseCoco's dictionary, attribute definitions and num_labels.json
+  -> ModelManager/Export/Assets/musecoco-vocabulary.json,
+     musecoco-attributes.json, and copies in the small Runner test fixtures.
+     Added stable descriptive consumer names and an explicit versioned schema.
+Source: MuseCoco music and custom BERT forward equations
+  -> ModelManager/Python/Scripts/export_musecoco.py: inference-only ONNX exporter.
+     Direct weight mapping, explicit recurrent state and external weight files;
+     no training code, fairseq runtime or custom attention extension is shipped.
+
+The publisher checkpoint weights are not included in this repository/package.
+The synthetic ONNX fixture weights were authored for this repository.
+
+    MIT License
+
+    Copyright (c) Microsoft Corporation.
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE
+
+
+================================================================================
+19. Facebook, Inc. and affiliates - fairseq (MIT)
+================================================================================
+Project: https://github.com/facebookresearch/fairseq
+Commit: 83e615d66905b8ca7483122a37da1a85f13f4b8e (v0.10.2)
+Source: fairseq/modules/sinusoidal_positional_embedding.py
+  -> ModelManager/Python/Scripts/export_musecoco.py: deterministic sinusoidal
+     position table and padding convention used by the MuseCoco checkpoint.
+     Position zero is added for the recurrent graph's attribute-prefix contract.
+
+MIT License
+
+Copyright (c) Facebook, Inc. and its affiliates.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+================================================================================
+20. Google AI Language Team / Hugging Face - BERT WordPiece (Apache-2.0)
+================================================================================
+Project: https://github.com/huggingface/transformers
+Version: v4.57.6
+Copyright 2018 The Google AI Language Team Authors and The HuggingFace Inc. team.
+Source: src/transformers/models/bert/tokenization_bert.py
+  -> ModelRunner/Tokenizers/BertWordPieceTokenizer.cs: basic uncased tokenizer
+     and greedy WordPiece, translated to Unicode Rune traversal in C#; special
+     tokens and vocabulary supplied as data. Adds cancellation and explicit
+     prompt truncation reporting. No Python code executes during inference.
+  -> Runner MuseCoco fixture wordpiece.json: the 30522-word bert-large-uncased
+     vocabulary distributed with the tested checkpoint, plus contract settings.
+
+The Apache License 2.0 text is reproduced in entry 2. No upstream NOTICE file
+accompanies this tokenizer. The modifications are identified above and in the
+source marker. Numerical fixture outputs were generated by the reference tools;
+no publisher neural-network weights are included.
+
+ONNX RUNTIME / MLAS FOLLOW-UP (entry 15)
+The SGEMM panel/register reuse strategy in onnxruntime/core/mlas/lib/sgemm.cpp
+and x86_64/FgemmKernelFma3Common.h was read during MuseCoco/BERT performance work.
+ModelRunner/Onnx/OnnxMatrixGemm.cs is a managed AVX2/FMA implementation with
+portable dispatch guards, bounded temporary panels and FP32 accumulators.
+No native assembly or additional native library was copied or shipped.
 
 ================================================================================
 

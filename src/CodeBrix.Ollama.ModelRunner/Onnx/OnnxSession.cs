@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -27,7 +26,6 @@ internal sealed class OnnxSession : IOnnxModel
     private readonly OnnxExecutionPlan _plan;
     private readonly OnnxExecutionSettings _settings;
     private readonly OnnxArena _arena;
-    private readonly OnnxTimingReport _timing;
     private int _running;
     private int _disposed;
 
@@ -40,7 +38,6 @@ internal sealed class OnnxSession : IOnnxModel
         _plan = plan;
         _settings = settings;
         _arena = new OnnxArena(options.ReuseBuffers);
-        _timing = OnnxTimingReport.FromEnvironment(plan);
         Options = options;
     }
 
@@ -63,21 +60,23 @@ internal sealed class OnnxSession : IOnnxModel
         return Task.Run(() => Execute(inputs, cancellationToken), cancellationToken);
     }
 
+    /// <summary>
+    /// Internal recurrent-driver path. Destinations belong exclusively to the driver and must not alias
+    /// any input or each other. The public Run/RunAsync ownership contract is unchanged.
+    /// </summary>
+    internal Task<IReadOnlyDictionary<string, OnnxTensor>> RunIntoAsync(
+        IReadOnlyDictionary<string, OnnxTensor> inputs, IReadOnlyDictionary<string, OnnxTensor> outputBuffers,
+        CancellationToken cancellationToken)
+        => Task.Run(() => Execute(inputs, cancellationToken, outputBuffers), cancellationToken);
+
     /// <summary>Releases the weights and the pooled buffers.</summary>
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
 
-        try
-        {
-            _timing?.Write();
-        }
-        finally
-        {
-            foreach (OnnxPlanSlot slot in _plan.Slots) slot.Initializer = null;
-            foreach (OnnxPlanNode node in _plan.Nodes) node.State = null;
-            _arena.Clear();
-        }
+        foreach (OnnxPlanSlot slot in _plan.Slots) slot.Initializer = null;
+        foreach (OnnxPlanNode node in _plan.Nodes) node.State = null;
+        _arena.Clear();
     }
 
     /// <summary>Releases the weights and the pooled buffers.</summary>
@@ -89,7 +88,8 @@ internal sealed class OnnxSession : IOnnxModel
     }
 
     private IReadOnlyDictionary<string, OnnxTensor> Execute(
-        IReadOnlyDictionary<string, OnnxTensor> inputs, CancellationToken cancellationToken)
+        IReadOnlyDictionary<string, OnnxTensor> inputs, CancellationToken cancellationToken,
+        IReadOnlyDictionary<string, OnnxTensor> outputBuffers = null)
     {
         if (inputs == null) throw new ArgumentNullException(nameof(inputs));
         ObjectDisposedException.ThrowIf(_disposed != 0, typeof(IOnnxModel));
@@ -103,7 +103,7 @@ internal sealed class OnnxSession : IOnnxModel
 
         try
         {
-            return RunPlan(inputs, cancellationToken);
+            return RunPlan(inputs, cancellationToken, outputBuffers);
         }
         finally
         {
@@ -112,11 +112,9 @@ internal sealed class OnnxSession : IOnnxModel
     }
 
     private IReadOnlyDictionary<string, OnnxTensor> RunPlan(
-        IReadOnlyDictionary<string, OnnxTensor> inputs, CancellationToken cancellationToken)
+        IReadOnlyDictionary<string, OnnxTensor> inputs, CancellationToken cancellationToken,
+        IReadOnlyDictionary<string, OnnxTensor> outputBuffers)
     {
-        long runStart = _timing == null ? 0 : Stopwatch.GetTimestamp();
-        long kernelTicks = 0;
-        int contextLength = _timing == null ? -1 : OnnxTimingReport.ContextLength(inputs);
         OnnxPlanSlot[] slots = _plan.Slots;
         OnnxValue[] values = new OnnxValue[slots.Length];
 
@@ -127,7 +125,8 @@ internal sealed class OnnxSession : IOnnxModel
 
         BindInputs(inputs, values);
 
-        OnnxOperatorContext context = new OnnxOperatorContext(values, _arena, _settings);
+        OnnxTensor[] destinations = BindOutputBuffers(inputs, outputBuffers);
+        OnnxOperatorContext context = new OnnxOperatorContext(values, _arena, _settings, destinations);
         OnnxPlanNode[] nodes = _plan.Nodes;
 
         for (int i = 0; i < nodes.Length; i++)
@@ -138,14 +137,7 @@ internal sealed class OnnxSession : IOnnxModel
 
             try
             {
-                long nodeStart = _timing == null ? 0 : Stopwatch.GetTimestamp();
                 node.Kernel.Run(context);
-                if (_timing != null)
-                {
-                    long elapsed = Stopwatch.GetTimestamp() - nodeStart;
-                    kernelTicks += elapsed;
-                    _timing.Node(i, contextLength, elapsed);
-                }
             }
             catch (Exception exception) when (exception is not ModelRunnerException
                 and not OperationCanceledException and not OutOfMemoryException)
@@ -167,13 +159,7 @@ internal sealed class OnnxSession : IOnnxModel
             }
         }
 
-        IReadOnlyDictionary<string, OnnxTensor> result = Collect(values);
-        if (_timing != null)
-        {
-            _timing.Run(contextLength, Stopwatch.GetTimestamp() - runStart, kernelTicks);
-        }
-
-        return result;
+        return Collect(values, destinations);
     }
 
     private void BindInputs(IReadOnlyDictionary<string, OnnxTensor> inputs, OnnxValue[] values)
@@ -229,7 +215,27 @@ internal sealed class OnnxSession : IOnnxModel
         }
     }
 
-    private IReadOnlyDictionary<string, OnnxTensor> Collect(OnnxValue[] values)
+    private OnnxTensor[] BindOutputBuffers(IReadOnlyDictionary<string, OnnxTensor> inputs,
+        IReadOnlyDictionary<string, OnnxTensor> buffers)
+    {
+        if (buffers == null) return null;
+        var destinations = new OnnxTensor[_plan.Slots.Length];
+        var arrays = new HashSet<Array>();
+        foreach (OnnxTensor input in inputs.Values) arrays.Add(input.Data());
+        foreach (KeyValuePair<string, OnnxTensor> pair in buffers)
+        {
+            if (pair.Value == null || !arrays.Add(pair.Value.Data()))
+                throw new ArgumentException("ONNX output buffers must not alias inputs or each other.", nameof(buffers));
+            int found = -1;
+            foreach (int slot in _plan.OutputSlots)
+                if (_plan.Slots[slot].Name == pair.Key) { found = slot; break; }
+            if (found < 0) throw new ArgumentException("Unknown bound ONNX output: " + pair.Key, nameof(buffers));
+            destinations[found] = pair.Value;
+        }
+        return destinations;
+    }
+
+    private IReadOnlyDictionary<string, OnnxTensor> Collect(OnnxValue[] values, OnnxTensor[] destinations)
     {
         Dictionary<string, OnnxTensor> outputs =
             new Dictionary<string, OnnxTensor>(_plan.OutputSlots.Length, StringComparer.Ordinal);
@@ -244,7 +250,14 @@ internal sealed class OnnxSession : IOnnxModel
                     "The graph names '" + slot.Name + "' as an output and the run produced nothing for it.");
             }
 
-            outputs[slot.Name] = Detach(value);
+            OnnxTensor target = destinations?[slot.Index];
+            if (target == null) outputs[slot.Name] = Detach(value);
+            else
+            {
+                OnnxOutputBinding.Validate(target, value.ElementType, value.Shape);
+                if (!ReferenceEquals(value.Buffer.Data, target.Data())) Array.Copy(value.Buffer.Data, target.Data(), value.Count);
+                outputs[slot.Name] = target;
+            }
 
             // Now that the caller has its own tensor, the run's own hold on the buffer goes: a buffer that
             // was only renamed on its way out - a reshape of something the arena lent us - goes back into

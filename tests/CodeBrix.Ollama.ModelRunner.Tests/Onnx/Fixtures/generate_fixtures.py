@@ -213,6 +213,34 @@ def node(op, ins, outs, **attrs):
     return helper.make_node(op, ins, outs, **attrs)
 
 
+# Standard layer normalization: optional statistics/bias and a multi-axis suffix.
+for ln_name, ln_axis, ln_shape, ln_bias in [
+    ("layernorm_last", -1, (2, 3, 17), True),
+    ("layernorm_suffix", 1, (2, 3, 17), True),
+    ("layernorm_no_bias", 0, (3, 17), False),
+]:
+    ln_axis_positive = ln_axis % len(ln_shape)
+    ln_scale_shape = ln_shape[ln_axis_positive:]
+    ln_inputs = {"x": floats(ln_shape, 782), "scale": positives(ln_scale_shape, 783)}
+    if ln_bias:
+        ln_inputs["bias"] = floats(ln_scale_shape, 784)
+    emit(ln_name, [node("LayerNormalization", list(ln_inputs), ["y", "mean", "inv"],
+                       axis=ln_axis, epsilon=1e-5)], ln_inputs,
+         [("y", TensorProto.FLOAT), ("mean", TensorProto.FLOAT), ("inv", TensorProto.FLOAT)], opset=17)
+
+
+# MuseCoco/BERT activation operators. Include cancellation-sensitive small negative ELU inputs.
+for activation_name, activation_op, activation_alpha, activation_values in [
+    ("elu_default", "Elu", None, [-100, -20, -10, -2, -.1, -1e-8, -0., 0., 1e-8, 1, 10, 100]),
+    ("elu_alpha", "Elu", .3, [-3, -1, -.001, 0, 1, 2]),
+    ("erf_float", "Erf", None, [-100, -8, -3, -1, -.1, -1e-8, -0., 0., 1e-8, .1, 1, 3, 8, 100]),
+    ("tanh_float", "Tanh", None, [-100, -10, -3, -1, -.1, -0., 0., .1, 1, 3, 10, 100]),
+]:
+    activation_attrs = {} if activation_alpha is None else {"alpha": activation_alpha}
+    emit(activation_name, [node(activation_op, ["a"], ["y"], **activation_attrs)],
+         {"a": np.asarray(activation_values, dtype=np.float32)}, [("y", TensorProto.FLOAT)], opset=17)
+
+
 # ---------------------------------------------------------------- element-by-element, two tensors
 
 for index, op in enumerate(["Add", "Sub", "Mul", "Div"]):

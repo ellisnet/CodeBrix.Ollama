@@ -121,7 +121,7 @@ Parsing/, Grammar/, Onnx/, Drivers/, Midi/, Tokenizers/) are FILE ORGANIZATION
 ONLY, not namespaces: `using CodeBrix.Ollama.ModelRunner.Engine;` is a CS0246
 error. Everything under Native/, Engine/, Onnx/, Drivers/, Midi/ and
 Tokenizers/ is internal -- the P/Invoke surface, the worker thread, the decode
-loop, the ONNX interpreter, its operators and the two model drivers are reached
+loop, the ONNX interpreter, its operators and the model drivers are reached
 only through the public entry points and their interfaces. You will also want
 the ordinary framework usings: System, System.Collections.Generic,
 System.Threading and System.Threading.Tasks.
@@ -1117,7 +1117,7 @@ package, and the two never meet.
 
 NOTHING IS INSTALLED AND NOTHING IS FETCHED. There is no ONNX runtime to
 install, no Python, no pip module, no publisher tooling and no native library
-of the engine's own: the graph reader, the operators, the two model drivers,
+of the engine's own: the graph reader, the operators, the model drivers,
 the tokenizer and the Standard MIDI File writer are all managed code in this
 assembly. The package still declares NO NuGet dependencies. So a graph runs
 wherever .NET 10 runs -- including a runtime identifier this package ships no
@@ -1721,7 +1721,7 @@ The exception is ModelLoadException and the message names the node, the
 operator and the domain where those apply, and lists what the engine does
 implement where that helps.
 
-    OPERATORS      37 of them: the standard set a decoder of this kind uses,
+    OPERATORS      41 of them: the standard set a decoder of this kind uses,
                    plus the contributed operators the model builders and
                    quantizers emit -- MatMulNBits, GroupQueryAttention,
                    SkipSimplifiedLayerNormalization,
@@ -1900,7 +1900,7 @@ TICKS       absolute, from the start of the piece;
 REFUSED     text: ChatAsync, ChatToEndAsync, RenderChatPromptAsync,
             EmbedAsync, SetLoraAdaptersAsync, and GenerationOptions.Grammar /
             .JsonSchema / .JsonMode -- all NotSupportedException by name
-GRAPHS      opsets ai.onnx 13 to 23; 37 operators; float, int64, int32 and
+GRAPHS      opsets ai.onnx 13 to 23; 41 operators; float, int64, int32 and
             bool at the edge; everything else refused at LOAD, by name
 PAIRING     ModelManager resolves a name to paths, you hand the paths here.
             INSTALL BOTH PACKAGES AT THE SAME VERSION
@@ -3564,3 +3564,50 @@ MANAGER     CodeBrix.Ollama.ModelManager is a separate package, with its own
 
 ================================================================================
 END OF AGENT-README
+
+
+MUSECOCO MUSIC AND OPTIONAL ATTRIBUTE BERT
+=========================================
+See MUSECOCO-README.txt for the complete consumer guide and versioned bundle
+contract. The public entry points are MuseCocoMusicModel and MuseCocoTextModel;
+both load from a directory or logical-name-to-path map and execute in managed
+.NET without Python, ModelManager or an ONNX Runtime installation.
+
+MuseCocoTextModel.PredictAsync returns MusicAttributePrediction: immutable
+MusicAttributes, classifier probabilities, WordPiece IDs and a truncation flag.
+MuseCocoMusicModel.GenerateAsync accepts those attributes (or Schema-created
+attributes), MuseCocoGenerationOptions, optional token-count progress and a
+CancellationToken. It returns a MidiScore, generated IDs, effective seed and
+prompt/generation timings. MidiFile.WriteAsync saves the score. BERT is optional;
+callers can inspect or change attributes before passing them to music generation.
+
+MuseCocoMusicModel.GenerateStreamingAsync takes the same arguments and returns
+IAsyncEnumerable<MidiEvent>. It releases completed bars while later bars are being
+generated, applying incomplete-position cleanup to the final bar. Events use 480
+ticks per quarter note and arrive in timestamp order; play strictly before each
+HorizonTicks (equal to Tick) until enumeration ends, then drain the player queue.
+Channel/track assignments stay fixed as instruments first become playable, with
+percussion on channel 9. Programs precede first notes at those notes' ticks.
+These assignments can differ from GenerateAsync's completed-score layout.
+Collect the events into new MidiScore(480, events) to save the streamed piece.
+
+Each model can independently be FP32, weight-only INT8 or weight-only INT4.
+Quantization belongs in the staging application. The runtime bundle is data-only.
+The libraries do not reference one another. Existing llama.cpp assets are not
+loaded for this managed ONNX path.
+
+One request per instance; cancellation allows reuse, and disposal during a
+request is refused. Recurrent state starts empty on every music request. Set
+Seed=null for fresh randomness, or a fixed nonnegative seed other than
+0xFFFFFFFF; negative seeds are rejected. Defaults are 2560 maximum tokens and
+512 minimum tokens, not MIDI notes. Lower both for short excerpts. An event
+enumeration owns its instance until it completes or is disposed; breaking await
+foreach stops generation, and cancellation preserves events already yielded.
+BERT truncates to 512 prompt tokens and reports that fact.
+
+General ONNX additions used by these models: FP32 Elu, Erf, Tanh and standard
+LayerNormalization (opset 17+, optional bias/statistics, FP32 stash). The matrix
+path shares weight panels across activation rows for FP32, INT4 and INT8 on
+AVX2/FMA processors. Portable vector/scalar fallbacks remain supported. The
+MuseCoco driver reuses two private recurrent-state buffers; public OnnxModel
+Run/RunAsync results retain their existing independent ownership contract.

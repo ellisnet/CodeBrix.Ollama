@@ -11,16 +11,19 @@ namespace CodeBrix.Ollama.ModelRunner;
 internal sealed class OnnxOperatorContext
 {
     private readonly OnnxValue[] _values;
+    private readonly OnnxTensor[] _outputBuffers;
 
     /// <summary>Creates the context one run uses.</summary>
     /// <param name="values">The run's slot table.</param>
     /// <param name="arena">The arena tensors are allocated from.</param>
     /// <param name="settings">The resolved options.</param>
-    internal OnnxOperatorContext(OnnxValue[] values, OnnxArena arena, OnnxExecutionSettings settings)
+    /// <param name="outputBuffers">Optional internal caller-owned output buffers, indexed by plan slot.</param>
+    internal OnnxOperatorContext(OnnxValue[] values, OnnxArena arena, OnnxExecutionSettings settings, OnnxTensor[] outputBuffers = null)
     {
         _values = values;
         Arena = arena;
         Settings = settings;
+        _outputBuffers = outputBuffers;
     }
 
     /// <summary>The node being run.</summary>
@@ -90,7 +93,15 @@ internal sealed class OnnxOperatorContext
     /// <returns>The tensor, whose elements are whatever the buffer last held.</returns>
     internal OnnxValue AllocateOutput(int index, OnnxElementType elementType, long[] shape)
     {
-        OnnxValue value = OnnxValue.Allocate(Arena, elementType, shape, !Node.OutputIsGraphOutput[index]);
+        int slot = Node.Outputs[index];
+        OnnxTensor destination = slot < 0 ? null : _outputBuffers?[slot];
+        OnnxValue value;
+        if (destination != null)
+        {
+            OnnxOutputBinding.Validate(destination, elementType, shape);
+            value = OnnxValue.Wrap(elementType, destination.Data(), shape);
+        }
+        else value = OnnxValue.Allocate(Arena, elementType, shape, !Node.OutputIsGraphOutput[index]);
         Store(index, value);
         return value;
     }

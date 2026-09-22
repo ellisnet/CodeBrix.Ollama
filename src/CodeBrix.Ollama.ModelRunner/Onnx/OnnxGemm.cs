@@ -72,6 +72,11 @@ internal static class OnnxGemm
         float[] a, int aOffset, float[] packed, float[] c, int cOffset,
         int m, int k, int n, OnnxKernelKind kind, int threads)
     {
+        if (OnnxMatrixGemm.CanUse(m, k, n, kind))
+        {
+            OnnxMatrixGemm.MultiplyPacked(a, aOffset, packed, c, cOffset, m, k, n, threads);
+            return;
+        }
         long total = (long)m * n;
         if (total == 0) return;
 

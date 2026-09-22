@@ -61,6 +61,11 @@ MAINTAINER AND EXTRAS
 
 GENERAL
 -------
+  MUSECOCO-README.txt
+      MuseCoco music and optional attribute BERT: staging, independent INT4/INT8
+      quantization, managed consumer APIs, bundle contracts and limitations.
+      Benchmark and fidelity evidence is in MAINTAINER-README.txt; fixture and
+      integration-test instructions are in EXTRAS-README.txt.
   README.md
       Human-facing overview shown on GitHub and nuget.org.
   THIRD-PARTY-NOTICES.txt

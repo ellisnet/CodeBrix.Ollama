@@ -1,0 +1,53 @@
+{
+  "name": "layernorm_no_bias",
+  "opset": 17,
+  "inputs": [
+    {
+      "name": "x",
+      "type": "float",
+      "shape": [
+        3,
+        17
+      ],
+      "file": "in_x.bin"
+    },
+    {
+      "name": "scale",
+      "type": "float",
+      "shape": [
+        3,
+        17
+      ],
+      "file": "in_scale.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        3,
+        17
+      ],
+      "file": "out_y.bin"
+    },
+    {
+      "name": "mean",
+      "type": "float",
+      "shape": [
+        1,
+        1
+      ],
+      "file": "out_mean.bin"
+    },
+    {
+      "name": "inv",
+      "type": "float",
+      "shape": [
+        1,
+        1
+      ],
+      "file": "out_inv.bin"
+    }
+  ]
+}

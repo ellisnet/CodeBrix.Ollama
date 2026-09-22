@@ -20,7 +20,7 @@ public sealed class SkyTntSamplerTests
         bool[] allowed = { true, false, true, true, false };
 
         //Act
-        int token = SkyTntSampler.Sample(logits, allowed, 1.0, 1.0, 1, new SkyTntRandom(1));
+        int token = SkyTntSampler.Sample(logits, allowed, 1.0, 1.0, 1, new GenerationRandom(1));
 
         //Assert
         token.Should().Be(3);
@@ -37,7 +37,7 @@ public sealed class SkyTntSamplerTests
         //Act and assert
         for (int i = 0; i < 5; i++)
         {
-            SkyTntSampler.Sample(logits, allowed, 1.0, 1.0, 1, new SkyTntRandom(i)).Should().Be(0);
+            SkyTntSampler.Sample(logits, allowed, 1.0, 1.0, 1, new GenerationRandom(i)).Should().Be(0);
         }
     }
 
@@ -48,10 +48,10 @@ public sealed class SkyTntSamplerTests
         //Arrange
         float[] logits = { 1f, 7f, 3f };
         bool[] allowed = { true, true, true };
-        SkyTntRandom random = new SkyTntRandom(99);
+        GenerationRandom random = new GenerationRandom(99);
         double first = random.NextDouble();
 
-        SkyTntRandom other = new SkyTntRandom(99);
+        GenerationRandom other = new GenerationRandom(99);
         SkyTntSampler.Sample(logits, allowed, 1.0, 1.0, 1, other);
 
         //Act
@@ -71,7 +71,7 @@ public sealed class SkyTntSamplerTests
         bool[] allowed = new bool[64];
         allowed[3] = true;
         allowed[11] = true;
-        SkyTntRandom random = new SkyTntRandom(7);
+        GenerationRandom random = new GenerationRandom(7);
 
         //Act and assert
         for (int i = 0; i < 200; i++)
@@ -88,7 +88,7 @@ public sealed class SkyTntSamplerTests
         //Arrange
         float[] logits = { 10f, 9f, 8f, 7f, 6f, 5f };
         bool[] allowed = { true, true, true, true, true, true };
-        SkyTntRandom random = new SkyTntRandom(4242);
+        GenerationRandom random = new GenerationRandom(4242);
         HashSet<int> chosen = new HashSet<int>();
 
         //Act
@@ -111,7 +111,7 @@ public sealed class SkyTntSamplerTests
         //Arrange
         float[] logits = { 0.1f, 8f, 0.2f, 0.3f };
         bool[] allowed = { true, true, true, true };
-        SkyTntRandom random = new SkyTntRandom(11);
+        GenerationRandom random = new GenerationRandom(11);
 
         //Act and assert
         for (int i = 0; i < 50; i++)
@@ -180,7 +180,7 @@ public sealed class SkyTntSamplerTests
     {
         //Arrange
         Action act = () => SkyTntSampler.Sample(
-            new[] { 1f, 2f }, new[] { false, false }, 1.0, 1.0, 1, new SkyTntRandom(1));
+            new[] { 1f, 2f }, new[] { false, false }, 1.0, 1.0, 1, new GenerationRandom(1));
 
         //Act and assert
         act.Should().Throw<InferenceException>();
@@ -188,7 +188,7 @@ public sealed class SkyTntSamplerTests
 
     private static List<int> Draw(float[] logits, bool[] allowed, long seed)
     {
-        SkyTntRandom random = new SkyTntRandom(seed);
+        GenerationRandom random = new GenerationRandom(seed);
         List<int> drawn = new List<int>();
         for (int i = 0; i < 40; i++)
         {

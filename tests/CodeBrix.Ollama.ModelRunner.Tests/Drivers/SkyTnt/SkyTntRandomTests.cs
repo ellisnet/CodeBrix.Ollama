@@ -11,15 +11,15 @@ namespace CodeBrix.Ollama.ModelRunner.Tests;
 /// It is written out in this library rather than taken from the framework because the framework's own
 /// generator is allowed to change between releases, and a seed is meant to mean one thing for ever.
 /// </remarks>
-public sealed class SkyTntRandomTests
+public sealed class GenerationRandomTests
 {
     /// <summary>The same seed gives the same stream.</summary>
     [Fact]
     public void NextDouble_from_the_same_seed_gives_the_same_stream()
     {
         //Arrange
-        SkyTntRandom first = new SkyTntRandom(20260918);
-        SkyTntRandom again = new SkyTntRandom(20260918);
+        GenerationRandom first = new GenerationRandom(20260918);
+        GenerationRandom again = new GenerationRandom(20260918);
 
         //Act and assert
         for (int i = 0; i < 200; i++) again.NextDouble().Should().Be(first.NextDouble());
@@ -30,8 +30,8 @@ public sealed class SkyTntRandomTests
     public void NextDouble_from_different_seeds_gives_different_streams()
     {
         //Arrange
-        SkyTntRandom first = new SkyTntRandom(1);
-        SkyTntRandom other = new SkyTntRandom(2);
+        GenerationRandom first = new GenerationRandom(1);
+        GenerationRandom other = new GenerationRandom(2);
         int same = 0;
 
         //Act
@@ -49,7 +49,7 @@ public sealed class SkyTntRandomTests
     public void NextDouble_is_at_least_nought_and_below_one()
     {
         //Arrange
-        SkyTntRandom random = new SkyTntRandom(-5);
+        GenerationRandom random = new GenerationRandom(-5);
 
         //Act and assert
         for (int i = 0; i < 10000; i++)
@@ -65,7 +65,7 @@ public sealed class SkyTntRandomTests
     public void NextDouble_from_a_seed_of_nought_still_varies()
     {
         //Arrange
-        SkyTntRandom random = new SkyTntRandom(0);
+        GenerationRandom random = new GenerationRandom(0);
         HashSet<double> seen = new HashSet<double>();
 
         //Act
@@ -80,7 +80,7 @@ public sealed class SkyTntRandomTests
     public void NextDouble_spreads_across_the_range()
     {
         //Arrange
-        SkyTntRandom random = new SkyTntRandom(77);
+        GenerationRandom random = new GenerationRandom(77);
         int[] buckets = new int[10];
 
         //Act

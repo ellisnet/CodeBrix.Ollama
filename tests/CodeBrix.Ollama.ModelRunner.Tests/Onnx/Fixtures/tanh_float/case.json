@@ -1,0 +1,24 @@
+{
+  "name": "tanh_float",
+  "opset": 17,
+  "inputs": [
+    {
+      "name": "a",
+      "type": "float",
+      "shape": [
+        12
+      ],
+      "file": "in_a.bin"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "y",
+      "type": "float",
+      "shape": [
+        12
+      ],
+      "file": "out_y.bin"
+    }
+  ]
+}

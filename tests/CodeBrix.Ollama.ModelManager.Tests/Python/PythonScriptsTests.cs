@@ -28,6 +28,7 @@ public sealed class PythonScriptsTests
     public void Names_lists_every_script_that_ships_in_this_package()
         => PythonScripts.Names().Should().Equal(
             PythonScripts.ExportGenAi,
+            PythonScripts.ExportMuseCoco,
             PythonScripts.ExportOptimum,
             PythonScripts.ProbeVersion,
             PythonScripts.ReduceDynamic,

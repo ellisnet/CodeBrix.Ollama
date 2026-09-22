@@ -189,17 +189,22 @@ public sealed class OnnxReduceTests
     }
 
     [Theory]
-    [InlineData("model.onnx.data", "model.onnx", true)]
-    [InlineData("model.onnx_data", "model.onnx", true)]
-    [InlineData("onnx/model_base.onnx.data", "onnx/model_base.onnx", true)]
-    [InlineData("model.onnx", "model.onnx", false)]
-    [InlineData("model_token.onnx", "model.onnx", false)]
-    [InlineData("config.json", "model.onnx", false)]
-    [InlineData("", "model.onnx", false)]
-    [InlineData("model.onnx.data", "", false)]
-    public void IsExternalDataFor_knows_which_file_holds_a_graphs_weights(
-        string path, string graphPath, bool expected)
-        => OnnxReduce.IsExternalDataFor(path, graphPath).Should().Be(expected);
+    [InlineData("model.onnx", "weights.bin", "weights.bin")]
+    [InlineData("onnx/model.onnx", "../shared/weights.bin", "shared/weights.bin")]
+    [InlineData("onnx/model.onnx", "data/weights", "onnx/data/weights")]
+    public void External_paths_are_relative_to_the_graph(string graph, string location, string expected)
+        => OnnxExternalFiles.BundleName(graph, location).Should().Be(expected);
+
+    [Theory]
+    [InlineData("../outside.bin")]
+    [InlineData("/outside.bin")]
+    [InlineData("C:/outside.bin")]
+    [InlineData("data/../../outside.bin")]
+    public void External_paths_cannot_escape_the_bundle(string location)
+    {
+        Action act = () => OnnxExternalFiles.BundleName("model.onnx", location);
+        act.Should().Throw<InvalidDataException>();
+    }
 
     [Fact]
     public void CompanionFiles_keeps_everything_the_reduction_does_not_write_itself()
@@ -216,7 +221,8 @@ public sealed class OnnxReduceTests
         };
 
         //Act
-        IReadOnlyList<ResolvedFile> kept = OnnxReduce.CompanionFiles(files, new[] { "model.onnx" });
+        IReadOnlyList<ResolvedFile> kept = OnnxReduce.CompanionFiles(files, new[] { "model.onnx" },
+            new Dictionary<string, HashSet<string>> { ["model.onnx"] = new HashSet<string> { "model.onnx.data" } });
 
         //Assert
         kept.Select(file => file.Name).Should().Equal("README.md", "config.json", "tokenizer.json");
@@ -227,7 +233,7 @@ public sealed class OnnxReduceTests
     {
         //Act
         IReadOnlyList<ResolvedFile> kept = OnnxReduce.CompanionFiles(
-            Bundle(), new[] { "onnx/model_base.onnx" });
+            Bundle(), new[] { "onnx/model_base.onnx" }, new Dictionary<string, HashSet<string>>());
 
         //Assert
         kept.Select(file => file.Name).Should().Equal(
@@ -236,7 +242,7 @@ public sealed class OnnxReduceTests
 
     [Fact]
     public void CompanionFiles_with_no_files_keeps_nothing()
-        => OnnxReduce.CompanionFiles(null, new[] { "model.onnx" }).Should().BeEmpty();
+        => OnnxReduce.CompanionFiles(null, new[] { "model.onnx" }, new Dictionary<string, HashSet<string>>()).Should().BeEmpty();
 
     [Theory]
     [InlineData(ReduceMode.DynamicInt8, true, true)]
@@ -332,35 +338,35 @@ public sealed class OnnxReduceTests
     }
 
     [Fact]
-    public void MeasureGraph_counts_the_graph_and_the_file_of_weights_beside_it()
+    public async Task MeasureGraph_counts_the_graph_and_the_file_of_weights_beside_it()
     {
         //Arrange
         using var directory = new TempStoreDirectory();
         string graph = Path.Combine(directory.DirectoryPath, "model.onnx");
-        System.IO.File.WriteAllBytes(graph, new byte[7]);
+        WriteGraph(graph, "model.onnx.data");
         System.IO.File.WriteAllBytes(graph + ".data", new byte[11]);
         System.IO.File.WriteAllBytes(Path.Combine(directory.DirectoryPath, "other.onnx"), new byte[13]);
 
         //Act and assert
-        OnnxReduce.MeasureGraph(graph).Should().Be(18L);
+        (await OnnxReduce.MeasureGraphAsync(graph)).Should().Be(new FileInfo(graph).Length + 11L);
     }
 
     [Fact]
-    public void ExternalDataPaths_finds_the_file_of_weights_beside_a_graph()
+    public async Task ExternalDataPaths_finds_the_file_of_weights_beside_a_graph()
     {
         //Arrange
         using var directory = new TempStoreDirectory();
         string graph = Path.Combine(directory.DirectoryPath, "model.onnx");
-        System.IO.File.WriteAllBytes(graph, new byte[3]);
+        WriteGraph(graph, "model.onnx.data");
         System.IO.File.WriteAllBytes(graph + ".data", new byte[5]);
         System.IO.File.WriteAllBytes(Path.Combine(directory.DirectoryPath, "other.onnx"), new byte[7]);
 
         //Act and assert
-        OnnxReduce.ExternalDataPaths(graph).Should().Equal(graph + ".data");
+        (await OnnxExternalFiles.PathsAsync(graph, TestContext.Current.CancellationToken)).Should().Equal(graph + ".data");
     }
 
     [Fact]
-    public void UnlinkExternalData_gives_a_graphs_weights_a_file_of_their_own()
+    public async Task UnlinkExternalData_gives_a_graphs_weights_a_file_of_their_own()
     {
         //Arrange
         //The ONNX package refuses to read a file of weights that has more than one hard link, and this
@@ -371,14 +377,14 @@ public sealed class OnnxReduceTests
         string graph = Path.Combine(directory.DirectoryPath, "model.onnx");
         string weights = graph + ".data";
         System.IO.File.WriteAllBytes(shared, new byte[] { 1, 2, 3, 4 });
-        System.IO.File.WriteAllBytes(graph, new byte[] { 9 });
+        WriteGraph(graph, "model.onnx.data");
         if (!HardLink.TryCreate(shared, weights))
         {
             return;
         }
 
         //Act
-        OnnxReduce.UnlinkExternalData(graph);
+        await OnnxReduce.UnlinkExternalDataAsync(graph);
 
         //Assert
         System.IO.File.ReadAllBytes(weights).Should().Equal(new byte[] { 1, 2, 3, 4 });
@@ -389,23 +395,24 @@ public sealed class OnnxReduceTests
     }
 
     [Fact]
-    public void UnlinkExternalData_of_a_graph_with_no_weights_beside_it_does_nothing()
+    public async Task UnlinkExternalData_of_a_graph_with_no_weights_beside_it_does_nothing()
     {
         //Arrange
         using var directory = new TempStoreDirectory();
         string graph = Path.Combine(directory.DirectoryPath, "model.onnx");
-        System.IO.File.WriteAllBytes(graph, new byte[] { 1, 2, 3 });
+        WriteGraph(graph);
+        byte[] original = System.IO.File.ReadAllBytes(graph);
 
         //Act
-        OnnxReduce.UnlinkExternalData(graph);
+        await OnnxReduce.UnlinkExternalDataAsync(graph);
 
         //Assert
-        System.IO.File.ReadAllBytes(graph).Should().Equal(new byte[] { 1, 2, 3 });
+        System.IO.File.ReadAllBytes(graph).Should().Equal(original);
     }
 
     [Fact]
-    public void MeasureGraph_of_a_file_that_is_not_there_measures_nothing()
-        => OnnxReduce.MeasureGraph(Path.Combine(Path.GetTempPath(), "no-such-model.onnx"))
+    public async Task MeasureGraph_of_a_file_that_is_not_there_measures_nothing()
+        => (await OnnxReduce.MeasureGraphAsync(Path.Combine(Path.GetTempPath(), "no-such-model.onnx")))
             .Should().Be(0L);
 
     [Fact]
@@ -459,6 +466,19 @@ public sealed class OnnxReduceTests
                 ReduceMode.WeightOnlyInt8, ReduceEngine.Python, new ReduceOptions(),
                 new[] { "model.onnx" })["accuracyLevel"]
             .Should().BeEmpty();
+
+    private static void WriteGraph(string path, string location = null)
+    {
+        var proto = new OnnxModelProto { IrVersion = 9, Graph = new OnnxGraphProto { Name = "external-test" } };
+        if (location != null)
+        {
+            var tensor = new OnnxTensorProto { Name = "weight", DataType = (int)OnnxTensorDataType.Float, DataLocation = 1 };
+            tensor.Dimensions.Add(1);
+            tensor.ExternalData.Add(OnnxStringStringEntry.Create("location", location));
+            proto.Graph.Initializers.Add(tensor);
+        }
+        System.IO.File.WriteAllBytes(path, OnnxModel.FromProto(proto, null).Serialize());
+    }
 
     /// <summary>
     /// The files of a bundle shaped like the one the live tests reduce: a model card, a configuration

@@ -1725,9 +1725,9 @@ ownership the first time it looks, and the contract runs BOTH WAYS.
   Python call was made. It applies PythonOptions, starts the interpreter, hands
   the interpreter lock back so that a run may happen on any thread, and asks
   the embedding layer to BOUND its own process-exit shutdown, which is the
-  safety net for an application that never disposes anything: a process that
-  simply ends still ends. PythonSupport.Owner reports ModelManager, and
-  PythonSupport.Shutdown() is what ends it.
+  fallback for an application that never disposes anything. Explicitly call
+  PythonSupport.Shutdown() at application shutdown for reliable teardown after
+  native modules such as torch. PythonSupport.Owner reports ModelManager.
 
   THE HOST OWNS IT -- your application had already started an interpreter. This
   library configures NOTHING (no virtual environment, no library path, no
@@ -3201,8 +3201,8 @@ COMMON PITFALLS TO AVOID
     application, or in the hope of starting a fresh interpreter. CPython cannot
     be restarted in a process: after the call every Python entry point throws
     InvalidOperationException, and no interpreter is ever started again. Call
-    it once, at the end, or not at all - the bounded process-exit mode means a
-    process that never calls it still exits.
+    it once, at the end. The bounded process-exit fallback is not a substitute
+    for explicit teardown after native Python modules such as torch.
 
 22. DO NOT expect PythonSupport.Shutdown() to end an interpreter your own
     application started. It is a no-op when PythonSupport.Owner is Host, on
@@ -3789,3 +3789,34 @@ RUNNER      ResolvedModel.ModelPath is what an in-process GGUF runner loads;
 
 ================================================================================
 END OF AGENT-README
+
+
+MUSECOCO STAGING AND INDEPENDENT QUANTIZATION
+=============================================
+MUSECOCO-README.txt at the repository root documents the full workflow, source
+files, runtime bundle schema and consumer examples. ExportRoute.MuseCocoMusic
+exports the original music .pt checkpoint; ExportRoute.MuseCocoText exports the
+fine-tuned BertForAttributModel checkpoint with its 60 custom classifier heads.
+Auto recognizes that BERT architecture. Both routes require FP32 and use the
+embedded exporter with torch, numpy and onnx; no publisher Python code or native
+attention extension is executed. Explicitly call PythonSupport.Shutdown once at
+application shutdown, after all Python work has finished.
+
+After staging, ReduceOnnxAsync supports WeightOnlyInt8 and WeightOnlyInt4 for
+either model independently. Engine=Managed requires no Python. ModelRunner can
+execute the results without a package/project reference to ModelManager, and
+this library has no reference to ModelRunner.
+
+ReduceOptions.NodesToExclude exposes exact graph node names for both managed
+and Python quantizers. MuseCoco matrix names are checkpoint module names ending
+in .MatMul, for example decoder.output_projection.MatMul. Exclusions are copied,
+deduplicated and recorded in derived-bundle settings; they are invalid for
+PreprocessOnly. They apply to the graph presented to the quantizer, including any
+renaming a requested Python preprocessing step performs.
+
+Pass-through and reduction now discover external files through ONNX tensor
+metadata. A weights.bin name is valid; filenames need not resemble the graph.
+Shared weights retained by unselected graphs survive partial reduction. Paths
+are relative to their ONNX graph and must remain within the bundle. Collisions
+with newly emitted external files are renamed and tensor references updated.
+SourceBytes includes selected graphs and each referenced weight file once.

@@ -70,3 +70,52 @@ Samples, tools and other non-package content in this repository
       and the measurements.
 
   samples/ModelQueryTool - a sample application, work in progress.
+
+
+MUSECOCO FIXTURES AND LOCAL-CHECKPOINT TEST
+==========================================
+MUSECOCO-README.txt is the staging/consumer guide. The ordinary Runner suite
+contains tiny synthetic music/BERT bundles under Drivers/MuseCoco/Fixtures.
+Its generator is a maintainer tool requiring Python, onnx and transformers;
+the test suite only reads the checked-in files and does not execute Python.
+The fixture README records provenance and regeneration arguments. Standard
+Elu/Erf/Tanh/LayerNormalization oracle fixtures are produced by the existing
+Onnx/Fixtures/generate_fixtures.py tool using ONNX Runtime.
+
+MuseCocoStreamingTests runs the synthetic recurrent graph through both output
+APIs, checks early event delivery before token generation completes, token-limit
+cleanup, fixed-seed repetition, stream lifetime, cancellation and early disposal.
+Remigen2StreamDecoderTests checks cutoff parity including incomplete chords,
+stable channels, percussion, timestamp ordering, long notes, tempo/signature
+changes and the 15-channel melodic limit. These tests need no external models.
+
+MuseCocoLiveTests in CodeBrix.Ollama.EndToEnd.Tests exercises the actual local
+checkpoints: stages both FP32 bundles, quantizes each independently to INT8 and
+INT4, runs text predictions and MIDI generation at each precision, combines
+INT8 BERT with INT4 music, checks repeatability, and writes MIDI artifacts.
+It downloads nothing. Set all three gates to 1:
+  CODEBRIX_OLLAMA_RUN_LIVE_TESTS
+  CODEBRIX_OLLAMA_RUN_PYTHON_TESTS
+  CODEBRIX_OLLAMA_RUN_MUSECOCO_TESTS
+Also set these directory variables:
+  CODEBRIX_OLLAMA_PYTHON_VENV                 torch/numpy/onnx environment
+  CODEBRIX_OLLAMA_MUSECOCO_MUSIC_SOURCE       folder with one music .pt
+  CODEBRIX_OLLAMA_MUSECOCO_TEXT_SOURCE        custom BERT checkpoint folder
+  CODEBRIX_OLLAMA_MUSECOCO_TEST_DIRECTORY     persistent test output/store folder
+
+Allow at least 30 GiB free disk space and sufficient RAM for FP32 staging and
+inference. The source checkpoints are large; ImportOptions.Link=true shares
+source data on the same filesystem. The test keeps generated bundles for
+inspection and reuse. Set OMP_NUM_THREADS=4 and MKL_NUM_THREADS=4 for the recorded
+staging measurements. The Runner test uses four inference threads.
+
+Build, then invoke the xUnit executable directly to select only this class:
+  dotnet build tests/CodeBrix.Ollama.EndToEnd.Tests/CodeBrix.Ollama.EndToEnd.Tests.csproj -c Release -p:GeneratePackageOnBuild=false
+  dotnet tests/CodeBrix.Ollama.EndToEnd.Tests/bin/Release/net10.0/CodeBrix.Ollama.EndToEnd.Tests.dll -class '*MuseCocoLiveTests' -showLiveOutput
+
+The assembly fixture calls PythonSupport.Shutdown after all tests finish. This
+explicit lifetime step is necessary for reliable exit after the torch exporter
+in the tested environment. A closed-gate run starts no Python interpreter.
+Portable execution can be exercised on Intel by setting COMPlus_EnableHWIntrinsic=0
+and running the ordinary Runner executable with -class '*MuseCoco*'. This checks
+fallback correctness; it is not an ARM performance measurement.

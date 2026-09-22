@@ -22,7 +22,7 @@ namespace CodeBrix.Ollama.ModelRunner;
 /// It is not for cryptography, and nothing here pretends otherwise.
 /// </para>
 /// </remarks>
-internal sealed class SkyTntRandom
+internal sealed class GenerationRandom
 {
     private ulong _a;
     private ulong _b;
@@ -31,7 +31,7 @@ internal sealed class SkyTntRandom
 
     /// <summary>Starts a stream from a seed.</summary>
     /// <param name="seed">The seed. Every seed gives a different stream, and the same seed the same one.</param>
-    internal SkyTntRandom(long seed)
+    internal GenerationRandom(long seed)
     {
         ulong state = (ulong)seed;
         _a = SplitMix64(ref state);

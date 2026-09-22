@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -30,16 +31,13 @@ namespace CodeBrix.Ollama.ModelRunner;
 /// every row reads that, which leaves the unpack where it belongs: paid once per column.
 /// </para>
 /// <para>
-/// IT IS THE SAME ARITHMETIC IN THE SAME ORDER. Each output element accumulates exactly the products it
-/// accumulated before, in the same order, into the same shape of accumulator, so the two paths agree bit for
-/// bit and not merely to within reassociation - the suite holds spreading over threads to that standard, and
-/// so does this.
+/// Large prompts use sixteen-column panels and four activation rows together, sharing the FP32 matrix
+/// kernel. Reassociation can change low bits compared with decoding one row at a time. Thread count does
+/// not change the arithmetic within a selected path. Small prompts retain the column-wise accumulation.
 /// </para>
 /// <para>
-/// THE DEQUANTIZATION IS FUSED AND NOT MATERIALIZED (plan decision D3): the weight is never written out as
-/// floats, not even a row of it, so a model reduced to a quarter of its size stays a quarter of its size while
-/// it runs. What is materialized is one column at a time - a few thousand floats, which is smaller than this
-/// processor's second-level cache - and only while that column is being multiplied.
+/// No full dequantized weight is retained. Temporary storage is bounded by seventeen columns per worker,
+/// independent of the output width; a quantized model remains quantized while it runs.
 /// </para>
 /// <para>
 /// The value of <c>accuracy_level</c> does not reach here. It asks a runtime to quantize the ACTIVATIONS as
@@ -80,6 +78,12 @@ internal static class OnnxBlockGemm
         long total = (long)m * n;
         if (total == 0) return;
 
+        if (OnnxMatrixGemm.CanUse(m, weight.Reduction, n, kind))
+        {
+            Matrix(a, weight, c, m, threads);
+            return;
+        }
+
         // The work is split by COLUMN rather than by output element, because a column is what the unpack is
         // paid for: a worker that owns a column owns every row of it and unpacks it once.
         long work = total * Math.Max(weight.Reduction, 1);
@@ -98,6 +102,44 @@ internal static class OnnxBlockGemm
             int end = Math.Min(n, start + chunk);
             if (start < end) Columns(a, weight, c, m, start, end, kind);
         });
+    }
+
+    private static void Matrix(float[] a, OnnxBlockQuantizedWeight weight, float[] c, int m, int threads)
+    {
+        int k = weight.Reduction, n = weight.Width;
+        int tiles = (n + OnnxMatrixGemm.Columns - 1) / OnnxMatrixGemm.Columns;
+        int workers = Math.Min(threads, tiles);
+        void Work(int worker)
+        {
+            float[] panel = ArrayPool<float>.Shared.Rent(checked(k * OnnxMatrixGemm.Columns));
+            float[] unpacked = ArrayPool<float>.Shared.Rent(k);
+            try
+            {
+                for (int tile = tiles * worker / workers; tile < tiles * (worker + 1) / workers; tile++)
+                {
+                    int column = tile * OnnxMatrixGemm.Columns;
+                    int width = Math.Min(OnnxMatrixGemm.Columns, n - column);
+                    for (int j = 0; j < width; j++)
+                    {
+                        Dequantize(weight, column + j, unpacked, true);
+                        for (int p = 0; p < k; p++) panel[p * OnnxMatrixGemm.Columns + j] = unpacked[p];
+                    }
+                    for (int j = width; j < OnnxMatrixGemm.Columns; j++)
+                        for (int p = 0; p < k; p++) panel[p * OnnxMatrixGemm.Columns + j] = 0;
+                    OnnxMatrixGemm.MultiplyPanel(a, 0, panel, c, 0, m, k, n, column, width);
+                    if (weight.Bias != null)
+                        for (int row = 0; row < m; row++)
+                            for (int j = 0; j < width; j++) c[row * n + column + j] += weight.Bias[column + j];
+                }
+            }
+            finally
+            {
+                ArrayPool<float>.Shared.Return(unpacked);
+                ArrayPool<float>.Shared.Return(panel);
+            }
+        }
+        if (workers == 1) Work(0);
+        else Parallel.For(0, workers, new ParallelOptions { MaxDegreeOfParallelism = workers }, Work);
     }
 
     /// <summary>The zero point one block of one column is measured from.</summary>

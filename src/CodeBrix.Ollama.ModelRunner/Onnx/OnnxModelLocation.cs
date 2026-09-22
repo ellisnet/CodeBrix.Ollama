@@ -25,12 +25,14 @@ internal sealed class OnnxModelLocation
 {
     private readonly string _directory;
     private readonly IReadOnlyDictionary<string, string> _files;
+    private readonly string _logicalGraph;
 
-    private OnnxModelLocation(string modelPath, string directory, IReadOnlyDictionary<string, string> files)
+    private OnnxModelLocation(string modelPath, string directory, IReadOnlyDictionary<string, string> files, string logicalGraph = null)
     {
         ModelPath = modelPath;
         _directory = directory;
         _files = files;
+        _logicalGraph = logicalGraph;
     }
 
     /// <summary>The path of the graph file itself.</summary>
@@ -52,7 +54,8 @@ internal sealed class OnnxModelLocation
     internal static OnnxModelLocation ForDirectory(string directory, string modelFileName)
     {
         string full = Path.GetFullPath(directory);
-        return new OnnxModelLocation(Path.Combine(full, Normalize(modelFileName)), full, null);
+        string logical = NormalizeRelative(modelFileName);
+        return new OnnxModelLocation(Path.Combine(full, logical), full, null, logical);
     }
 
     /// <summary>A graph file named among a set of (logical name to path) pairs.</summary>
@@ -76,10 +79,10 @@ internal sealed class OnnxModelLocation
                     "The file '" + pair.Key + "' was named with an empty path.", nameof(files));
             }
 
-            copy[Normalize(pair.Key)] = pair.Value;
+            copy.Add(NormalizeRelative(pair.Key), pair.Value);
         }
 
-        string key = Normalize(modelFileName);
+        string key = NormalizeRelative(modelFileName);
         if (!copy.TryGetValue(key, out string path))
         {
             throw new ArgumentException(
@@ -88,7 +91,7 @@ internal sealed class OnnxModelLocation
                 nameof(modelFileName));
         }
 
-        return new OnnxModelLocation(Path.GetFullPath(path), null, copy);
+        return new OnnxModelLocation(Path.GetFullPath(path), null, copy, key);
     }
 
     /// <summary>Finds a side file the graph names.</summary>
@@ -99,6 +102,17 @@ internal sealed class OnnxModelLocation
         if (string.IsNullOrEmpty(location)) return null;
 
         string key = Normalize(location);
+        if (_logicalGraph != null)
+        {
+            // ONNX locations are relative to the GRAPH's directory, not the bundle root.
+            // Canonicalize ../shared references while keeping them inside the named bundle.
+            if (Path.IsPathRooted(key) || key.Contains(':'))
+            {
+                throw new ModelLoadException("An ONNX bundle weight must have a relative filename: " + location);
+            }
+            string folder = Path.GetDirectoryName(_logicalGraph);
+            key = NormalizeRelative(string.IsNullOrEmpty(folder) ? key : Path.Combine(folder, key));
+        }
         if (_files != null)
         {
             return _files.TryGetValue(key, out string path) ? path : null;
@@ -112,5 +126,27 @@ internal sealed class OnnxModelLocation
     {
         if (string.IsNullOrEmpty(name)) return name;
         return name.Replace('\\', '/').Replace('/', Path.DirectorySeparatorChar);
+    }
+
+    private static string NormalizeRelative(string name)
+    {
+        string normalized = Normalize(name);
+        if (string.IsNullOrWhiteSpace(normalized) || Path.IsPathRooted(normalized) || normalized.Contains(':'))
+        {
+            throw new ModelLoadException("Invalid relative ONNX bundle filename: " + name);
+        }
+        var parts = new List<string>();
+        foreach (string part in normalized.Split(Path.DirectorySeparatorChar))
+        {
+            if (part.Length == 0 || part == ".") continue;
+            if (part == "..")
+            {
+                if (parts.Count == 0) throw new ModelLoadException("An ONNX weight path escapes its bundle: " + name);
+                parts.RemoveAt(parts.Count - 1);
+            }
+            else parts.Add(part);
+        }
+        if (parts.Count == 0) throw new ModelLoadException("An ONNX filename names a directory: " + name);
+        return string.Join(Path.DirectorySeparatorChar, parts);
     }
 }

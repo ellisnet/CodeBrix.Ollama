@@ -56,6 +56,11 @@ internal static class OnnxExport
     /// <summary>The modules the Optimum route imports, checked before the script runs.</summary>
     internal static readonly string[] OptimumModules = { "optimum", "onnx", "torch", "transformers" };
 
+    internal static readonly string[] MuseCocoModules = { "torch", "numpy", "onnx" };
+
+    internal static bool IsMuseCoco(ExportRoute route)
+        => route == ExportRoute.MuseCocoMusic || route == ExportRoute.MuseCocoText;
+
     /// <summary>
     /// The architectures the ONNX Runtime GenAI model builder writes, spelled as a checkpoint's
     /// <c>config.json</c> spells them. The automatic route reads that file and takes the builder when it
@@ -108,6 +113,10 @@ internal static class OnnxExport
     /// <returns>The module names.</returns>
     internal static string[] ModulesFor(ExportRoute route)
     {
+        if (IsMuseCoco(route))
+        {
+            return MuseCocoModules;
+        }
         if (route == ExportRoute.GenAiBuilder)
         {
             return GenAiModules;
@@ -122,6 +131,10 @@ internal static class OnnxExport
     /// <returns>The tool name.</returns>
     internal static string ToolFor(ExportRoute route)
     {
+        if (IsMuseCoco(route))
+        {
+            return "codebrix-musecoco";
+        }
         if (route == ExportRoute.GenAiBuilder)
         {
             return GenAiTool;
@@ -169,8 +182,10 @@ internal static class OnnxExport
     /// graph replaces.
     /// </summary>
     /// <param name="files">The source bundle's files.</param>
+    /// <param name="referencedWeights">Names referenced by ONNX external tensors, including checkpoint-like filenames.</param>
     /// <returns>The files to register, in the order the source holds them.</returns>
-    internal static IReadOnlyList<ResolvedFile> PassThroughFiles(IReadOnlyList<ResolvedFile> files)
+    internal static IReadOnlyList<ResolvedFile> PassThroughFiles(
+        IReadOnlyList<ResolvedFile> files, ISet<string> referencedWeights = null)
     {
         var kept = new List<ResolvedFile>();
         if (files == null)
@@ -180,7 +195,7 @@ internal static class OnnxExport
 
         foreach (ResolvedFile file in files)
         {
-            if (!IsSupersededCheckpoint(file.Name))
+            if ((referencedWeights != null && referencedWeights.Contains(file.Name)) || !IsSupersededCheckpoint(file.Name))
             {
                 kept.Add(file);
             }
@@ -367,7 +382,15 @@ internal static class OnnxExport
             return ExportRoute.PublisherOnnx;
         }
 
-        return NamesBuilderArchitecture(ReadArchitectures(configJson))
+        IReadOnlyList<string> architectures = ReadArchitectures(configJson);
+        foreach (string architecture in architectures)
+        {
+            if (architecture == "BertForAttributModel")
+            {
+                return ExportRoute.MuseCocoText;
+            }
+        }
+        return NamesBuilderArchitecture(architectures)
             ? ExportRoute.GenAiBuilder
             : ExportRoute.Optimum;
     }
@@ -416,7 +439,7 @@ internal static class OnnxExport
         string task,
         CancellationToken cancellationToken)
     {
-        string scriptName = route == ExportRoute.GenAiBuilder
+        string scriptName = IsMuseCoco(route) ? PythonScripts.ExportMuseCoco : route == ExportRoute.GenAiBuilder
             ? PythonScripts.ExportGenAi
             : PythonScripts.ExportOptimum;
 
@@ -427,7 +450,14 @@ internal static class OnnxExport
             ["allow_remote_code"] = options.AllowRemoteCode
         };
 
-        if (route == ExportRoute.GenAiBuilder)
+        if (IsMuseCoco(route))
+        {
+            parameters["model_kind"] = route == ExportRoute.MuseCocoMusic ? "music" : "text";
+            parameters["precision"] = options.Precision;
+            parameters["attribute_schema_json"] = MuseCocoAssets.Read("musecoco-attributes.json");
+            parameters["music_vocabulary_json"] = MuseCocoAssets.Read("musecoco-vocabulary.json");
+        }
+        else if (route == ExportRoute.GenAiBuilder)
         {
             parameters["model_name"] = sourceName;
             parameters["precision"] = options.Precision;

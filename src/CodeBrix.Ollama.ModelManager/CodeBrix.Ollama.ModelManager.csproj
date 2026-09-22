@@ -112,12 +112,14 @@
   <!-- The Python scripts this library runs ship inside the assembly, never as files on disk. -->
   <ItemGroup>
     <EmbeddedResource Include="Python\Scripts\*.py" />
+    <EmbeddedResource Include="Export\Assets\*.json" />
   </ItemGroup>
 
   <ItemGroup>
     <None Include="..\..\icon-codebrix-128.png" Pack="true" PackagePath="" />
     <None Include="..\..\README.md" Pack="true" PackagePath="" />
     <None Include="AGENT-README.txt" Pack="true" PackagePath="" />
+    <None Include="..\..\MUSECOCO-README.txt" Pack="true" PackagePath="" />
     <None Include="..\..\THIRD-PARTY-NOTICES.txt" Pack="true" PackagePath="" />
     <None Include="..\..\LICENSE" Pack="true" PackagePath="" />
   </ItemGroup>

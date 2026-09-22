@@ -40,7 +40,7 @@ internal static class SkyTntSampler
     /// <param name="random">Where the choice is drawn from, when there is a choice to make.</param>
     /// <returns>The token.</returns>
     internal static int Sample(
-        float[] logits, bool[] allowed, double temperature, double topP, int topK, SkyTntRandom random)
+        float[] logits, bool[] allowed, double temperature, double topP, int topK, GenerationRandom random)
     {
         int count = allowed.Length;
 

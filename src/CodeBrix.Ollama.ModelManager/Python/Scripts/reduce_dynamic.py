@@ -7,7 +7,7 @@
 # not the embedding tables - because this mode is here to make the FILE smaller, and those operators
 # either grow it or change what it computes for no gain.
 #
-# The caller sets: input_path, output_path and use_external_data. Nothing outside the output path and
+# The caller sets: input_path, output_path, nodes_to_exclude and use_external_data. Nothing outside the output path and
 # the process temporary directory is written.
 import os
 
@@ -23,6 +23,7 @@ quantize_dynamic(
     reduce_range=False,
     weight_type=QuantType.QInt8,
     use_external_data_format=use_external_data,
+    nodes_to_exclude=nodes_to_exclude,
 )
 
 files = []

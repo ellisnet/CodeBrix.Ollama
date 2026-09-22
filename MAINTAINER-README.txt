@@ -115,7 +115,7 @@ THE STATE OF THINGS, 2026-09-18
     longer a placeholder.
   * ModelRunner NOW RUNS ONNX MODELS WITH NOTHING INSTALLED, and as of
     2026-09-18 it GENERATES TEXT from one as well as music. The managed
-    interpreter under Onnx/ runs 37 operators, contributed and quantized ones
+    interpreter under Onnx/ runs 41 operators, contributed and quantized ones
     included, and two DRIVERS sit on it: Drivers/SkyTnt/ for the two-graph MIDI
     model (MidiGenerationModel) and Drivers/CausalLm/ for a single-graph decoder
     described by a genai_config.json (OnnxCausalLmModel, which hands back an
@@ -2387,7 +2387,7 @@ HOW A LOAD WORKS
     transpose and scale buffers. A nonscalar scale or a scale introducing a
     broadcast axis executes the original kernels instead. Runtime ranks are
     still validated. The metadata reports the original graph's operators;
-    timing reports identify the combined nodes as MatMulTranspose[Scale].
+    the execution plan identifies the combined nodes as MatMulTranspose[Scale].
 
     THE LOAD COUNTS WHAT IT HAS THROWN AWAY and asks the collector for it when
     it is worth a collection (OnnxLoadReclaim, threshold 128 MiB). A load
@@ -3224,16 +3224,6 @@ against onnxruntime 1.30.0 on identical inputs.
                CLOSED MOST OF THAT - the load now counts what it has abandoned
                and asks for it (see HOW A LOAD WORKS) - and the figures to use
                are in PERFORMANCE BUDGETS below.
-
-PROFILING A MANAGED ONNX GRAPH
------------------------------
-Set CODEBRIX_OLLAMA_ONNX_TIMING_DIR to a writable directory before loading an
-ONNX model. On disposal, each loaded graph writes one onnx-timing-*.json file
-there. The file reports elapsed time for every node and graph run, and groups
-per-node time by 100-position cache-context buckets when the graph has a
-past_key_values.0.key input. Timings include buffer allocation inside kernels.
-Leave the variable unset for ordinary runs; collecting per-node timings adds
-overhead. Dispose the model to write the report.
 
 LONG-CONTEXT MANAGED PERFORMANCE, 2026-09-21
 ------------------------------------------
@@ -5135,3 +5125,223 @@ THREE DESIGN CHOICES, SO THEY ARE NOT MISTAKEN FOR OVERSIGHTS
 
 ================================================================================
 END OF MAINTAINER-README
+
+
+MUSECOCO VALIDATION (2026-09-22)
+================================
+MUSECOCO-README.txt documents consumer APIs and the versioned bundle. The new
+exporter is Python staging code inside ModelManager; the runtime drivers,
+WordPiece, REMIGEN2 decoder and new ONNX kernels are managed C# in ModelRunner.
+No Core source/ABI changes, new package dependencies, cross-library references,
+or new native runtime are required. Both NuGets include the MuseCoco guide.
+
+MUSECOCO MIDI STREAMING
+  GenerateStreamingAsync shares GenerateTokensAsync with the completed-score
+  API; it does not change the exported graph or sampling. Remigen2Reader holds
+  the shared token interpretation. Remigen2StreamDecoder buffers the unfinished
+  bar and releases events strictly before the next bar's start, sorted by tick.
+  Positions beyond that boundary remain pending. Final-position cleanup is shared
+  with Remigen2Decoder, so incomplete chords are not emitted prematurely.
+  Tracks/channels are assigned on first playable use; program changes occur at
+  first-note ticks. Completed decoding retains its sorted-instrument mapping.
+  Streaming adds initial 120 BPM / 4/4 when no explicit tick-zero metadata exists.
+  A stream owns the model until enumeration finishes or is disposed, including
+  while final buffered events are yielded. Cancellation preserves delivered
+  events and drops the rest. The stream does not accumulate all generated tokens.
+
+REPRODUCIBLE SOURCES
+  Muzic: 2b8739671ba06f819f31f568b8a79da581aaf6f9.
+  Music checkpoint: XinXuNLPer/MuseCoco_attribute2music, revision
+    8d9df584e3e09da88601546e7980323221f12644, attribute2music.pt SHA256
+    b3d99658eee895f8773a86d1f41e32e9e11df7e0c4b0e899e175e31b9f62955f.
+  Custom BERT: XinXuNLPer/MuseCoco_text2attribute, pytorch_model.bin SHA256
+    85dd23b1a3b6ea8927b77cdb4a011d8396c4f2f23d8808938369dbe58e1ea71b.
+  Reference fairseq: 83e615d66905b8ca7483122a37da1a85f13f4b8e (0.10.2).
+  Reference fast-transformers: 2ad36b97e64cb93862937bd21fcc9568d989561f.
+  Validation environment: Python 3.13, torch 2.14.0+cpu, transformers 4.57.6,
+    onnx 1.22.0, onnxruntime 1.30.0, numpy 2.5.3; .NET 10.0.12.
+  Original source classes were used only in research oracles. Production staging
+    imports neither fairseq nor the publisher's custom Python modules.
+
+FP32 FIDELITY GATE
+The spike's original-vs-export discrepancy was isolated to negative ELU
+rounding: PyTorch uses expm1-like evaluation, while ONNX Runtime computes a float
+exp followed by subtracting one. Recurrent linear attention amplifies very small
+changes near zero. Replacing ONLY that component in the PyTorch reference cut a
+saved-step max logit difference from 0.022852 to 0.0000143. The export preserves
+the original architecture, including 24 x 85 (2040) attention projections inside
+a 2048-wide music model and the leading-EOS positional convention.
+
+The acceptance gate was fixed before quantization: maximum next-token total
+variation <=0.02 and argmax agreement >=99% on 34 sampled-history checks from
+the original publisher's full-sequence model. Result: maximum TV 0.006819,
+maximum KL 0.0002502, all 34 argmax choices equal. A sampled note can still
+change at a close probability boundary; bitwise publisher output is not promised.
+The final standard LayerNormalization export was checked against the accepted
+spike over all 256 history steps: maximum TV 0.00004174, 256/256 argmax agreement.
+Saved step-0/23 logit errors vs the earlier graph were below 0.000008, with
+relative recurrent-state error below 0.000022.
+
+BERT's final export was checked against the original custom publisher class on
+10 prompts (600 classifier decisions), including empty text, Chinese, accented
+text and special tokens. All decisions agreed; maximum logit error was below
+0.00002. WordPiece IDs matched, with 15 additional checked-in tokenizer cases
+covering Unicode, punctuation, special tokens, long words and truncation.
+
+QUANTIZATION AND OUTPUT QUALITY
+Both models were exported and independently reduced using the public Manager
+APIs. Block size 128, asymmetric weights, no accuracy_level attribute, no node
+exclusions in this baseline. Music has 145 quantized constant matrices; BERT
+has 205. Embeddings and other non-MatMul weights remain FP32.
+
+                       FP32 bytes       INT8 bytes       INT4 bytes
+  music graph+weights  4,915,899,268    1,336,746,301      727,348,867
+  BERT graph+weights   1,341,630,968      443,732,575      290,916,386
+
+Small JSON companions are additional. The music INT4 size is about 0.68 GiB;
+INT8 about 1.25 GiB. BERT INT4 is about 277 MiB and INT8 about 423 MiB.
+ModelManager exports took about 27s (music) and 5s (BERT). Managed quantization
+took about 25s per music model and 5s per BERT model in this environment.
+
+All 600 BERT decisions also agreed with the original FP32 reference at INT8 and
+INT4. Managed-vs-native classifier probability differences were below 0.000003.
+This is a small prompt set, not a labeled accuracy benchmark or a claim that
+quantization never changes an attribute.
+
+For music, feeding the same 256-token sampled history to every precision gave:
+                  mean TV vs FP32   max TV vs FP32   argmax agreement
+  INT8               0.000795          0.008697          100%
+  INT4               0.017795          0.131887           97.65625%
+INT4 has measurable changes near some choices. On separate free-running seeded
+piano samples, FP32/INT8/INT4 generated 61/63/60 complete notes from 256 tokens.
+Every note had valid MIDI pitch, velocity and positive duration; all programs
+remained piano and all pitches belonged to the requested major-mode diatonic
+pitch set in these samples. Pitch ranges were 40-71, 40-71 and 48-84; distinct
+pitches 16, 15 and 10; distinct durations 12, 9 and 5. INT4 changed the musical
+trajectory and diversity, which is why file-size reduction is an option.
+
+For EACH precision, managed and native generated exactly the same 256 sampled
+tokens with the same xoshiro256** stream, seed 20260921, top-k 15, temperature 1,
+top-p 1, EOS suppressed for the measured 256 tokens, and four threads. The
+managed MidiScore, and independently reparsed saved MIDI, agreed with the
+publisher REMIGEN2 decoder's notes and tempo/time-signature events.
+A longer INT8-BERT + INT4-music jazz prompt generated 1024 tokens, 253 notes and
+about 24.83 seconds of MIDI, including piano, bass and percussion. Its managed
+decode took 49.53s. Its score and saved MIDI also independently matched the
+publisher decoder, including notes, programs, tempo and time signatures.
+Subjective listening quality has not been certified; these
+checks measure fidelity, valid music structure, conditioning and diversity.
+
+CPU PERFORMANCE
+Intel Core i7-12850HX, AVX2/FMA, four inference threads, CPU only. Native is the
+same graph and precision through ORT 1.30.0 CPUExecutionProvider with
+ORT_ENABLE_ALL, intra_op_num_threads=4 and inter_op_num_threads=1. The filesystem
+cache was warm; each measured model starts in a new process. Managed loading is
+eager; native can defer external-file costs until first inference. Loading,
+attribute-prefix processing and generated-token processing are separate below.
+
+  Music: 256 generated tokens (255 subsequent recurrent graph calls)
+                load seconds       prefix seconds       decode seconds
+                managed/native     managed/native       managed/native
+  FP32             4.86 / 2.06        6.96 / 6.06         26.27 / 23.84
+  INT8             0.91 / 0.05        3.79 / 40.88        13.01 / 159.92
+  INT4             0.56 / 0.52        3.65 / 2.23         11.70 / 8.83
+
+  Peak process working set (MiB), including load and generation:
+                managed/native
+  FP32            5145 / 4738
+  INT8            1491 / 1388
+  INT4             907 / 729
+
+Native's weight-only INT8 path was much slower on this CPU/ORT build. That is a
+measurement of this operator configuration, not a general claim about native
+INT8 inference or quantized activations. Native INT4 remains faster than managed.
+
+  BERT: median of 10 prompts in one process, including the first-call sample
+                  prediction seconds   load seconds    peak MiB
+                    managed/native     managed/native  managed/native
+  FP32                 .259 / .101        1.45 / .70      1553 / 1235
+  INT8                 .377 / .175         .35 / .37       904 / 608
+  INT4                 .362 / .099         .26 / .41       611 / 462
+
+BERT quantization reduces size and load memory, not prediction latency in these
+managed measurements. FP32 is the fastest managed BERT option; INT8 BERT + INT4
+music is the initial compact combined configuration, not a speed guarantee.
+
+OPTIMIZATIONS AND THEIR SCOPE
+Profiling the initial BERT runner put about 74% of inference time in MatMul;
+Erf and decomposed normalization were additional costs. Managed FP32 BERT
+improved from roughly .41-.50s per prompt to roughly .24-.28s after warmup:
+  - FP32/INT4/INT8 matrix prompts share sixteen-column weight panels and four
+    activation rows with AVX2/FMA. Packing and 128-element reduction slices
+    bound scratch storage and improve cache reuse. Small-row decode paths
+    remain in the existing kernels; no full float copy of a quantized model
+    is retained. Scalar/vector paths remain available.
+  - Portable Vector<double> intermediates accelerate the FP32 Erf approximation.
+  - Standard LayerNormalization removes temporary graph tensors while keeping
+    explicit epsilon and FP32-stash semantics.
+  - MuseCoco reuses two private recurrent-state banks (about 17 MiB each). This
+    reduced INT4 peak memory from 3196 to 907 MiB and decode from 12.62 to 11.70s;
+    INT8 peak fell from 5796 to 1491 MiB. All sampled tokens remained identical.
+    Internal RunIntoAsync rejects aliased input/output buffers and validates
+    result shapes. Public Run/RunAsync outputs remain independently owned.
+
+Portable driver/output-buffer tests also passed with COMPlus_EnableHWIntrinsic=0.
+No ARM device was benchmarked; hardware-disabled Intel validates fallback
+correctness, not ARM performance. Matrix reassociation can change low bits and
+seeded samples across builds even when every kernel is numerically correct.
+
+TESTS AND ARTIFACTS
+The offline suites cover tokenizer/reference IDs, all schema heads, direct and
+text-derived attributes, MIDI notes/percussion and truncation, seeds, cancellation,
+concurrency/disposal, invalid metadata and paths, nested/shared external files,
+node exclusions and dependency boundaries. Standard activation/normalization
+fixtures come from ORT; matrix tests compare double-precision references and
+thread-count stability. The real local-checkpoint test in EXTRAS-README passed:
+public FP32 exports, all four reductions, predictions and generation at all
+precisions, mixed INT8-BERT/INT4-music and repeated seeded generation.
+
+Final validation totals:
+  ModelRunner: 3287 passed, 30 gated skips, zero failures (3317 total).
+  ModelManager: 1822 passed, 13 gated skips, zero failures (1835 total).
+  Real-checkpoint MuseCocoLiveTests: 1 passed, zero failures (149.894s).
+  Real Python node-exclusion test: 1 passed, covering INT4, INT8 and dynamic INT8.
+  Hardware-intrinsics-disabled driver/output-buffer checks: 33 passed.
+Other live/Python suites remain opt-in; a gated skip is not a validation claim.
+The existing SkyTNT 1000-event regression completed in 18.65647s with exact
+event agreement against the prior optimized baseline.
+
+Release packages were built locally with validation BuildVersion=1.0.265.0 and
+their contents inspected. Runner has no NuGet dependencies; Manager's sole
+package dependency is CodeBrix.Python.MitLicenseForever 1.0.260.1181. Both include
+the internal Core assembly and MUSECOCO-README.txt; Runner retains its existing
+native assets. The current MuseCoco exporter is embedded in Manager. No Core
+source changes, library cross-reference, or additional native engine was added.
+The packages are in /tmp/codebrix-musecoco-packages and were not published.
+Manager pack reported NU1900 because the NuGet vulnerability feed was unavailable;
+package creation succeeded, but that run did not establish a vulnerability audit.
+Test/pack logs are /tmp/musecoco-*-tests.log, /tmp/musecoco-live-tests.log,
+/tmp/musecoco-python-exclusions.log and /tmp/musecoco-*-pack.log.
+
+Research evidence on Jeremy's machine:
+  ~/ClaudeHome/musecoco-a2m-spike-2026-09-21/
+    elu-rounding-diagnostic.json, fidelity-distribution.json, original references.
+  ~/ClaudeHome/musecoco-implementation-2026-09-21/
+    bert-export-fidelity.json, music-export-fidelity.json,
+    music-quantization-quality.json, midi-quality.json,
+    text-{managed,native}-final-{fp32,int8,int4}.json,
+    music-{managed,native}-final-{fp32,int8,int4}.json,
+    pipeline-int8-int4-1024.json and its .mid file, pipeline-quality.json,
+    skytnt-after-musecoco.json, staging/reduction reports,
+    native_check.py, verify_quality.py and the public-API validation harnesses.
+The native oracle and original-publisher code are research tooling, not runtime
+or package dependencies. Managed validation ran with PATH=/nonexistent and
+checked loaded modules for Python, torch and ONNX Runtime; none were present.
+
+STAGING LIFETIME FINDING
+An exporter process that relied only on automatic process-exit Python shutdown
+hung after completing torch work in this environment. Explicit
+PythonSupport.Shutdown() completed and allowed normal exit. Examples and the
+end-to-end assembly fixture now own that lifetime explicitly. No change to the
+CodeBrix.Python package was made; the automatic fallback should not be treated
+as a guarantee for arbitrary native Python modules.
