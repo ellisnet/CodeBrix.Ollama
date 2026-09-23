@@ -7,6 +7,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using Xunit;
 
+#pragma warning disable xUnit1051
+
 namespace CodeBrix.Ollama.ModelRunner.Tests;
 
 public sealed class MuseCocoModelTests

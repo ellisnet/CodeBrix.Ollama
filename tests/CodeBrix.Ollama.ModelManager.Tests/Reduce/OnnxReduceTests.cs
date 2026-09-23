@@ -7,6 +7,8 @@ using CodeBrix.Ollama.Core;
 using SilverAssertions;
 using Xunit;
 
+#pragma warning disable xUnit1051
+
 namespace CodeBrix.Ollama.ModelManager.Tests;
 
 /// <summary>

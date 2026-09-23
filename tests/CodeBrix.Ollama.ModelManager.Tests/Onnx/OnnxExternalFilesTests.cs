@@ -1,10 +1,11 @@
-using System;
+using CodeBrix.Ollama.Core;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
-using CodeBrix.Ollama.Core;
 using Xunit;
+
+#pragma warning disable xUnit1051
 
 namespace CodeBrix.Ollama.ModelManager.Tests;
 
