@@ -3605,6 +3605,39 @@ enumeration owns its instance until it completes or is disposed; breaking await
 foreach stops generation, and cancellation preserves events already yielded.
 BERT truncates to 512 prompt tokens and reports that fact.
 
+Both music APIs filter invalid REMIGEN2 transitions before top-k/top-p sampling,
+including when the minimum token count blocks EOS. DecodeTokens remains strict
+for malformed saved tokens. Filtering can change seeded output across builds.
+MinimumTokens=0 allows natural endings; forcing a longer piece guarantees no
+musical quality beyond valid event structure. Token counts are not durations.
+
+EXPERIMENTAL MUSECOCO CONTINUATION
+Create a context with music.CreateContinuation(contextBars: 4), then repeatedly
+enumerate music.GenerateContinuationStreamingAsync(context, attributes, options,
+cancellationToken: cancellationToken). The first call generates the initial
+section. Later calls replay up to the last four completed bars after the attribute
+prefix, using fresh recurrent state, and emit ONLY new music. Musical transitions
+and long-form quality are experimental and still need listening tests.
+
+Reuse the SAME context and loaded model for one piece. Events across calls share
+absolute ticks (480 PPQ), stable channels and one tempo/signature history; do not
+offset or replay earlier events. Notes may sustain across section boundaries.
+Finish enumerating each section before requesting the next. The final bar receives
+normal incomplete-position cleanup and is closed before the next section begins.
+At completed section boundaries, context.NextTick is a safe exclusive playback
+horizon. Only drain the final playback queue when ending the whole continuation.
+
+Options.MaximumTokens/MinimumTokens and progress count NEW tokens. Replayed
+ContextTokenCount also consumes the model's position capacity: MaximumTokens must
+not exceed music.MaximumGenerationTokens - context.ContextTokenCount. Retention is
+bounded by ContextBars (1..16); it does not accumulate the whole song. Each request
+still has inference/prompt cost and can underrun playback without consumer buffering.
+Use MinimumTokens=0 for natural endings. EOS may arrive immediately; stop or revise
+the request when LastGeneratedTokenCount is zero, or NextTick does not advance.
+After cancellation, failure or early disposal, that context is invalid; create a
+fresh one. The model remains reusable. All generation methods share the busy gate.
+MUSECOCO-README.txt includes an integration example and experimental limitations.
+
 General ONNX additions used by these models: FP32 Elu, Erf, Tanh and standard
 LayerNormalization (opset 17+, optional bias/statistics, FP32 stash). The matrix
 path shares weight panels across activation rows for FP32, INT4 and INT8 on

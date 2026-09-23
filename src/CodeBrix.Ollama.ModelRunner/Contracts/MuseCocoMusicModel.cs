@@ -210,11 +210,82 @@ public sealed class MuseCocoMusicModel : IDisposable, IAsyncDisposable
         }
     }
 
-    private MuseCocoGenerationOptions BeginGeneration(MusicAttributes attributes, MuseCocoGenerationOptions options)
+    /// <summary>Creates experimental rolling context for sustained MIDI generation with this model.</summary>
+    /// <param name="contextBars">Recent completed bars to replay before each later section, from 1 to 16. Default 4.</param>
+    /// <returns>A fresh context for GenerateContinuationStreamingAsync, bound to this model instance.</returns>
+    /// <remarks>This API is experimental. Musical continuity and long-form quality have not been established by listening tests.</remarks>
+    public MuseCocoContinuation CreateContinuation(int contextBars = 4)
+    {
+        if (contextBars < 1 || contextBars > 16) throw new ArgumentOutOfRangeException(nameof(contextBars));
+        if (Volatile.Read(ref _state) == 2) throw new ObjectDisposedException(nameof(MuseCocoMusicModel));
+        return new MuseCocoContinuation(this, contextBars);
+    }
+
+    /// <summary>Experimental: streams one new section, conditioned on recent bars from the same continuation.</summary>
+    /// <param name="continuation">Context created by this model. An empty context generates the initial section.</param>
+    /// <param name="attributes">Attributes from this model's schema, or null for defaults.</param>
+    /// <param name="options">Sampling and limits for NEW tokens only; retained prompt tokens also consume model position capacity.</param>
+    /// <param name="progress">Optional count of newly generated tokens, excluding replayed context.</param>
+    /// <param name="cancellationToken">Cancels the section and invalidates this continuation.</param>
+    /// <returns>Only newly generated MIDI events, using the continuation's absolute timeline and stable channels.</returns>
+    /// <remarks>
+    /// Experimental; listening tests must assess section transitions and sustained musical quality.
+    /// Enumerate a section fully before requesting the next. The last ContextBars completed bars are replayed
+    /// after the attribute prefix with fresh recurrent state; the old music is never yielded a second time.
+    /// A partial final bar is cleaned up and closed before the next section. Notes may sustain across sections.
+    /// Sampling can select EOS immediately: stop or revise the request when LastGeneratedTokenCount is zero.
+    /// MinimumTokens=0 permits natural endings; forcing a minimum does not guarantee musical quality.
+    /// Events obey the same horizon rule as GenerateStreamingAsync. Playback may drain the final queue when
+    /// the application ends the continuation. Cancellation, faults and early disposal invalidate the context
+    /// because some events may already have reached playback; use CreateContinuation to start afresh.
+    /// </remarks>
+    public async IAsyncEnumerable<MidiEvent> GenerateContinuationStreamingAsync(
+        MuseCocoContinuation continuation, MusicAttributes attributes = null, MuseCocoGenerationOptions options = null,
+        IProgress<int> progress = null, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        if (continuation == null) throw new ArgumentNullException(nameof(continuation));
+        if (!ReferenceEquals(continuation.Owner, this))
+            throw new ArgumentException("The continuation belongs to another model instance.", nameof(continuation));
+        if (continuation.Invalid)
+            throw new InvalidOperationException("This continuation was interrupted. Create a new continuation before generating again.");
+        attributes ??= Schema.CreateAttributes();
+        MuseCocoGenerationOptions effective = BeginGeneration(attributes, options, continuation.ContextTokenCount);
+        bool completed = false;
+        try
+        {
+            var generated = new List<int>();
+            var state = new MuseCocoGenerationState();
+            await foreach (int token in GenerateTokensAsync(attributes, effective, state, progress,
+                cancellationToken, continuation.Prompt).ConfigureAwait(false))
+            {
+                generated.Add(token);
+                foreach (MidiEvent item in continuation.Decoder.Add(_vocabulary[token]))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    yield return item;
+                }
+            }
+            cancellationToken.ThrowIfCancellationRequested();
+            foreach (MidiEvent item in continuation.Decoder.CompleteSection())
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                yield return item;
+            }
+            continuation.Complete(generated, _vocabulary, _tokenIds);
+            completed = true;
+        }
+        finally
+        {
+            if (!completed) continuation.Invalid = true;
+            Volatile.Write(ref _state, 0);
+        }
+    }
+
+    private MuseCocoGenerationOptions BeginGeneration(MusicAttributes attributes, MuseCocoGenerationOptions options, int promptTokens = 0)
     {
         if (!Schema.IsCompatibleWith(attributes.Schema))
             throw new ArgumentException("The attributes belong to an incompatible model schema.", nameof(attributes));
-        MuseCocoGenerationOptions effective = (options ?? new MuseCocoGenerationOptions()).CopyAndValidate(MaximumGenerationTokens);
+        MuseCocoGenerationOptions effective = (options ?? new MuseCocoGenerationOptions()).CopyAndValidate(MaximumGenerationTokens - promptTokens);
         int previous = Interlocked.CompareExchange(ref _state, 1, 0);
         if (previous == 2) throw new ObjectDisposedException(nameof(MuseCocoMusicModel));
         if (previous != 0) throw new InferenceException("A generation is already running on this MuseCoco music model.");
@@ -223,11 +294,12 @@ public sealed class MuseCocoMusicModel : IDisposable, IAsyncDisposable
 
     private async IAsyncEnumerable<int> GenerateTokensAsync(
         MusicAttributes attributes, MuseCocoGenerationOptions effective, MuseCocoGenerationState state,
-        IProgress<int> progress, [EnumeratorCancellation] CancellationToken cancellationToken)
+        IProgress<int> progress, [EnumeratorCancellation] CancellationToken cancellationToken, IReadOnlyList<int> musicPrefix = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         state.Seed = effective.Seed ?? FreshSeed();
         var random = new GenerationRandom(state.Seed);
+        var grammar = new Remigen2Grammar(_vocabulary);
         int[] prefix = BuildPrefix(attributes);
         var inputs = new Dictionary<string, OnnxTensor>(StringComparer.Ordinal);
         OnnxSession reusable = Options.ReuseBuffers ? _graph as OnnxSession : null;
@@ -268,6 +340,13 @@ public sealed class MuseCocoMusicModel : IDisposable, IAsyncDisposable
             // starts positional embeddings at the last attribute, one token before <sep>.
             await StepAsync(prefix[i], i < _prefixPositionStart ? 0 : i - _prefixPositionStart + 2).ConfigureAwait(false);
         }
+        int musicPrefixCount = musicPrefix?.Count ?? 0;
+        for (int i = 0; i < musicPrefixCount; i++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            grammar.Accept(musicPrefix[i]);
+            await StepAsync(musicPrefix[i], prefix.Length + i - _prefixPositionStart + 2).ConfigureAwait(false);
+        }
         state.PromptTime = timer.Elapsed;
         timer.Restart();
         for (int i = 0; i < effective.MaximumTokens; i++)
@@ -276,7 +355,8 @@ public sealed class MuseCocoMusicModel : IDisposable, IAsyncDisposable
             float[] logits = output["logits"].Floats;
             if (logits == null || logits.Length != _vocabulary.Length)
                 throw new InferenceException("The decoder returned invalid logits.");
-            int token = MuseCocoSampler.Sample(logits, _pad, _eos, i >= effective.MinimumTokens, effective, random);
+            int token = MuseCocoSampler.Sample(logits, _eos, i >= effective.MinimumTokens, grammar, effective, random);
+            grammar.Accept(token);
             if (token == _eos)
             {
                 state.EndedWithEos = true;
@@ -289,7 +369,7 @@ public sealed class MuseCocoMusicModel : IDisposable, IAsyncDisposable
             timer.Start();
             cancellationToken.ThrowIfCancellationRequested();
             if (i + 1 < effective.MaximumTokens)
-                await StepAsync(token, prefix.Length + i - _prefixPositionStart + 2).ConfigureAwait(false);
+                await StepAsync(token, prefix.Length + musicPrefixCount + i - _prefixPositionStart + 2).ConfigureAwait(false);
         }
         state.GenerationTime = timer.Elapsed;
     }

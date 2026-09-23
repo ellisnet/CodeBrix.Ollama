@@ -5149,6 +5149,37 @@ MUSECOCO MIDI STREAMING
   while final buffered events are yielded. Cancellation preserves delivered
   events and drops the rest. The stream does not accumulate all generated tokens.
 
+MUSECOCO U1 GENERATION FIX (2026-09-22)
+  An INT4 request with piano=present, tempo=moderate, seed 20260921,
+  minimum=maximum=512, top-k=15, top-p=1, temperature=1 and four threads
+  reproduced "REMIGEN2 duration without a pitch" in both output APIs.
+  The model preferred EOS at token 292. With EOS blocked, unconstrained sampling
+  selected a signature after a position at token 300, then a duration after a
+  signature at token 310. ONNX Runtime replay matched all 512 top predictions
+  (maximum absolute logit difference 0.000170); disabling buffer reuse produced
+  identical tokens. The decoder's ordering check also matches the publisher.
+  Remigen2Grammar now restricts candidates BEFORE top-k/top-p in the shared
+  generation loop. It excludes prompt/special tokens, keeps note triples ordered
+  and restricts signatures to bar starts. EOS/length settings and final-position
+  cleanup are retained. Saved-token decoding remains strict. No ONNX graph,
+  kernel, export, weight or model setting is changed. Seeded output may change
+  across builds; structural validity does not guarantee musical quality when
+  the caller forces continuation beyond the model's preferred ending.
+  The offline grammar cases and local INT4 live regression are described in
+  EXTRAS-README.txt. Investigation artifacts are under .artifacts/musecoco-u1/.
+
+EXPERIMENTAL MUSECOCO CONTINUATION (2026-09-22)
+  CreateContinuation / GenerateContinuationStreamingAsync keep a bounded tail of
+  completed music bars, rebase that tail into a self-contained token prompt and
+  prefill it after the attributes on the next request. The shared decoder keeps
+  the absolute event timeline and channel assignments across requests. Token
+  budgets count new output; context also occupies model positions. Each section
+  starts with fresh recurrent state. An interrupted context becomes unusable,
+  because already delivered events cannot be rolled back safely. Caller-created
+  fresh contexts and other requests remain possible on the same loaded model.
+  Source/API comments and AGENT-README mark this experimental: inference and
+  event mechanics are tested, while musical continuity needs listening tests.
+
 REPRODUCIBLE SOURCES
   Muzic: 2b8739671ba06f819f31f568b8a79da581aaf6f9.
   Music checkpoint: XinXuNLPer/MuseCoco_attribute2music, revision

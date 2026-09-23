@@ -192,6 +192,60 @@ The stream itself does not retain the whole song or return token IDs/statistics;
 keep events as above to save them, and use an explicit seed when repeatability is
 required. Optional progress still reports generated token counts.
 
+EXPERIMENTAL: CONTINUE WITH RECENT MUSICAL CONTEXT
+------------------------------------------------
+This path is EXPERIMENTAL. It enables MusicGeneration integration and listening
+tests; coherent transitions and several-minute musical quality are not established.
+It uses the same staged model and requires no retraining or re-export.
+
+    MuseCocoContinuation context = music.CreateContinuation(contextBars: 4);
+    for (int section = 0; section < 6; section++)
+    {
+        int available = music.MaximumGenerationTokens - context.ContextTokenCount;
+        if (available < 1) break;
+        long before = context.NextTick;
+        await foreach (MidiEvent item in music.GenerateContinuationStreamingAsync(
+            context, attributes, new MuseCocoGenerationOptions
+            {
+                MaximumTokens = Math.Min(512, available), MinimumTokens = 0,
+                Seed = 20260922 + section, TopK = 15
+            }, cancellationToken: cancellationToken))
+        {
+            // Enqueue NEW events directly; ticks/channels already span all sections.
+            // Advance playback strictly before item.HorizonTicks.
+        }
+        // The completed section also settles all ticks strictly before context.NextTick.
+        if (context.LastGeneratedTokenCount == 0 || context.NextTick == before) break;
+    }
+    // Drain the remaining playback queue when ending the whole continuation.
+
+The first enumeration generates normally. The context retains at most the last
+ContextBars completed bars (default four, configurable from one to sixteen).
+Later enumerations replay those tokens after the attribute prefix with fresh
+recurrent state, then sample new music. Replayed bars are never emitted again.
+Inherited signature, tempo and instrument values are restored in the retained
+prompt when needed. The unfinished final position receives normal cleanup; a
+partial final bar is closed before starting the next section.
+
+The same context keeps absolute ticks, tempo/signature state and stable channels
+across requests. Do not add a per-section time offset. Notes may sustain across
+boundaries. Collect all yielded events if saving the entire piece to one MIDI file.
+Contexts belong to the model instance that created them. Other generation calls
+can use that model between sections, but do not become part of the continuation.
+
+MaximumTokens/MinimumTokens and progress refer only to NEW tokens; the retained
+ContextTokenCount also uses the finite position table. An oversized request is
+rejected, not silently shortened. Prefilling context costs inference time, so a
+consumer still needs buffering if generation cannot keep up with playback.
+MinimumTokens=0 allows natural EOS; a context does not guarantee more music on
+every request. LastGeneratedTokenCount and NextTick let the caller detect no
+progress. Attributes can guide the next section; they do not guarantee continuity.
+
+Enumerate each section fully before starting another. Cancellation, errors or an
+early break invalidate that context because some of its events may already have
+reached playback. Create a fresh context afterward; the model itself stays reusable.
+The existing GenerateAsync and GenerateStreamingAsync remain independent requests.
+
 ADD OPTIONAL TEXT PROMPTING (ModelRunner ONLY)
 ----------------------------------------------
     using MuseCocoTextModel text = await MuseCocoTextModel.LoadFromDirectoryAsync(
@@ -222,6 +276,17 @@ GENERATION AND LIFETIME RULES
   Counts are REMIGEN2 TOKENS, not notes or seconds. For a shorter request lower
   MinimumTokens too. EOS can finish a request after the minimum; the maximum
   always bounds work. TopK=1 chooses greedily. TopP is applied after top-k.
+- Both generation APIs filter candidates to valid REMIGEN2 continuations BEFORE
+  top-k/top-p sampling. Pitch, duration and velocity stay in order; signatures
+  occur at bar starts; prompt/special tokens cannot enter the generated music.
+  This also applies when MinimumTokens suppresses an otherwise preferred EOS.
+  DecodeTokens still rejects malformed saved sequences; no emitted tokens are
+  repaired or silently dropped beyond the existing incomplete-ending cleanup.
+  The filtering can change fixed-seed output compared with earlier builds.
+- MinimumTokens=0 lets the model stop naturally. A high minimum can force weak
+  musical continuation even though the MIDI is structurally valid. Token counts
+  do not specify playback duration. Use bars/duration_seconds attributes to guide
+  length; they are learned preferences, not guarantees of an exact duration.
 - Seed=null requests a fresh seed, which the result reports. Fixed seeds must
   be nonnegative and cannot be 0xFFFFFFFF. -1 is rejected. Repeatability also
   requires the same model, settings, build and arithmetic. BERT is deterministic

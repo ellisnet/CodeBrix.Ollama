@@ -10,13 +10,16 @@ public sealed class MuseCocoGenerationOptions
     /// <summary>Maximum generated REMIGEN2 tokens, excluding the attribute prefix. Default 2560.</summary>
     public int MaximumTokens { get; set; } = 2560;
 
-    /// <summary>Number of tokens before EOS is allowed. Default 512; must not exceed MaximumTokens.</summary>
+    /// <summary>
+    /// Number of tokens before EOS is allowed. Default 512; must not exceed MaximumTokens.
+    /// Zero lets the model end naturally at any point. Forcing a longer continuation does not guarantee musical quality.
+    /// </summary>
     public int MinimumTokens { get; set; } = 512;
 
     /// <summary>Positive softmax temperature. Default 1.</summary>
     public double Temperature { get; set; } = 1;
 
-    /// <summary>Maximum most likely candidates to retain. Default 15. One gives deterministic greedy generation.</summary>
+    /// <summary>Maximum most likely valid REMIGEN2 continuations to retain. Default 15. One gives deterministic greedy generation.</summary>
     public int TopK { get; set; } = 15;
 
     /// <summary>Nucleus threshold after top-k filtering, in (0, 1]. Default 1 keeps all top-k candidates.</summary>

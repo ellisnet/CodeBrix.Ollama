@@ -5,13 +5,13 @@ namespace CodeBrix.Ollama.ModelRunner;
 
 internal static class MuseCocoSampler
 {
-    internal static int Sample(float[] logits, int pad, int eos, bool allowEos,
+    internal static int Sample(float[] logits, int eos, bool allowEos, Remigen2Grammar grammar,
         MuseCocoGenerationOptions options, GenerationRandom random)
     {
         var order = new List<int>(logits.Length);
         for (int i = 0; i < logits.Length; i++)
         {
-            if (i == pad || (i == eos && !allowEos)) continue;
+            if ((i == eos && !allowEos) || !grammar.Allows(i)) continue;
             if (!float.IsFinite(logits[i])) throw new InferenceException("MuseCoco returned a non-finite logit.");
             order.Add(i);
         }

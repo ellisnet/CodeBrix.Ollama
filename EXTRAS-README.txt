@@ -88,6 +88,24 @@ cleanup, fixed-seed repetition, stream lifetime, cancellation and early disposal
 Remigen2StreamDecoderTests checks cutoff parity including incomplete chords,
 stable channels, percussion, timestamp ordering, long notes, tempo/signature
 changes and the 15-channel melodic limit. These tests need no external models.
+MuseCocoGrammarTests checks filtering before top-k/top-p, invalid note ordering,
+bar metadata, prompt-token exclusion, EOS gating and incomplete final notes.
+MuseCocoContinuationTests checks the experimental rolling prompt through the
+synthetic graph: advancing inference positions, bounded retained bars, inherited
+metadata, no replayed MIDI, stable channels/timeline, capacity and interruption.
+
+MuseCocoLiveTests in CodeBrix.Ollama.ModelRunner.Tests is a separate, local-bundle
+regression for integration issue U1: both APIs must finish 512 generated tokens
+with seed 20260921, top-k 15, top-p 1, temperature 1 and piano/moderate attributes.
+It compares the complete and streamed music, checks early ordered delivery and
+reads the resulting MIDI. It neither stages models nor requires Python. Set
+CODEBRIX_OLLAMA_RUN_LIVE_TESTS=1, CODEBRIX_OLLAMA_RUN_MUSECOCO_TESTS=1, and
+CODEBRIX_OLLAMA_MUSECOCO_MUSIC_BUNDLE to the existing music-int4 bundle. After a
+Release build, select only that test (so other live models are not downloaded):
+  dotnet tests/CodeBrix.Ollama.ModelRunner.Tests/bin/Release/net10.0/CodeBrix.Ollama.ModelRunner.Tests.dll -class CodeBrix.Ollama.ModelRunner.Tests.MuseCocoLiveTests -showLiveOutput
+That class also exercises two experimental continuation sections using the same
+local INT4 bundle with a four-bar context and natural EOS allowed. It checks
+inference and event continuity; it is not a listening test of musical quality.
 
 MuseCocoLiveTests in CodeBrix.Ollama.EndToEnd.Tests exercises the actual local
 checkpoints: stages both FP32 bundles, quantizes each independently to INT8 and

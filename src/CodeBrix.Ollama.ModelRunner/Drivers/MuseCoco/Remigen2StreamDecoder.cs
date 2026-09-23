@@ -19,6 +19,8 @@ internal sealed class Remigen2StreamDecoder
     private bool _initialized;
     private bool _completed;
 
+    internal long BarTick => _reader.BarTick;
+
     internal IReadOnlyList<MidiEvent> Add(string word)
     {
         if (_completed) throw new InvalidOperationException("The MIDI stream has already ended.");
@@ -42,6 +44,17 @@ internal sealed class Remigen2StreamDecoder
         Remigen2Decoder.CleanEnding(_words);
         ReadBar();
         return Drain(long.MaxValue);
+    }
+
+    // Experimental continuation keeps the timeline, instrument assignments and deferred future
+    // positions alive across requests. Close a partial final bar before beginning the next section.
+    internal IReadOnlyList<MidiEvent> CompleteSection()
+    {
+        if (_completed) throw new InvalidOperationException("The MIDI stream has already ended.");
+        Remigen2Decoder.CleanEnding(_words);
+        if (_words.Count != 0 && _words[_words.Count - 1] != "b-1") _words.Add("b-1");
+        ReadBar();
+        return Drain(_reader.BarTick);
     }
 
     private void ReadBar()
