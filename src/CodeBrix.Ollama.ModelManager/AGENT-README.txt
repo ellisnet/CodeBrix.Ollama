@@ -1778,7 +1778,7 @@ turns a bundle into ONNX and stores the result as a DERIVED BUNDLE. The model
 must be a bundle: a GGUF model pulled from an Ollama-protocol registry has no
 publisher file tree and is refused with InvalidOperationException.
 
-THE FOUR ROUTES, ExportOptions.Route:
+THE SIX ROUTES, ExportOptions.Route:
 
     Auto            the default. Reads the source and decides, by the rules
                     below
@@ -1797,10 +1797,31 @@ THE FOUR ROUTES, ExportOptions.Route:
     Optimum         Hugging Face Optimum's ONNX exporter, which traces the
                     model's own Python code. It reaches architectures the
                     builder does not write and is the fallback for them
+    MuseCocoMusic   this library's own exporter for a MuseCoco music
+                    checkpoint - exactly one .pt file at the bundle root. It
+                    writes an FP32 recurrent decoder graph with its weights in
+                    a file beside it, and the attribute schema and the music
+                    vocabulary the runner reads. Auto never chooses it: name it
+    MuseCocoText    the same exporter for MuseCoco's fine-tuned
+                    BertForAttributModel - config.json, pytorch_model.bin,
+                    vocab.txt and tokenizer_config.json. It writes an FP32
+                    graph with the sixty classifier heads, the attribute schema
+                    and the WordPiece tokenizer data
+
+THE TWO MuseCoco ROUTES run a fixed export script that ships inside this
+library, not either tool above and not the publisher's own code: the checkpoint
+is loaded as weights only, its architecture, tensor inventory and classifier
+shapes are checked, and a tensor the script does not recognize is refused
+rather than silently dropped. They export at FP32 ONLY - any other Precision is
+an ArgumentException saying so - and ReduceOnnxAsync is the separate step that
+makes either graph eight- or four-bit, each one independently (see REDUCING AN
+ONNX MODEL). MUSECOCO-README.txt at the repository root is the whole workflow:
+the source files, the runtime bundle contract and consumer examples.
 
 WHAT Auto DECIDES:
 
     the source ships at least one .onnx file          -> PublisherOnnx
+    its config.json names BertForAttributModel        -> MuseCocoText
     its config.json names an architecture the GenAI
       builder writes (LlamaForCausalLM, Qwen2/3,
       Phi, Gemma, Mistral, Granite, Whisper and the
@@ -1824,6 +1845,8 @@ WHICH ROUTES NEED PYTHON, AND WHICH MODULES
     PublisherOnnx   none. Nothing of the embedding layer is loaded
     GenAiBuilder    onnxruntime_genai, torch, transformers, onnx
     Optimum         optimum, onnx, torch, transformers
+    MuseCocoMusic   torch, numpy, onnx
+    MuseCocoText    torch, numpy, onnx
 
 A Python route calls PythonSupport.Require BEFORE it lays anything out, so a
 machine without the modules says so in a second rather than after copying a
@@ -1833,7 +1856,7 @@ every message.
 ExportOptions
 
     ExportRoute Route        Auto (the default) | PublisherOnnx | GenAiBuilder
-                             | Optimum
+                             | Optimum | MuseCocoMusic | MuseCocoText
     string Precision         "fp32" (the default), "fp16", "bf16", "int8",
                              "int4" - whatever the tool accepts; it is passed
                              verbatim and the TOOL decides. Never null: an
@@ -1842,7 +1865,8 @@ ExportOptions
                              THE Optimum ROUTE IGNORES IT and exports at the
                              checkpoint's own precision; what was asked for is
                              still recorded in the provenance, so a bundle
-                             never claims a precision that was not applied
+                             never claims a precision that was not applied.
+                             THE TWO MuseCoco ROUTES ACCEPT "fp32" ONLY
     string OutputName        null takes the source name with its tag replaced
                              by "onnx"
     bool Overwrite           false; a name already in the store fails the
@@ -1909,7 +1933,8 @@ all.
 
 WHAT CAN GO WRONG: ModelNotFoundException (no such model),
 InvalidOperationException (not a bundle, or PublisherOnnx named for a bundle
-with no .onnx in it), PythonNotAvailableException and
+with no .onnx in it), ArgumentException (a MuseCoco route asked for a
+precision other than "fp32"), PythonNotAvailableException and
 PythonModuleNotInstalledException (a Python route on a machine that cannot run
 it), PythonScriptException (the tool refused the model or failed - its own
 message is in PythonMessage), and ModelManagerException (the output name is
@@ -2071,13 +2096,30 @@ ReduceOptions
                              has one of them reduced and stays complete. A name
                              the bundle does not hold is refused, and the
                              message lists the ones it does
+    IReadOnlyList<string>
+        NodesToExclude       null - the default - excludes nothing. Exact
+                             graph node names, ordinal and case-sensitive, to
+                             leave at their original precision; an unnamed
+                             node cannot be excluded. It applies to DynamicInt8
+                             and both weight-only modes, with either engine. A
+                             null or blank name is an ArgumentException, and
+                             so is any name at all with PreprocessOnly. The
+                             names are copied, deduplicated and recorded in the
+                             derived bundle's settings. They name nodes of the
+                             graph the quantizer is given, so after a
+                             preparation pass they name the prepared graph. A
+                             graph from a MuseCoco route names each constant
+                             matrix multiply after its checkpoint module, with
+                             .MatMul on the end - for instance
+                             decoder.output_projection.MatMul
 
 ReduceResult   string Name (ready to show, resolve or materialize);
     IReadOnlyList<string> Files; ReduceEngine EngineUsed (the engine that RAN,
     so never Auto); ReduceMode Mode; long SourceBytes; long ReducedBytes;
     string Tool; string ToolVersion. SourceBytes and ReducedBytes are about the
-    GRAPHS THAT WERE REDUCED and the files of weights beside them, not about
-    the whole bundle: what is carried through counts towards neither.
+    GRAPHS THAT WERE REDUCED and the files of weights beside them, each file
+    counted once, not about the whole bundle: what is carried through counts
+    towards neither.
 
 THE DEFAULT NAME adds the mode's tag to the tag the source carries:
 
@@ -2113,6 +2155,17 @@ two-gibibyte message limit. Both engines ask the same question of the same
 graph, so both write the same shape of answer - one file, or a graph and a file
 of weights named after it. The file of weights that belonged to a graph being
 reduced is replaced with it, not carried through.
+
+WHICH FILES A GRAPH NEEDS is read from the graph itself - from every tensor's
+external-data location, sub-graphs included - so a weight file's name need not
+resemble the graph's (weights.bin is as good as any). A location is relative to
+the .onnx file that names it and must stay inside the bundle: a missing file,
+or a path that leaves the bundle, is refused. The pass-through export route
+uses the same reading: a weight file a graph names is kept even when its name
+(weights.bin, say) is one of the checkpoint kinds that route otherwise leaves
+behind. A weight file that a graph NOT being reduced still uses survives a
+partial reduction, and a file the quantizer writes that would collide with one
+is given another name, with the graph's references updated to match.
 
 THE ONE LIMIT WORTH KNOWING: the preparation pass writes its result as a single
 message unless it was asked for external data, and such a message cannot exceed
@@ -2188,8 +2241,9 @@ FILE SYSTEM before reducing anything of size.
     await store.MaterializeAsync(small.Name, "/somewhere/on/disk");
 
 WHAT CAN GO WRONG: ModelNotFoundException (no such model),
-InvalidOperationException (not a bundle), NotSupportedException (the managed
-engine was asked for something it does not cover),
+InvalidOperationException (not a bundle), ArgumentException (a blank name in
+NodesToExclude, or NodesToExclude with PreprocessOnly), NotSupportedException
+(the managed engine was asked for something it does not cover),
 PythonNotAvailableException and
 PythonModuleNotInstalledException (a machine that cannot run the tools),
 PythonScriptException (a tool refused a graph or failed - its own message is in
@@ -3377,10 +3431,11 @@ Do NOT reach for this package to:
   - Garbage-collect a store on its own. Blobs are removed by DeleteAsync, by
     the pruning PullAsync and CreateAsync do for the name they just wrote, and
     by PruneAsync when you call it; nothing runs in the background.
-  - RUN the files of a bundle, or EXPORT a checkpoint to ONNX without the
-    publisher's own tooling. They are fetched, verified, stored and laid out
+  - RUN the files of a bundle, or EXPORT a checkpoint to ONNX without
+    Python. They are fetched, verified, stored and laid out
     again as the publisher's tree, and exporting to ONNX is this library
-    driving the ONNX Runtime GenAI model builder or Hugging Face Optimum in an
+    driving the ONNX Runtime GenAI model builder or Hugging Face Optimum - or,
+    for the two MuseCoco routes, its own export script on torch - in an
     interpreter YOU already have, never a re-implementation of either. Nothing
     here runs a model of any kind - the separate CodeBrix.Ollama.ModelRunner
     package runs a GGUF model, and also runs an exported or reduced ONNX graph
@@ -3540,11 +3595,22 @@ Feature-to-test-file map:
     https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Export/OnnxExportTests.cs
     https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Store/ModelStoreDerivedBundleTests.cs
 
+  The two MuseCoco routes: the fine-tuned BERT detected by Auto, the modules
+  both routes need, the embedded attribute schema, and the refusal of any
+  precision but FP32 before Python is started
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Export/MuseCocoExportTests.cs
+
   Reducing an ONNX model: the four modes, the engine the automatic choice
   reaches, the derived names, the files carried through, and whole reductions
   run by the managed engine with no interpreter in the process at all
     https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Store/ModelStoreReduceTests.cs
     https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Reduce/OnnxReduceTests.cs
+
+  Weight files named by the graphs themselves: shared weights with arbitrary
+  names kept through a partial reduction and counted once, a nested graph's
+  reference, collisions avoided, missing files refused, and node exclusions
+  kept at full precision and recorded
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Onnx/OnnxExternalFilesTests.cs
 
   Converting a checkpoint to GGUF: the name the result takes, the provenance
   and the licence it carries, the stop parameter and the template that is not
@@ -3553,6 +3619,12 @@ Feature-to-test-file map:
   synthetic checkpoints that need no network and no interpreter
     https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Store/ModelStoreConvertTests.cs
     https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Convert/GgufConversionTests.cs
+
+  Quantizing a stored GGUF model with a quantizer the test supplies: the name
+  the result takes, the bytes and provenance it stores, what is carried over,
+  the progress it reports, the working folder removed on success and failure,
+  and every refusal
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelManager.Tests/Store/ModelStoreQuantizeTests.cs
 
   Asking for Python and being told what is missing: the report a machine with
   no CPython produces, the resolution order, the two exceptions, and the test
@@ -3645,15 +3717,19 @@ EXPORT      ExportToOnnxAsync(name, ExportOptions { Route, Precision,
             Precision reads as ("fp32").
             Routes (ExportRoute): Auto (default) | PublisherOnnx (NO PYTHON,
             no bytes copied) | GenAiBuilder (onnxruntime_genai, torch,
-            transformers, onnx) | Optimum (optimum, onnx, torch, transformers).
-            Auto: ships .onnx -> PublisherOnnx; config.json names an
+            transformers, onnx) | Optimum (optimum, onnx, torch, transformers)
+            | MuseCocoMusic and MuseCocoText (torch, numpy, onnx; FP32 ONLY,
+            reduce afterwards). Auto: ships .onnx -> PublisherOnnx;
+            config.json names BertForAttributModel -> MuseCocoText; names an
             architecture the builder writes -> GenAiBuilder; else Optimum.
+            Auto never chooses MuseCocoMusic.
             AllowRemoteCode runs the PUBLISHER'S OWN Python; false by default.
             TMPDIR must be on a real file system for a converting route
 EXPORT STATUS   materializing source -> exporting -> collecting -> writing
             manifest -> success
 REDUCE      ReduceOnnxAsync(name, ReduceOptions { Mode, BlockSize, IsSymmetric,
-            AccuracyLevel, Preprocess, OutputName, Overwrite, Engine, Files },
+            AccuracyLevel, Preprocess, OutputName, Overwrite, Engine, Files,
+            NodesToExclude },
             IProgress<PullProgress>, ct) -> ReduceResult { Name, Files,
             EngineUsed, Mode, SourceBytes, ReducedBytes, Tool, ToolVersion;
             ToString() }. ReduceOptions.DefaultBlockSize is the block size an
@@ -3668,9 +3744,11 @@ REDUCE      ReduceOnnxAsync(name, ReduceOptions { Mode, BlockSize, IsSymmetric,
             DynamicInt8 -> Managed on a prepared graph, else Python;
             PreprocessOnly -> Python. Both engines write the same bytes.
             Files: null = every .onnx; naming some carries the rest through
-            unchanged. Only MatMul weights shrink, so a graph of embeddings
-            shrinks less. TMPDIR must be on a real file system, whichever
-            engine runs. A REDUCED MODEL IS AN APPROXIMATION
+            unchanged. NodesToExclude: exact node names kept at full
+            precision; not with PreprocessOnly. Only MatMul weights shrink,
+            so a graph of embeddings shrinks less. TMPDIR must be on a real
+            file system, whichever engine runs. A REDUCED MODEL IS AN
+            APPROXIMATION
 REDUCE NAME the source's tag plus the mode's: int8 | int8-weights |
             int4-weights | onnx-preprocessed. No tag of its own (or "latest")
             takes the mode's tag alone; a tag is never repeated, so :onnx
@@ -3789,34 +3867,3 @@ RUNNER      ResolvedModel.ModelPath is what an in-process GGUF runner loads;
 
 ================================================================================
 END OF AGENT-README
-
-
-MUSECOCO STAGING AND INDEPENDENT QUANTIZATION
-=============================================
-MUSECOCO-README.txt at the repository root documents the full workflow, source
-files, runtime bundle schema and consumer examples. ExportRoute.MuseCocoMusic
-exports the original music .pt checkpoint; ExportRoute.MuseCocoText exports the
-fine-tuned BertForAttributModel checkpoint with its 60 custom classifier heads.
-Auto recognizes that BERT architecture. Both routes require FP32 and use the
-embedded exporter with torch, numpy and onnx; no publisher Python code or native
-attention extension is executed. Explicitly call PythonSupport.Shutdown once at
-application shutdown, after all Python work has finished.
-
-After staging, ReduceOnnxAsync supports WeightOnlyInt8 and WeightOnlyInt4 for
-either model independently. Engine=Managed requires no Python. ModelRunner can
-execute the results without a package/project reference to ModelManager, and
-this library has no reference to ModelRunner.
-
-ReduceOptions.NodesToExclude exposes exact graph node names for both managed
-and Python quantizers. MuseCoco matrix names are checkpoint module names ending
-in .MatMul, for example decoder.output_projection.MatMul. Exclusions are copied,
-deduplicated and recorded in derived-bundle settings; they are invalid for
-PreprocessOnly. They apply to the graph presented to the quantizer, including any
-renaming a requested Python preprocessing step performs.
-
-Pass-through and reduction now discover external files through ONNX tensor
-metadata. A weights.bin name is valid; filenames need not resemble the graph.
-Shared weights retained by unselected graphs survive partial reduction. Paths
-are relative to their ONNX graph and must remain within the bundle. Collisions
-with newly emitted external files are renamed and tensor references updated.
-SourceBytes includes selected graphs and each referenced weight file once.

@@ -56,8 +56,16 @@ internal static class OnnxExport
     /// <summary>The modules the Optimum route imports, checked before the script runs.</summary>
     internal static readonly string[] OptimumModules = { "optimum", "onnx", "torch", "transformers" };
 
+    /// <summary>The modules both MuseCoco routes import, checked before the script runs.</summary>
     internal static readonly string[] MuseCocoModules = { "torch", "numpy", "onnx" };
 
+    /// <summary>
+    /// Whether a route is one of the two MuseCoco routes, which share one export script and one set of
+    /// required modules.
+    /// </summary>
+    /// <param name="route">The route to test.</param>
+    /// <returns><see langword="true"/> for <see cref="ExportRoute.MuseCocoMusic"/> and
+    /// <see cref="ExportRoute.MuseCocoText"/>; otherwise <see langword="false"/>.</returns>
     internal static bool IsMuseCoco(ExportRoute route)
         => route == ExportRoute.MuseCocoMusic || route == ExportRoute.MuseCocoText;
 
@@ -372,6 +380,7 @@ internal static class OnnxExport
     /// <param name="configJson">The text of the source's <c>config.json</c>, or <see langword="null"/>.</param>
     /// <returns>
     /// <see cref="ExportRoute.PublisherOnnx"/> when the bundle already ships a graph,
+    /// <see cref="ExportRoute.MuseCocoText"/> when its configuration names <c>BertForAttributModel</c>,
     /// <see cref="ExportRoute.GenAiBuilder"/> when its configuration names an architecture the builder
     /// writes, and <see cref="ExportRoute.Optimum"/> otherwise.
     /// </returns>

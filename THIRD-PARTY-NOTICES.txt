@@ -102,8 +102,8 @@ HOW THE BSD-3-CLAUSE NOTICE REQUIREMENT IS SATISFIED
     reproduce the copyright notice, the list of conditions and the disclaimer
     "in the documentation and/or other materials provided with the
     distribution". This file is one of those materials: both library projects
-    pack THIRD-PARTY-NOTICES.txt into the NuGet package beside LICENSE and
-    README.md, so the full texts in entries 5 and 7 travel with every copy of
+    pack THIRD-PARTY-NOTICES.txt into the NuGet package beside README.md, so
+    the full texts in entries 5 and 7 travel with every copy of
     the assembly that carries the ported code. The forty-one source files
     ported from Go (entry 5) also keep their upstream copyright header.
 

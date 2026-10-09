@@ -121,7 +121,6 @@
     <None Include="AGENT-README.txt" Pack="true" PackagePath="" />
     <None Include="..\..\MUSECOCO-README.txt" Pack="true" PackagePath="" />
     <None Include="..\..\THIRD-PARTY-NOTICES.txt" Pack="true" PackagePath="" />
-    <None Include="..\..\LICENSE" Pack="true" PackagePath="" />
   </ItemGroup>
 
 </Project>

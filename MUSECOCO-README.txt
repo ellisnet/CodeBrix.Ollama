@@ -14,8 +14,8 @@ generation. Direct attributes work without loading BERT.
 ModelManager stages the original FP32 checkpoints and can separately reduce
 either exported graph to INT8 or INT4. Every precision runs in managed .NET 10.
 There is no reference between the two libraries, and ModelRunner neither loads
-Python nor uses an ONNX native runtime. Its existing llama.cpp libraries are
-not involved in MuseCoco inference. Training and ABC output are not implemented.
+Python nor uses an ONNX native runtime. Its native GGUF engine is not
+involved in MuseCoco inference. Training and ABC output are not implemented.
 
 The tested checkpoints are XinXuNLPer/MuseCoco_attribute2music and
 XinXuNLPer/MuseCoco_text2attribute on Hugging Face. These are the music checkpoint
@@ -194,7 +194,7 @@ required. Optional progress still reports generated token counts.
 
 EXPERIMENTAL: CONTINUE WITH RECENT MUSICAL CONTEXT
 ------------------------------------------------
-This path is EXPERIMENTAL. It enables MusicGeneration integration and listening
+This path is EXPERIMENTAL. It is provided for integration and listening
 tests; coherent transitions and several-minute musical quality are not established.
 It uses the same staged model and requires no retraining or re-export.
 

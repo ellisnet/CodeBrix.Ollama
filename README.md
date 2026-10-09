@@ -95,7 +95,8 @@ that road works on a platform with no native library in the package at all.
 * Exporting a bundle to ONNX and keeping the result in the same store as a *derived bundle* that
   records what made it and from what: the graphs a publisher already ships are passed through with
   no conversion and no Python at all, and a checkpoint is converted by the ONNX Runtime GenAI model
-  builder or by Hugging Face Optimum, running in a CPython the machine already has
+  builder, by Hugging Face Optimum or, for MuseCoco, by this library's own exporter, running in a
+  CPython the machine already has
 * Converting a checkpoint into a GGUF model with **nothing installed at all**: the weights a
   publisher ships - `safetensors` or PyTorch containers, one file or many - are read by this
   library's own managed code, mapped on to the tensor names the native inference engine expects
@@ -136,8 +137,8 @@ that road works on a platform with no native library in the package at all.
   takes a `CancellationToken` as its last parameter
 
 Not in this package: running a model, rendering chat templates, pushing to a registry,
-safetensors layers in an Ollama manifest, exporting a checkpoint to ONNX without the publisher's
-own tooling, deciding anything about a licence, or any HTTP server.
+safetensors layers in an Ollama manifest, exporting a checkpoint to ONNX without Python,
+deciding anything about a licence, or any HTTP server.
 
 ## CodeBrix.Ollama.ModelRunner supports:
 

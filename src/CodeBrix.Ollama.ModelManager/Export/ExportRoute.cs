@@ -7,9 +7,12 @@ public enum ExportRoute
 {
     /// <summary>
     /// Choose a route from what the model actually holds: a bundle that already ships <c>.onnx</c> files
-    /// takes <see cref="PublisherOnnx"/>, a checkpoint whose <c>config.json</c> names an architecture the
-    /// ONNX Runtime GenAI model builder writes takes <see cref="GenAiBuilder"/>, and anything else takes
-    /// <see cref="Optimum"/>. This is the default.
+    /// takes <see cref="PublisherOnnx"/>, a checkpoint whose <c>config.json</c> names the MuseCoco
+    /// <c>BertForAttributModel</c> architecture takes <see cref="MuseCocoText"/>, a checkpoint whose
+    /// <c>config.json</c> names an architecture the ONNX Runtime GenAI model builder writes takes
+    /// <see cref="GenAiBuilder"/>, and anything else takes <see cref="Optimum"/>. The MuseCoco music
+    /// checkpoint is never chosen automatically; ask for <see cref="MuseCocoMusic"/> by name. This is the
+    /// default.
     /// </summary>
     Auto = 0,
 

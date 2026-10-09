@@ -12,12 +12,12 @@ server to start, no daemon to talk to, no Ollama installation to find, no HTTP
 anywhere, and no NuGet dependency of any kind.
 
 IT HAS TWO ROADS THROUGH IT, and which one you take is decided by the file you
-have. A GGUF file runs over a llama.cpp engine this repository builds itself
-and ships inside the package; an ONNX graph runs on an interpreter written in
-managed code inside the same assembly, which needs nothing installed at all and
-runs wherever .NET runs. The GGUF road is everything from here to QUANTIZING A
-GGUF MODEL below; the ONNX road is the one section RUNNING ONNX MODELS. They
-share the package and nothing else.
+have. A GGUF file runs over a native inference engine this repository builds
+itself and ships inside the package; an ONNX graph runs on an interpreter
+written in managed code inside the same assembly, which needs nothing installed
+at all and runs wherever .NET runs. The GGUF road is everything from here to
+QUANTIZING A GGUF MODEL below; the ONNX road is the one section RUNNING ONNX
+MODELS. They share the package and nothing else.
 
 What it does with a GGUF file, through one interface:
 
@@ -41,8 +41,10 @@ And what it does with an ONNX graph, on managed code with NOTHING installed:
 
   6. RUNNING AN ONNX GRAPH -- tensors in by name, tensors out by name, with
      the graph's own metadata; a driver that generates MIDI music and streams
-     the events as it writes them; and a driver that generates TEXT through
-     the same IRunningModel contract. See RUNNING ONNX MODELS below.
+     the events as it writes them; a driver that generates TEXT through the
+     same IRunningModel contract; and the MuseCoco drivers, which turn musical
+     attributes, or a text prompt through them, into MIDI. See RUNNING ONNX
+     MODELS below.
 
 Everything that touches the engine is async and takes a CancellationToken
 last, with a default. The template engines, the parsers and the schema-to-
@@ -187,7 +189,8 @@ hands back:
     LoRA ADAPTERS                   applying and replacing them
     QUANTIZING A GGUF MODEL         a smaller file, with nothing installed
     RUNNING ONNX MODELS             the other road: a managed interpreter,
-                                    a MIDI driver and a text driver
+                                    a MIDI driver, a text driver and the
+                                    MuseCoco drivers
     THREADS: HOW MANY ARE USED, AND HOW TO CONTROL IT
                                     both roads: the defaults, Threads,
                                     BatchThreads and MaxThreads
@@ -574,7 +577,7 @@ it behaves under Ollama:
     float FrequencyPenalty = 0.0f
     uint? Seed            = null   null -> a fresh seed per request
 
-THE SAMPLER ORDER IS llama.cpp's, and it is not a detail: penalties first,
+THE SAMPLER ORDER IS THE ENGINE'S OWN, and it is not a detail: penalties first,
 then the grammar, then top-k, typical-p, top-p and min-p, then temperature,
 then the draw. A chain in any other order produces different text for the same
 seed.
@@ -599,8 +602,8 @@ requests. A fixed seed does not promise identical output across these runners:
 their random generators and inference implementations differ.
 
 PENALTIES SEE ONLY WHAT THIS REQUEST GENERATED, not the prompt: RepeatLastN is
-a window over the generated tokens. That is a deliberate deviation from
-llama.cpp's command-line front end, which feeds it the prompt as well.
+a window over the generated tokens. That is a deliberate deviation from the
+engine's own command-line front end, which feeds it the prompt as well.
 
 FINISH REASONS
 
@@ -889,10 +892,10 @@ and no validation step, and the output parses the first time.
     ChatResponse reply = await model.ChatToEndAsync(request);
     using JsonDocument document = JsonDocument.Parse(reply.Message.Content);
 
-ResponseFormat.Json, and GenerationOptions.JsonMode, use llama.cpp's own
+ResponseFormat.Json, and GenerationOptions.JsonMode, use the engine's own
 json.gbnf, which accepts any JSON object.
 
-THE SCHEMA CONVERTER is a port of llama.cpp's, rule for rule, and is public in
+THE SCHEMA CONVERTER is a port of the engine's, rule for rule, and is public in
 its own right as JsonSchemaGrammar -- see UTILITIES. It covers $ref within the
 document and the $defs/definitions it points into, oneOf, anyOf, allOf, enum,
 const, strings with minLength, maxLength, pattern and the date, time, date-time
@@ -1148,11 +1151,14 @@ ARE USED, AND HOW TO CONTROL IT, below, is the whole of it for both roads: the
 rule, why this road's default differs from the GGUF road's, the precedence,
 the examples and how to measure your own machine.
 
-    THE THREE ENTRY POINTS        which to use, and when
+    THE ENTRY POINTS              which to use, and when
     OnnxModel                     the raw surface: tensors in, tensors out
     MidiGenerationModel           MIDI music, streamed as it is written
     OnnxCausalLmModel             text, through this package's own
                                   IRunningModel contract
+    MuseCocoMusicModel AND
+    MuseCocoTextModel             MIDI from musical attributes, and the
+                                  optional text-to-attributes model
     LOADING BY PATH               and the two-package example
     STREAMING MIDI TO A PLAYER    the consumer-side loop, in full
     WHAT IS SUPPORTED AND WHAT IS REFUSED
@@ -1176,6 +1182,12 @@ WHICH ENTRY POINT TO USE
                          it tokenizes, prefills, decodes, samples and stops,
                          through the same IRunningModel contract the rest of
                          this package uses.
+    MuseCocoMusicModel   The bundle is a staged MuseCoco music model. Use it
+                         to generate MIDI from musical attributes, as a whole
+                         score or streamed bar by bar.
+    MuseCocoTextModel    The bundle is MuseCoco's staged attribute BERT. Use
+                         it, optionally, to turn a text prompt into the
+                         attributes MuseCocoMusicModel takes.
 
 Each driver decides what it can do from what the BUNDLE says about itself, and
 refuses by name what it cannot. Nothing about any particular publisher's model
@@ -1589,6 +1601,95 @@ anything else. A bundle carrying a tokenizer of another kind -- a SentencePiece
 model with no byte-level pair beside it, a single tokenizer.json, or none at
 all -- is refused by the name of what was found. So is an added token asking
 for a matching rule this library does not implement.
+
+MuseCocoMusicModel AND MuseCocoTextModel -- MUSIC FROM ATTRIBUTES
+-----------------------------------------------------------------
+MUSECOCO-README.txt at the repository root is the complete consumer guide and
+the versioned bundle contract (codebrix.musecoco.v1). The public entry points
+are MuseCocoMusicModel and MuseCocoTextModel. Both load with
+LoadFromDirectoryAsync (a directory) or LoadFromFilesAsync (a map of logical
+bundle name to path) and run in managed .NET, without Python, without
+CodeBrix.Ollama.ModelManager and without an ONNX runtime installed. The native
+GGUF engine is not loaded on this path.
+
+MuseCocoTextModel.PredictAsync returns a MusicAttributePrediction: immutable
+MusicAttributes, the classifier probabilities, the WordPiece ids and a
+truncation flag. MuseCocoMusicModel.GenerateAsync takes those attributes (or
+attributes made from its Schema), MuseCocoGenerationOptions, optional
+token-count progress and a CancellationToken, and returns a MidiScore, the
+generated ids, the effective seed and the prompt and generation timings.
+MidiFile.WriteAsync saves the score. The text model is optional: a caller can
+inspect or change attributes before passing them to music generation.
+
+MuseCocoMusicModel.GenerateStreamingAsync takes the same arguments and returns
+IAsyncEnumerable<MidiEvent>. It releases completed bars while later bars are
+being generated, applying incomplete-position cleanup to the final bar. Events
+use 480 ticks per quarter note and arrive in timestamp order; play strictly
+before each HorizonTicks (equal to Tick) until enumeration ends, then drain the
+player queue. Channel and track assignments stay fixed as instruments first
+become playable, with percussion on channel 9. Programs precede first notes at
+those notes' ticks. These assignments can differ from GenerateAsync's
+completed-score layout. Collect the events into new MidiScore(480, events) to
+save the streamed piece.
+
+Each model can independently be FP32, weight-only INT8 or weight-only INT4.
+Quantizing belongs in the application that stages the models; the runtime
+bundle is data only. The two packages do not reference one another.
+
+One request per instance; cancellation allows reuse, and disposal during a
+request is refused. Recurrent state starts empty on every music request. Set
+Seed = null for fresh randomness, or a fixed nonnegative seed other than
+0xFFFFFFFF; negative seeds are rejected. The defaults are 2560 maximum tokens
+and 512 minimum tokens, not MIDI notes; lower both for short excerpts. An event
+enumeration owns its instance until it completes or is disposed; breaking an
+await foreach stops generation, and cancellation preserves events already
+yielded. The text model truncates to 512 prompt tokens and reports that it did.
+
+Both music APIs filter invalid REMIGEN2 transitions before top-k/top-p
+sampling, including when the minimum token count blocks EOS. DecodeTokens
+stays strict for malformed saved tokens. The filtering can change seeded
+output across builds. MinimumTokens = 0 allows natural endings; forcing a
+longer piece guarantees no musical quality beyond valid event structure. Token
+counts are not durations.
+
+EXPERIMENTAL: CONTINUATION. Create a context with
+music.CreateContinuation(contextBars: 4), then repeatedly enumerate
+music.GenerateContinuationStreamingAsync(context, attributes, options,
+cancellationToken: cancellationToken). The first call generates the initial
+section. Later calls replay up to the last four completed bars after the
+attribute prefix, using fresh recurrent state, and emit ONLY new music.
+Musical transitions and long-form quality are experimental and still need
+listening tests.
+
+Reuse the SAME context and loaded model for one piece. Events across calls
+share absolute ticks (480 PPQ), stable channels and one tempo and signature
+history; do not offset or replay earlier events. Notes may sustain across
+section boundaries. Finish enumerating each section before requesting the
+next. The final bar receives the normal incomplete-position cleanup and is
+closed before the next section begins. At completed section boundaries,
+context.NextTick is a safe exclusive playback horizon. Drain the final playback
+queue only when ending the whole continuation.
+
+MaximumTokens, MinimumTokens and progress count NEW tokens. The replayed
+ContextTokenCount also consumes the model's position capacity: MaximumTokens
+must not exceed music.MaximumGenerationTokens - context.ContextTokenCount.
+Retention is bounded by ContextBars (1 to 16); it does not accumulate the whole
+song. Each request still has an inference and prompt cost and can underrun
+playback without buffering on the consumer's side. Use MinimumTokens = 0 for
+natural endings. EOS may arrive immediately; stop or revise the request when
+LastGeneratedTokenCount is zero or NextTick does not advance. After
+cancellation, a failure or early disposal, that context is invalid; create a
+fresh one. The model stays reusable. All generation methods share the busy
+gate. MUSECOCO-README.txt includes an integration example and the experimental
+limitations.
+
+OPERATORS THESE MODELS USE: FP32 Elu, Erf, Tanh and standard
+LayerNormalization (opset 17 and later, optional bias and statistics outputs,
+FP32 stash) are among the operators the interpreter implements. The matrix
+path shares weight panels across activation rows for FP32, INT4 and INT8 on
+AVX2/FMA processors; the portable vector and scalar paths remain. The MuseCoco
+driver reuses two private recurrent-state buffers; OnnxModel Run/RunAsync
+results keep their independent ownership contract.
 
 LOADING BY PATH, AND THE TWO PACKAGES TOGETHER
 -----------------------------------------------
@@ -2716,10 +2817,10 @@ JsonSchemaGrammar
                              out IReadOnlyList<string> warnings)
 
 The schema-to-grammar converter described under STRUCTURED OUTPUT, usable on
-its own. JsonGrammar is llama.cpp's grammars/json.gbnf verbatim. The `warnings`
-overloads report what the converter had to widen -- a pattern it cannot
-express exactly, for instance -- while still producing a usable grammar; a
-schema it converts exactly produces none.
+its own. JsonGrammar is the engine's grammars/json.gbnf verbatim. The
+`warnings` overloads report what the converter had to widen -- a pattern it
+cannot express exactly, for instance -- while still producing a usable
+grammar; a schema it converts exactly produces none.
 
     string grammar = JsonSchemaGrammar.FromSchema(schemaText, out var notes);
     foreach (string note in notes) Console.Error.WriteLine(note);
@@ -2789,7 +2890,7 @@ THE NATIVE LIBRARY
 ==================
 NAME: codebrix_llama -- libcodebrix_llama.dylib on macOS,
 libcodebrix_llama.so on Linux, codebrix_llama.dll on Windows. It is the
-unchanged llama.cpp C API plus two identity functions, built from vendored
+engine's unchanged C API plus two identity functions, built from vendored
 source by this repository and committed; nothing downloads or compiles
 anything at run time.
 
@@ -2820,7 +2921,7 @@ path it tried, one per line, and then says:
 
 That list of paths is the answer to nearly every packaging question.
 
-THE LIBRARY IS CHECKED BEFORE IT IS USED. It reports the upstream llama.cpp
+THE LIBRARY IS CHECKED BEFORE IT IS USED. It reports the upstream engine
 commit it was built from and the runtime identifier it was built for, and both
 must agree with what this binding expects; a mismatch is a
 NativeLibraryException naming the file, because a library built from
@@ -3293,11 +3394,15 @@ Do NOT reach for this package to:
   - SPECULATIVE DECODING with a draft model, or the multi-token-prediction
     layers some models carry. LoadMtpLayers exists, costs memory and is
     reserved for that path; nothing uses it in this version.
-  - QUANTIZE, CONVERT OR WRITE a model file. The engine can do it; none of it
-    is exposed here. No safetensors, no GGUF writing, no re-quantization.
-    Nothing here writes an ONNX graph either: the ONNX road READS a graph and
-    runs it, and making one smaller is the separate
-    CodeBrix.Ollama.ModelManager package's work.
+  - CONVERT OR WRITE a model file beyond QuantizeAsync. QuantizeAsync
+    rewrites a GGUF file that already exists at another type -- and, with
+    QuantizeOptions.AllowRequantize, one whose weights are already quantized
+    -- but the engine's other quantizer switches (an importance matrix,
+    per-tensor and per-layer type overrides and the rest) are not exposed, and
+    there is no safetensors reading and no other GGUF writing. Nothing here
+    writes an ONNX graph either: the ONNX road READS a graph and runs it, and
+    making one smaller is the separate CodeBrix.Ollama.ModelManager package's
+    work.
   - TRAIN, FINE-TUNE OR RUN AN ONNX GRAPH ON AN ACCELERATOR. The managed ONNX
     interpreter is CPU-only by design, because that is what runs everywhere
     with nothing installed.
@@ -3318,8 +3423,9 @@ This package IS for: loading a GGUF file into your own process; completing a
 prompt; holding a conversation through the model's own chat template, with
 reasoning and tool calls separated out for you; embedding text; constraining
 output to a grammar or a JSON schema; tokenizing; reading everything the engine
-knows about a model file; and -- on the other road, with nothing installed at
-all -- running an ONNX graph, generating streamed MIDI music from a MIDI model,
+knows about a model file; rewriting a GGUF file at a smaller quantization; and
+-- on the other road, with nothing installed at all -- running an ONNX graph,
+generating streamed MIDI music from a MIDI model or from MuseCoco attributes,
 and generating text from an ONNX text bundle.
 
 
@@ -3470,7 +3576,7 @@ Feature-to-test-file map:
     https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelRunner.Tests/Parsing/ToolCallFormatTests.cs
     https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelRunner.Tests/Parsing/ThinkingTagsTests.cs
 
-  The JSON-schema-to-grammar converter, against llama.cpp's own case table
+  The JSON-schema-to-grammar converter, against the engine's own case table
     https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelRunner.Tests/Grammar/JsonSchemaGrammarTests.cs
 
   Option mapping and validation, without a model
@@ -3478,6 +3584,11 @@ Feature-to-test-file map:
 
   Finding and checking the native library
     https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelRunner.Tests/Native/NativeLibraryLoaderTests.cs
+
+  Quantizing a GGUF file: the engine's own tool's bytes for each type, the
+  option defaults, the thread count that changes nothing written, requantizing
+  only when allowed, and no partial file left behind when the engine refuses
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelRunner.Tests/Engine/ModelQuantizerTests.cs
 
   ON THE ONNX ROAD -- loading a graph, the three load forms, every refusal,
   and running one against recorded answers
@@ -3491,6 +3602,14 @@ Feature-to-test-file map:
 
   Generating text from an ONNX bundle, including every refusal by name
     https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelRunner.Tests/Drivers/CausalLm/OnnxCausalLmModelTests.cs
+
+  MuseCoco: loading and generating, the REMIGEN2 grammar filter, streaming
+  bar by bar, the experimental continuation, and the bundle integrity checks
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelRunner.Tests/Drivers/MuseCoco/MuseCocoModelTests.cs
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelRunner.Tests/Drivers/MuseCoco/MuseCocoGrammarTests.cs
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelRunner.Tests/Drivers/MuseCoco/MuseCocoStreamingTests.cs
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelRunner.Tests/Drivers/MuseCoco/MuseCocoContinuationTests.cs
+    https://github.com/ellisnet/CodeBrix.Ollama/blob/main/tests/CodeBrix.Ollama.ModelRunner.Tests/Drivers/MuseCoco/MuseCocoIntegrityTests.cs
 
   Both packages used together, which is the only place they meet
     https://github.com/ellisnet/CodeBrix.Ollama/tree/main/tests/CodeBrix.Ollama.EndToEnd.Tests
@@ -3555,8 +3674,9 @@ ERRORS      ModelRunnerException: NativeLibraryException, ModelLoadException,
             exception and is not under that base type
 ONNX        the other road, with nothing installed and no native library:
             OnnxModel (tensors in, tensors out), MidiGenerationModel (streamed
-            MIDI events) and OnnxCausalLmModel (text, as IRunningModel). See
-            RUNNING ONNX MODELS, which has a quick reference of its own
+            MIDI events), OnnxCausalLmModel (text, as IRunningModel) and
+            MuseCocoMusicModel / MuseCocoTextModel (MIDI from attributes).
+            See RUNNING ONNX MODELS, which has a quick reference of its own
 MANAGER     CodeBrix.Ollama.ModelManager is a separate package, with its own
             AGENT-README, that turns a model NAME into the file path this
             package loads. INSTALL BOTH AT THE SAME VERSION.
@@ -3564,83 +3684,3 @@ MANAGER     CodeBrix.Ollama.ModelManager is a separate package, with its own
 
 ================================================================================
 END OF AGENT-README
-
-
-MUSECOCO MUSIC AND OPTIONAL ATTRIBUTE BERT
-=========================================
-See MUSECOCO-README.txt for the complete consumer guide and versioned bundle
-contract. The public entry points are MuseCocoMusicModel and MuseCocoTextModel;
-both load from a directory or logical-name-to-path map and execute in managed
-.NET without Python, ModelManager or an ONNX Runtime installation.
-
-MuseCocoTextModel.PredictAsync returns MusicAttributePrediction: immutable
-MusicAttributes, classifier probabilities, WordPiece IDs and a truncation flag.
-MuseCocoMusicModel.GenerateAsync accepts those attributes (or Schema-created
-attributes), MuseCocoGenerationOptions, optional token-count progress and a
-CancellationToken. It returns a MidiScore, generated IDs, effective seed and
-prompt/generation timings. MidiFile.WriteAsync saves the score. BERT is optional;
-callers can inspect or change attributes before passing them to music generation.
-
-MuseCocoMusicModel.GenerateStreamingAsync takes the same arguments and returns
-IAsyncEnumerable<MidiEvent>. It releases completed bars while later bars are being
-generated, applying incomplete-position cleanup to the final bar. Events use 480
-ticks per quarter note and arrive in timestamp order; play strictly before each
-HorizonTicks (equal to Tick) until enumeration ends, then drain the player queue.
-Channel/track assignments stay fixed as instruments first become playable, with
-percussion on channel 9. Programs precede first notes at those notes' ticks.
-These assignments can differ from GenerateAsync's completed-score layout.
-Collect the events into new MidiScore(480, events) to save the streamed piece.
-
-Each model can independently be FP32, weight-only INT8 or weight-only INT4.
-Quantization belongs in the staging application. The runtime bundle is data-only.
-The libraries do not reference one another. Existing llama.cpp assets are not
-loaded for this managed ONNX path.
-
-One request per instance; cancellation allows reuse, and disposal during a
-request is refused. Recurrent state starts empty on every music request. Set
-Seed=null for fresh randomness, or a fixed nonnegative seed other than
-0xFFFFFFFF; negative seeds are rejected. Defaults are 2560 maximum tokens and
-512 minimum tokens, not MIDI notes. Lower both for short excerpts. An event
-enumeration owns its instance until it completes or is disposed; breaking await
-foreach stops generation, and cancellation preserves events already yielded.
-BERT truncates to 512 prompt tokens and reports that fact.
-
-Both music APIs filter invalid REMIGEN2 transitions before top-k/top-p sampling,
-including when the minimum token count blocks EOS. DecodeTokens remains strict
-for malformed saved tokens. Filtering can change seeded output across builds.
-MinimumTokens=0 allows natural endings; forcing a longer piece guarantees no
-musical quality beyond valid event structure. Token counts are not durations.
-
-EXPERIMENTAL MUSECOCO CONTINUATION
-Create a context with music.CreateContinuation(contextBars: 4), then repeatedly
-enumerate music.GenerateContinuationStreamingAsync(context, attributes, options,
-cancellationToken: cancellationToken). The first call generates the initial
-section. Later calls replay up to the last four completed bars after the attribute
-prefix, using fresh recurrent state, and emit ONLY new music. Musical transitions
-and long-form quality are experimental and still need listening tests.
-
-Reuse the SAME context and loaded model for one piece. Events across calls share
-absolute ticks (480 PPQ), stable channels and one tempo/signature history; do not
-offset or replay earlier events. Notes may sustain across section boundaries.
-Finish enumerating each section before requesting the next. The final bar receives
-normal incomplete-position cleanup and is closed before the next section begins.
-At completed section boundaries, context.NextTick is a safe exclusive playback
-horizon. Only drain the final playback queue when ending the whole continuation.
-
-Options.MaximumTokens/MinimumTokens and progress count NEW tokens. Replayed
-ContextTokenCount also consumes the model's position capacity: MaximumTokens must
-not exceed music.MaximumGenerationTokens - context.ContextTokenCount. Retention is
-bounded by ContextBars (1..16); it does not accumulate the whole song. Each request
-still has inference/prompt cost and can underrun playback without consumer buffering.
-Use MinimumTokens=0 for natural endings. EOS may arrive immediately; stop or revise
-the request when LastGeneratedTokenCount is zero, or NextTick does not advance.
-After cancellation, failure or early disposal, that context is invalid; create a
-fresh one. The model remains reusable. All generation methods share the busy gate.
-MUSECOCO-README.txt includes an integration example and experimental limitations.
-
-General ONNX additions used by these models: FP32 Elu, Erf, Tanh and standard
-LayerNormalization (opset 17+, optional bias/statistics, FP32 stash). The matrix
-path shares weight panels across activation rows for FP32, INT4 and INT8 on
-AVX2/FMA processors. Portable vector/scalar fallbacks remain supported. The
-MuseCoco driver reuses two private recurrent-state buffers; public OnnxModel
-Run/RunAsync results retain their existing independent ownership contract.
