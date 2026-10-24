@@ -41,10 +41,17 @@ internal sealed class OnnxModelLocation
     /// <summary>A graph file, with any side file beside it.</summary>
     /// <param name="modelPath">The graph file's path.</param>
     /// <returns>The location.</returns>
+    /// <remarks>
+    /// The graph's folder is treated as a bundle holding only the graph, so a side file is confined to that
+    /// folder and its sub-folders exactly as the directory form confines it to the bundle: an absolute
+    /// location, a drive-qualified one, or a <c>../</c> that climbs out of the folder is refused rather than
+    /// followed. A graph file is untrusted input, and its locations would otherwise read any file the process
+    /// can open into tensor data.
+    /// </remarks>
     internal static OnnxModelLocation ForFile(string modelPath)
     {
         string full = Path.GetFullPath(modelPath);
-        return new OnnxModelLocation(full, Path.GetDirectoryName(full), null);
+        return new OnnxModelLocation(full, Path.GetDirectoryName(full), null, Path.GetFileName(full));
     }
 
     /// <summary>A graph file inside a bundle directory, with its side files in the same directory.</summary>
@@ -118,8 +125,7 @@ internal sealed class OnnxModelLocation
             return _files.TryGetValue(key, out string path) ? path : null;
         }
 
-        if (Path.IsPathRooted(key)) return key;
-        return string.IsNullOrEmpty(_directory) ? key : Path.Combine(_directory, key);
+        return Path.Combine(_directory, key);
     }
 
     private static string Normalize(string name)

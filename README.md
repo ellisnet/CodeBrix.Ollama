@@ -150,7 +150,9 @@ deciding anything about a licence, or any HTTP server.
 * Chat through the model's own chat template (`ChatAsync` / `ChatToEndAsync`), in three dialects:
   the **Jinja** template embedded in the GGUF file, an **Ollama** Go template (the `TEMPLATE` text
   ModelManager resolves for you), or the engine's own built-in **native** templates - `Auto`
-  picks the right one. `RenderChatPromptAsync` returns the rendered prompt without generating
+  picks the right one. `RenderChatPromptAsync` returns the rendered prompt without generating.
+  Every render is held to `TemplateLimits` - steps, output, string and collection size, nesting
+  depth and time - so a hostile template is refused instead of hanging or crashing the process
 * Reasoning separated from the answer, so a thinking model's `<think>` block arrives as
   `ThinkingDelta` and never contaminates the content, with a per-request `Think` switch
 * Tool calling: hand over `ToolDefinition`s and read back `ToolCall`s with their arguments as

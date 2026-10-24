@@ -7,7 +7,11 @@ namespace CodeBrix.Ollama.ModelRunner;
 /// </summary>
 public sealed class NativeRuntimeInfo
 {
-    /// <summary>The full path the library was loaded from.</summary>
+    /// <summary>
+    /// The full path the library was loaded from, or "codebrix_llama (operating-system search path, not
+    /// hash-checked)" when <see cref="ModelRunner.AllowSystemNativeLibrary"/> was set and the package's own
+    /// copy was not found.
+    /// </summary>
     public string LoadedPath { get; init; }
 
     /// <summary>The runtime identifier the library was built for, as the library reports it, for example "osx-x64".</summary>

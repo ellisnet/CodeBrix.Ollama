@@ -35,4 +35,25 @@ public sealed class OnnxModelLocationTests
         OnnxModelLocation model = OnnxModelLocation.ForDirectory(Path.GetTempPath(), "graphs/model.onnx");
         Assert.Throws<ModelLoadException>(() => model.Resolve(location));
     }
+
+    [Theory]
+    [InlineData("../outside.bin")]
+    [InlineData("sub/../../outside.bin")]
+    [InlineData("/outside.bin")]
+    [InlineData("C:\\outside.bin")]
+    [InlineData("C:outside.bin")]
+    public void Single_file_external_paths_cannot_escape_the_graph_folder(string location)
+    {
+        OnnxModelLocation model = OnnxModelLocation.ForFile(Path.Combine(Path.GetTempPath(), "graphs", "model.onnx"));
+        Assert.Throws<ModelLoadException>(() => model.Resolve(location));
+    }
+
+    [Fact]
+    public void Single_file_external_paths_resolve_inside_the_graph_folder()
+    {
+        string folder = Path.Combine(Path.GetTempPath(), "graphs");
+        OnnxModelLocation model = OnnxModelLocation.ForFile(Path.Combine(folder, "model.onnx"));
+        Assert.Equal(Path.Combine(folder, "model.onnx.data"), model.Resolve("model.onnx.data"));
+        Assert.Equal(Path.Combine(folder, "weights", "a.bin"), model.Resolve("./weights/x/../a.bin"));
+    }
 }

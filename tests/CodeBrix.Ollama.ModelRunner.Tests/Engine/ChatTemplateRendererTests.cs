@@ -39,7 +39,7 @@ public sealed class ChatTemplateRendererTests
         request.Messages.Add(new ChatMessage(ChatRole.User, "hello"));
 
         //Act
-        string prompt = renderer.Render(request);
+        string prompt = renderer.Render(request, TestContext.Current.CancellationToken);
 
         //Assert
         prompt.Should().Be(
@@ -58,7 +58,7 @@ public sealed class ChatTemplateRendererTests
         request.Messages.Add(new ChatMessage(ChatRole.User, "hello"));
 
         //Act
-        string prompt = renderer.Render(request);
+        string prompt = renderer.Render(request, TestContext.Current.CancellationToken);
 
         //Assert
         prompt.Should().Be("OPTIONS:hello");
@@ -76,7 +76,7 @@ public sealed class ChatTemplateRendererTests
         request.Messages.Add(new ChatMessage(ChatRole.User, "hello"));
 
         //Act
-        string prompt = renderer.Render(request);
+        string prompt = renderer.Render(request, TestContext.Current.CancellationToken);
 
         //Assert
         prompt.Should().Be("<s>hello");
@@ -95,7 +95,7 @@ public sealed class ChatTemplateRendererTests
         request.Tools.Add(new ToolDefinition { Name = "get_weather" });
 
         //Act
-        string prompt = renderer.Render(request);
+        string prompt = renderer.Render(request, TestContext.Current.CancellationToken);
 
         //Assert
         prompt.Should().Be("<tool>get_weather</tool>[user]weather?");
@@ -132,7 +132,7 @@ public sealed class ChatTemplateRendererTests
         request.Messages.Add(new ChatMessage(ChatRole.User, "hello"));
 
         //Act
-        string prompt = renderer.Render(request);
+        string prompt = renderer.Render(request, TestContext.Current.CancellationToken);
 
         //Assert
         prompt.Should().Be(
@@ -155,8 +155,8 @@ public sealed class ChatTemplateRendererTests
         request.Messages.Add(new ChatMessage(ChatRole.Assistant, "hi there") { ToolCalls = null });
 
         //Act
-        string byOllama = ollama.Render(request);
-        string byJinja = jinja.Render(request);
+        string byOllama = ollama.Render(request, TestContext.Current.CancellationToken);
+        string byJinja = jinja.Render(request, TestContext.Current.CancellationToken);
 
         //Assert
         byOllama.Should().Contain("hi there");
@@ -184,8 +184,8 @@ public sealed class ChatTemplateRendererTests
         request.Messages.Add(assistant);
 
         //Act
-        string byOllama = ollama.Render(request);
-        string byJinja = jinja.Render(request);
+        string byOllama = ollama.Render(request, TestContext.Current.CancellationToken);
+        string byJinja = jinja.Render(request, TestContext.Current.CancellationToken);
 
         //Assert
         byOllama.Should().Contain("get_weather");

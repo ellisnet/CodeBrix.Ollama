@@ -59,7 +59,8 @@ public interface IModelStore
     /// records where the files came from, the revision the listing resolved to and whatever the source
     /// states about the licence. A file already in the store costs no request. A file the source states
     /// a SHA-256 for is verified against it; a file it states only an MD5 for is verified against that;
-    /// and the store computes the SHA-256 of every file in any case, so a second pull verifies against
+    /// a file it states a git blob identifier and no SHA-256 for - every small file of a Hugging Face
+    /// repository - is verified against that identifier; and the store computes the SHA-256 of every file in any case, so a second pull verifies against
     /// the first.
     /// </para>
     /// </remarks>
@@ -71,7 +72,7 @@ public interface IModelStore
     /// <param name="cancellationToken">A token to cancel the operation; partial downloads are kept for resumption.</param>
     /// <returns>
     /// A stream of progress reports: "listing &lt;repository&gt;", then "pulling &lt;path&gt;" for each
-    /// file with its byte counts, then "verifying sha256 digest", "writing manifest" and "success".
+    /// file with its byte counts, then "checking stored files", "writing manifest" and "success".
     /// </returns>
     /// <exception cref="ArgumentException">
     /// A Hugging Face pull was asked for under a name that is not a Hugging Face name and
@@ -190,7 +191,16 @@ public interface IModelStore
     /// <exception cref="PythonModuleNotInstalledException">
     /// A converting route was chosen and one of the modules it needs is not installed.
     /// </exception>
-    /// <exception cref="PythonScriptException">The tool refused the model, or failed while writing it.</exception>
+    /// <exception cref="PythonModuleTooOldException">
+    /// A converting route was chosen and one of the modules it needs is older than the lowest version
+    /// this library runs.
+    /// </exception>
+    /// <exception cref="PythonScriptException">
+    /// The tool refused the model, or failed while writing it; or, for <see cref="ExportRoute.GenAiBuilder"/>
+    /// and <see cref="ExportRoute.Optimum"/>, the bundle's <c>tokenizer_config.json</c>,
+    /// <c>chat_template.json</c> or <c>processor_config.json</c> names a chat template with a name that is
+    /// not a plain file name, which is refused before any Python runs.
+    /// </exception>
     /// <exception cref="ModelManagerException">
     /// The output name is taken and <see cref="ExportOptions.Overwrite"/> is not set, or the tool wrote
     /// nothing.
@@ -437,6 +447,24 @@ public interface IModelStore
     /// <returns>The resolved paths and layers.</returns>
     /// <exception cref="ModelNotFoundException">The store has no such model.</exception>
     Task<ResolvedModel> ResolveAsync(string name, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Re-reads and re-hashes every blob a stored model's manifest names - each content layer and the
+    /// config - and reports every one that is missing, does not hash to its digest, or is not the size
+    /// the manifest records. A store is only as trustworthy as the last time its files were read, and
+    /// one shared with other tools can be changed under it; this is how a caller checks before it
+    /// trusts a model it pulled some time ago.
+    /// </summary>
+    /// <remarks>
+    /// Nothing is changed: a bad blob is reported, not deleted, because it may be shared with other
+    /// models and other tools. The work is a full read of the model, which for a large model takes as
+    /// long as reading that many gigabytes from disk.
+    /// </remarks>
+    /// <param name="name">The model name.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>What was checked, and every blob that did not pass.</returns>
+    /// <exception cref="ModelNotFoundException">The store has no such model.</exception>
+    Task<VerifyResult> VerifyAsync(string name, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Gives an existing model a second name. Only the manifest is copied; every blob is shared.

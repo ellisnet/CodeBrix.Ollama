@@ -79,7 +79,7 @@ public sealed class OllamaTemplateBuiltInTests
         };
 
         //Act
-        var rendered = template.Render(values);
+        var rendered = template.Render(values, TestContext.Current.CancellationToken);
 
         //Assert
         template.Source.Should().NotBeNull();

@@ -368,21 +368,59 @@ internal static class LayerFactory
             throw new ArgumentNullException(nameof(paths));
         }
 
-        string blobPath = paths.GetBlobPath(digest);
-        if (!File.Exists(blobPath))
+        string actual = await HashBlobAsync(paths, digest, cancellationToken).ConfigureAwait(false);
+        if (actual == null)
         {
             throw new ModelManagerException($"blob {digest} does not exist");
         }
 
-        string actual = await Sha256Digest.ComputeFileAsync(blobPath, cancellationToken).ConfigureAwait(false);
         string expected = Sha256Digest.ToDigest(digest).ToLowerInvariant();
         if (string.Equals(actual, expected, StringComparison.Ordinal))
         {
             return true;
         }
 
-        File.Delete(blobPath);
+        File.Delete(paths.GetBlobPath(digest));
         throw new DigestMismatchException(expected, actual);
+    }
+
+    /// <summary>
+    /// Rehashes a blob and answers what it hashes to, without judging the answer and without touching
+    /// the file. <see cref="VerifyBlobAsync"/> and the store's public verification are both built on it.
+    /// </summary>
+    /// <param name="paths">The store paths.</param>
+    /// <param name="digest">The digest the blob is filed under.</param>
+    /// <param name="cancellationToken">A token that cancels the work.</param>
+    /// <returns>
+    /// The digest the content hashes to, in <c>sha256:&lt;64 lowercase hex&gt;</c> form, or
+    /// <see langword="null"/> when the blob is not in the store.
+    /// </returns>
+    /// <exception cref="ArgumentException">The digest is not well formed.</exception>
+    public static async Task<string> HashBlobAsync(
+        ModelStorePaths paths,
+        string digest,
+        CancellationToken cancellationToken)
+    {
+        if (paths == null)
+        {
+            throw new ArgumentNullException(nameof(paths));
+        }
+
+        string blobPath = paths.GetBlobPath(digest);
+        if (!File.Exists(blobPath))
+        {
+            return null;
+        }
+
+        try
+        {
+            return await Sha256Digest.ComputeFileAsync(blobPath, cancellationToken).ConfigureAwait(false);
+        }
+        catch (FileNotFoundException)
+        {
+            // Pruned between the check and the read: it is missing all the same.
+            return null;
+        }
     }
 
     /// <summary>

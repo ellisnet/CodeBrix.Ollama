@@ -21,6 +21,7 @@ public sealed class ExportOptionsTests
         options.OutputName.Should().BeNull();
         options.Overwrite.Should().BeFalse();
         options.AllowRemoteCode.Should().BeFalse();
+        options.AllowUnpatchedTransformers.Should().BeFalse();
     }
 
     [Theory]

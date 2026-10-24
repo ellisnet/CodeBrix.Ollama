@@ -1,5 +1,8 @@
 using System;
+using System.Globalization;
 using System.IO;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -17,6 +20,11 @@ namespace CodeBrix.Ollama.ModelManager;
 /// a partial file named after its address, and moved to the blob its content turns out to name once the
 /// bytes are all there and hashed. Either way the store ends up content-addressed and a second pull
 /// verifies against the first.
+/// </para>
+/// <para>
+/// Every hash the source stated is checked: the SHA-256 and the MD5 by the download itself, and the git
+/// blob identifier - the only hash a Hugging Face repository states for a file outside large-file
+/// storage - here, once the bytes are all there, whenever no SHA-256 was stated.
 /// </para>
 /// <para>
 /// One downloader may be used for many files, one after another or several at a time; each file gets
@@ -107,7 +115,8 @@ internal sealed class FileDownloader : IDisposable
     /// </summary>
     /// <param name="file">The file to fetch.</param>
     /// <param name="requireStatedHash">
-    /// Whether a file whose source stated neither a SHA-256 nor an MD5 is refused instead of downloaded.
+    /// Whether a file whose source stated no SHA-256, no MD5 and no git blob identifier is refused
+    /// instead of downloaded.
     /// This is what <see cref="PullOptions.RequireHashes"/> asks for.
     /// </param>
     /// <param name="progress">
@@ -126,8 +135,9 @@ internal sealed class FileDownloader : IDisposable
     /// <paramref name="requireStatedHash"/> is set and the source stated no hash for this file.
     /// </exception>
     /// <exception cref="RegistryException">
-    /// A byte range failed every retry; the server answered an error status; or the server states a
-    /// size other than the one the source stated.
+    /// The address is plain HTTP and <see cref="ModelStoreOptions.AllowInsecureHttp"/> is not set, or a
+    /// redirect on the way is refused; a byte range failed every retry; the server answered an error
+    /// status; or the server states a size other than the one the source stated.
     /// </exception>
     public async Task<BlobDownloadResult> DownloadFileAsync(
         BundleFile file,
@@ -143,9 +153,12 @@ internal sealed class FileDownloader : IDisposable
         if (requireStatedHash && !file.HasVerifiableHash)
         {
             throw new ModelManagerException(
-                "The source states no sha256 and no md5 for '" + file.Path
+                "The source states no sha256, no md5 and no git blob id for '" + file.Path
                     + "', and hashes were required. Either drop that requirement or use a source that states one.");
         }
+
+        // A plain-HTTP address is refused here, before a partial file or sidecar is made for it.
+        _client.EnsureAddressAllowed(file.Url);
 
         // A stated sha256 names the blob before a single byte arrives, which is what lets a file
         // already in the store cost nothing.
@@ -169,7 +182,12 @@ internal sealed class FileDownloader : IDisposable
             return result;
         }
 
-        // Nothing was stated, so the file is named by what it turned out to be.
+        if (file.GitSha1 != null)
+        {
+            await VerifyGitBlobAsync(file, result.FilePath, cancellationToken).ConfigureAwait(false);
+        }
+
+        // No sha256 was stated, so the file is named by what it turned out to be.
         string blobPath = _paths.GetBlobPath(result.Digest);
         string blobDirectory = Path.GetDirectoryName(blobPath);
         if (!string.IsNullOrEmpty(blobDirectory))
@@ -179,6 +197,65 @@ internal sealed class FileDownloader : IDisposable
 
         File.Move(result.FilePath, blobPath, true);
         return new BlobDownloadResult(result.Digest, result.Md5, result.Size, blobPath, result.Existed);
+    }
+
+    /// <summary>
+    /// Computes the git blob identifier of a file: the SHA-1 of <c>"blob " + length + "\0"</c> followed
+    /// by the content.
+    /// </summary>
+    /// <param name="path">The file to read.</param>
+    /// <param name="cancellationToken">A token that cancels the read.</param>
+    /// <returns>The identifier in lower-case hexadecimal.</returns>
+    internal static async Task<string> ComputeGitBlobSha1Async(string path, CancellationToken cancellationToken)
+    {
+        await using var stream = new FileStream(
+            path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, FileOptions.Asynchronous | FileOptions.SequentialScan);
+
+        using IncrementalHash sha1 = IncrementalHash.CreateHash(HashAlgorithmName.SHA1);
+        sha1.AppendData(Encoding.ASCII.GetBytes(
+            "blob " + stream.Length.ToString(CultureInfo.InvariantCulture) + "\0"));
+
+        byte[] buffer = new byte[81920];
+        int read;
+        while ((read = await stream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false)) > 0)
+        {
+            sha1.AppendData(buffer, 0, read);
+        }
+
+        return Convert.ToHexStringLower(sha1.GetCurrentHash());
+    }
+
+    /// <summary>
+    /// Holds a finished download to the git blob identifier its source stated, and deletes it when the
+    /// two differ, exactly as a SHA-256 mismatch is handled.
+    /// </summary>
+    /// <param name="file">The file as the source described it.</param>
+    /// <param name="downloadedPath">Where the verified-so-far bytes are.</param>
+    /// <param name="cancellationToken">A token that cancels the read.</param>
+    /// <exception cref="DigestMismatchException">The bytes do not hash to the stated identifier.</exception>
+    private static async Task VerifyGitBlobAsync(BundleFile file, string downloadedPath, CancellationToken cancellationToken)
+    {
+        string actual = await ComputeGitBlobSha1Async(downloadedPath, cancellationToken).ConfigureAwait(false);
+        if (string.Equals(actual, file.GitSha1, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        try
+        {
+            File.Delete(downloadedPath);
+        }
+        catch (IOException)
+        {
+            // The mismatch is what matters; a partial file left behind is started over next time,
+            // because its sidecar is already gone.
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // As above.
+        }
+
+        throw new DigestMismatchException("git-sha1:" + file.GitSha1, "git-sha1:" + actual);
     }
 
     /// <summary>

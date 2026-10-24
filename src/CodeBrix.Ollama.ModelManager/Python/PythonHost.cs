@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using CodeBrix.Python;
@@ -202,6 +203,10 @@ internal static class PythonHost
                             problems.Add("The Python module '" + module.Name + "' is not installed in the CPython at "
                                          + (libraryPath ?? "(unknown path)") + ": " + module.Error + ".");
                         }
+                        else if (!module.MeetsMinimumVersion)
+                        {
+                            problems.Add(DescribeTooOld(module, libraryPath));
+                        }
                     }
                 }
                 catch (Exception exception)
@@ -235,12 +240,39 @@ internal static class PythonHost
     /// <exception cref="InvalidOperationException">Python has been shut down for this process.</exception>
     /// <exception cref="PythonNotAvailableException">There is no usable CPython.</exception>
     /// <exception cref="PythonModuleNotInstalledException">A module the feature needs is not installed.</exception>
+    /// <exception cref="PythonModuleTooOldException">A module the feature needs is older than its floor.</exception>
     internal static void Require(PythonOptions options, string feature, string[] requiredModules)
+        => Require(options, feature, requiredModules, null);
+
+    /// <summary>
+    /// Checks what <see cref="Check"/> checks and throws the friendly exception when a feature cannot run,
+    /// letting the named modules fall below their floors - the caller has accepted that, by name.
+    /// </summary>
+    /// <param name="options">The caller's options.</param>
+    /// <param name="feature">The feature that needs Python, named as a phrase.</param>
+    /// <param name="requiredModules">The modules the feature imports.</param>
+    /// <param name="waivedFloors">
+    /// Modules whose version floor the caller has waived, or <see langword="null"/> for none. They must
+    /// still be installed.
+    /// </param>
+    /// <exception cref="InvalidOperationException">Python has been shut down for this process.</exception>
+    /// <exception cref="PythonNotAvailableException">There is no usable CPython.</exception>
+    /// <exception cref="PythonModuleNotInstalledException">A module the feature needs is not installed.</exception>
+    /// <exception cref="PythonModuleTooOldException">A module the feature needs is older than its floor.</exception>
+    internal static void Require(
+        PythonOptions options, string feature, string[] requiredModules, IReadOnlyCollection<string> waivedFloors)
     {
         ThrowIfShutDown();
 
         PythonSupportReport report = Check(options, requiredModules);
         if (report.IsUsable)
+        {
+            return;
+        }
+
+        if (report.LibraryLoads && report.IsSupportedVersion
+            && report.Modules.All(module => module.IsInstalled
+                && (module.MeetsMinimumVersion || IsWaived(waivedFloors, module.Name))))
         {
             return;
         }
@@ -260,6 +292,16 @@ internal static class PythonHost
             {
                 throw new PythonModuleNotInstalledException(
                     feature, module.Name, report.LibraryPath, report.VirtualEnvironment);
+            }
+        }
+
+        foreach (PythonModuleReport module in report.Modules)
+        {
+            if (!module.MeetsMinimumVersion && !IsWaived(waivedFloors, module.Name))
+            {
+                throw new PythonModuleTooOldException(
+                    feature, module.Name, module.InstalledVersion, module.MinimumVersion,
+                    report.LibraryPath, report.VirtualEnvironment);
             }
         }
 
@@ -287,9 +329,32 @@ internal static class PythonHost
         IReadOnlyDictionary<string, object> parameters,
         string[] requiredModules,
         CancellationToken cancellationToken = default)
+        => await RunScriptAsync(options, feature, scriptName, parameters, requiredModules, null, cancellationToken)
+            .ConfigureAwait(false);
+
+    /// <summary>
+    /// Runs one of the scripts that ship in this package, letting the named modules fall below their
+    /// version floors, and returns what it left in its result variable.
+    /// </summary>
+    /// <param name="options">The caller's options.</param>
+    /// <param name="feature">The feature the script is running for, named as a phrase.</param>
+    /// <param name="scriptName">The script's file name, such as <c>probe_version.py</c>.</param>
+    /// <param name="parameters">Values to set as script variables before it runs, or <see langword="null"/>.</param>
+    /// <param name="requiredModules">The modules the script imports, checked before it runs.</param>
+    /// <param name="waivedFloors">Modules whose version floor the caller has waived, or <see langword="null"/>.</param>
+    /// <param name="cancellationToken">Cancels the wait for the interpreter, never a run in progress.</param>
+    /// <returns>The dictionary the script left in <c>result</c>, converted to .NET values.</returns>
+    internal static async Task<IReadOnlyDictionary<string, object>> RunScriptAsync(
+        PythonOptions options,
+        string feature,
+        string scriptName,
+        IReadOnlyDictionary<string, object> parameters,
+        string[] requiredModules,
+        IReadOnlyCollection<string> waivedFloors,
+        CancellationToken cancellationToken)
     {
         ThrowIfShutDown();
-        Require(options, feature, requiredModules);
+        Require(options, feature, requiredModules, waivedFloors);
         EnsureInitialized(PythonLibraryLocator.Resolve(options));
 
         await RunLocker.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -485,7 +550,7 @@ internal static class PythonHost
                 try
                 {
                     using PyObject imported = Py.Import(module);
-                    reports.Add(new PythonModuleReport(module, true, null));
+                    reports.Add(DescribeImported(module, ReadModuleVersion(imported, module)));
                 }
                 catch (PythonException exception)
                 {
@@ -497,6 +562,95 @@ internal static class PythonHost
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Reads the version an imported module reports: its <c>__version__</c>, or failing that what the
+    /// installed distribution of the same name records. Called inside the interpreter lock.
+    /// </summary>
+    /// <param name="imported">The imported module.</param>
+    /// <param name="module">The module name.</param>
+    /// <returns>The version text, or <see langword="null"/> when neither answers.</returns>
+    private static string ReadModuleVersion(PyObject imported, string module)
+    {
+        try
+        {
+            if (imported.HasAttr("__version__"))
+            {
+                using PyObject version = imported.GetAttr("__version__");
+                string text = version.IsNone() ? null : version.ToString();
+                if (!string.IsNullOrWhiteSpace(text))
+                {
+                    return text.Trim();
+                }
+            }
+        }
+        catch (Exception)
+        {
+            //A module whose version attribute will not read falls through to the installed metadata.
+        }
+
+        try
+        {
+            using PyObject metadata = Py.Import("importlib.metadata");
+            using var distribution = new PyString(module.Split('.')[0]);
+            using PyObject version = metadata.InvokeMethod("version", distribution);
+            string text = version.ToString();
+            return string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The report for a module that imported, measured against its floor when it has one.
+    /// </summary>
+    /// <param name="module">The module name, as the caller asked for it.</param>
+    /// <param name="installedVersion">The version it reports, or <see langword="null"/>.</param>
+    /// <returns>The report.</returns>
+    internal static PythonModuleReport DescribeImported(string module, string installedVersion)
+    {
+        PythonModuleFloors.Floor floor = PythonModuleFloors.For(module);
+        if (floor == null)
+        {
+            return new PythonModuleReport(module, true, null, installedVersion, null, true);
+        }
+
+        return new PythonModuleReport(
+            module,
+            true,
+            null,
+            installedVersion,
+            PythonModuleFloors.Describe(floor.Minimum),
+            PythonModuleFloors.Meets(installedVersion, floor.Minimum));
+    }
+
+    /// <summary>
+    /// Whether a module's version floor is among the ones a caller waived.
+    /// </summary>
+    /// <param name="waivedFloors">The waived modules, or <see langword="null"/>.</param>
+    /// <param name="moduleName">The module.</param>
+    /// <returns><see langword="true"/> when the floor is waived.</returns>
+    private static bool IsWaived(IReadOnlyCollection<string> waivedFloors, string moduleName)
+        => waivedFloors != null && waivedFloors.Contains(moduleName, StringComparer.Ordinal);
+
+    /// <summary>
+    /// The sentence a report carries for a module that is installed but older than its floor.
+    /// </summary>
+    /// <param name="module">The module's report.</param>
+    /// <param name="libraryPath">The CPython shared library in use, or <see langword="null"/>.</param>
+    /// <returns>A sentence naming the module, the installed and required versions, and why.</returns>
+    internal static string DescribeTooOld(PythonModuleReport module, string libraryPath)
+    {
+        PythonModuleFloors.Floor floor = PythonModuleFloors.For(module.Name);
+        string installed = string.IsNullOrWhiteSpace(module.InstalledVersion)
+            ? "of a version that could not be read"
+            : "version " + module.InstalledVersion;
+        string reason = floor == null ? string.Empty : ": " + floor.Reason;
+        return "The Python module '" + module.Name + "' in the CPython at " + (libraryPath ?? "(unknown path)")
+               + " is " + installed + ", and at least " + module.MinimumVersion + " is required" + reason + ".";
     }
 
     /// <summary>

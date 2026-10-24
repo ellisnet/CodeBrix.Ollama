@@ -109,7 +109,8 @@ internal sealed class RunningModel : IRunningModel
             options.OllamaTemplate,
             details.ChatTemplate,
             beginningOfSequenceText,
-            TokenText(vocab, NativeMethods.llama_vocab_eos(vocab)));
+            TokenText(vocab, NativeMethods.llama_vocab_eos(vocab)),
+            options.TemplateLimits);
     }
 
     /// <inheritdoc />
@@ -371,13 +372,32 @@ internal sealed class RunningModel : IRunningModel
         if (request == null) throw new ArgumentNullException(nameof(request));
         ThrowIfDisposed();
 
-        // Rendering reads no context state, so like tokenizing it does not take the request gate; it still
-        // runs on the worker because the native dialect calls into the engine to do it.
-        return worker.RunAsync(() =>
+        // Rendering reads no context state, so like tokenizing it does not take the request gate.
+        return RenderPromptAsync(request, cancellationToken);
+    }
+
+    /// <summary>Renders a chat request into its prompt, on the thread its dialect needs.</summary>
+    /// <param name="request">The request.</param>
+    /// <param name="cancellationToken">A token to cancel the render, checked as it goes.</param>
+    /// <returns>The prompt text.</returns>
+    /// <remarks>
+    /// Only the native dialect calls into the engine, so only it runs on the worker. The Jinja and Ollama
+    /// dialects are managed interpreters that touch no engine state; they run on the thread pool, so that a
+    /// template that is slow - or hostile, until its limits stop it - never holds up the engine thread, a
+    /// running generation's neighbours or <see cref="DisposeAsync"/>.
+    /// </remarks>
+    private Task<string> RenderPromptAsync(ChatRequest request, CancellationToken cancellationToken)
+    {
+        if (renderer.RendersOnEngine)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            return renderer.Render(request);
-        });
+            return worker.RunAsync(() =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                return renderer.Render(request, cancellationToken);
+            });
+        }
+
+        return Task.Run(() => renderer.Render(request, cancellationToken), cancellationToken);
     }
 
     /// <inheritdoc />
@@ -615,11 +635,7 @@ internal sealed class RunningModel : IRunningModel
     {
         Stopwatch preparation = Stopwatch.StartNew();
 
-        string prompt = await worker.RunAsync(() =>
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            return renderer.Render(request);
-        }).ConfigureAwait(false);
+        string prompt = await RenderPromptAsync(request, cancellationToken).ConfigureAwait(false);
 
         // The rendered prompt decides whether the tokenizer may add a beginning-of-sequence token; special
         // tokens are always parsed, because a chat prompt is nothing but special tokens and text.

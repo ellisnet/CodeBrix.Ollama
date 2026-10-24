@@ -54,4 +54,52 @@ public sealed class PythonHostTests
     public void DescribeRunningLibrarySource_says_Host_only_for_a_path_nothing_here_resolved(
         PythonLibrarySource resolved, string runningPath, PythonLibrarySource expected)
         => PythonHost.DescribeRunningLibrarySource(resolved, runningPath).Should().Be(expected);
+
+    [Theory]
+    [InlineData("torch", "2.5.1+cpu", "2.6", false)]
+    [InlineData("torch", "2.14.0+cpu", "2.6", true)]
+    [InlineData("onnx", "1.15.0", "1.16", false)]
+    [InlineData("onnx", "1.17.0.dev0", "1.16", true)]
+    [InlineData("transformers", "4.57.6", "5.10", false)]
+    [InlineData("transformers", "5.10.0", "5.10", true)]
+    [InlineData("torch", null, "2.6", false)]
+    public void DescribeImported_measures_a_module_with_a_floor_against_it(
+        string module, string installed, string minimum, bool meets)
+    {
+        //Act
+        PythonModuleReport report = PythonHost.DescribeImported(module, installed);
+
+        //Assert
+        report.IsInstalled.Should().BeTrue();
+        report.InstalledVersion.Should().Be(installed);
+        report.MinimumVersion.Should().Be(minimum);
+        report.MeetsMinimumVersion.Should().Be(meets);
+    }
+
+    [Fact]
+    public void DescribeImported_holds_a_module_with_no_floor_to_nothing()
+    {
+        //Act
+        PythonModuleReport report = PythonHost.DescribeImported("numpy", "0.1");
+
+        //Assert
+        report.InstalledVersion.Should().Be("0.1");
+        report.MinimumVersion.Should().BeNull();
+        report.MeetsMinimumVersion.Should().BeTrue();
+    }
+
+    [Fact]
+    public void DescribeTooOld_names_the_module_both_versions_and_the_advisory()
+    {
+        //Arrange
+        PythonModuleReport report = PythonHost.DescribeImported("torch", "2.5.1");
+
+        //Act
+        string problem = PythonHost.DescribeTooOld(report, "/usr/lib/libpython3.13.so");
+
+        //Assert
+        problem.Should().StartWith("The Python module 'torch' in the CPython at /usr/lib/libpython3.13.so");
+        problem.Should().Contain("is version 2.5.1, and at least 2.6 is required");
+        problem.Should().Contain("CVE-2025-32434");
+    }
 }

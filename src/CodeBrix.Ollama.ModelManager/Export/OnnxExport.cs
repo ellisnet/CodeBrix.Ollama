@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -49,6 +50,13 @@ internal static class OnnxExport
 
     /// <summary>The configuration file whose <c>architectures</c> decide the automatic route.</summary>
     internal const string ConfigFileName = "config.json";
+
+    /// <summary>The longest chat template name a converting route accepts.</summary>
+    internal const int MaximumChatTemplateNameLength = 64;
+
+    /// <summary>The files transformers reads a <c>chat_template</c> out of.</summary>
+    internal static readonly string[] ChatTemplateFileNames =
+        { "tokenizer_config.json", "chat_template.json", "processor_config.json" };
 
     /// <summary>The modules the GenAI builder route imports, checked before the script runs.</summary>
     internal static readonly string[] GenAiModules = { "onnxruntime_genai", "torch", "transformers", "onnx" };
@@ -113,6 +121,18 @@ internal static class OnnxExport
         "VideoChatFlashQwenForCausalLM",
         "WhisperForConditionalGeneration"
     };
+
+    /// <summary>
+    /// The module version floors a route's options waive: transformers, for the two converting routes,
+    /// when the caller set <see cref="ExportOptions.AllowUnpatchedTransformers"/>; nothing otherwise.
+    /// </summary>
+    /// <param name="route">The route.</param>
+    /// <param name="options">The caller's options.</param>
+    /// <returns>The waived modules; empty for none.</returns>
+    internal static string[] FloorsWaivedBy(ExportRoute route, ExportOptions options)
+        => options != null && options.AllowUnpatchedTransformers && SavesChatTemplates(route)
+            ? new[] { "transformers" }
+            : Array.Empty<string>();
 
     /// <summary>
     /// The modules a route needs, or an empty array for the route that needs no Python.
@@ -421,6 +441,230 @@ internal static class OnnxExport
         };
 
     /// <summary>
+    /// The export script a Python route runs.
+    /// </summary>
+    /// <param name="route">The route; it must be a Python one.</param>
+    /// <returns>The script's file name.</returns>
+    internal static string ScriptFor(ExportRoute route)
+    {
+        if (IsMuseCoco(route))
+        {
+            return PythonScripts.ExportMuseCoco;
+        }
+        return route == ExportRoute.GenAiBuilder ? PythonScripts.ExportGenAi : PythonScripts.ExportOptimum;
+    }
+
+    /// <summary>
+    /// Whether a route hands the publisher's tokenizer or processor to transformers'
+    /// <c>save_pretrained</c>, which writes each named chat template as a file named after it. Both the
+    /// GenAI builder and Optimum do; the pass-through and the MuseCoco routes do not.
+    /// </summary>
+    /// <param name="route">The route that is about to run.</param>
+    /// <returns><see langword="true"/> for <see cref="ExportRoute.GenAiBuilder"/> and
+    /// <see cref="ExportRoute.Optimum"/>.</returns>
+    internal static bool SavesChatTemplates(ExportRoute route)
+        => route == ExportRoute.GenAiBuilder || route == ExportRoute.Optimum;
+
+    /// <summary>
+    /// Whether a bundle path names one of the files transformers reads a <c>chat_template</c> out of:
+    /// <c>tokenizer_config.json</c>, <c>chat_template.json</c> or <c>processor_config.json</c>, in any
+    /// folder of the bundle.
+    /// </summary>
+    /// <param name="path">The publisher's relative path, with forward slashes.</param>
+    /// <returns><see langword="true"/> when the file can carry chat template names.</returns>
+    internal static bool IsChatTemplateFile(string path)
+    {
+        if (string.IsNullOrEmpty(path))
+        {
+            return false;
+        }
+
+        int slash = path.LastIndexOf('/');
+        string name = slash < 0 ? path : path.Substring(slash + 1);
+        foreach (string candidate in ChatTemplateFileNames)
+        {
+            if (string.Equals(name, candidate, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Refuses a file whose <c>chat_template</c> names a template with anything but a plain file name.
+    /// transformers writes each template of a dict-form or list-form <c>chat_template</c> to a file named
+    /// after it when it saves a tokenizer or processor, and both converting routes save one, so a name
+    /// such as <c>../../x</c> would be written outside the output folder (CVE-2026-9856). This runs in
+    /// .NET before any Python does.
+    /// </summary>
+    /// <remarks>
+    /// A name passes when it is 1 to 64 characters of ASCII letters, digits, <c>_</c>, <c>.</c> and
+    /// <c>-</c>, and is not <c>.</c> or <c>..</c>. A single-string <c>chat_template</c> names nothing and
+    /// passes. A file that is not JSON this reader accepts is refused too: Python's reader takes some
+    /// text this one does not, and a name that cannot be read cannot be shown to be safe.
+    /// </remarks>
+    /// <param name="filePath">The file's path in the bundle, for the message.</param>
+    /// <param name="json">The file's text, or <see langword="null"/> when it could not be read.</param>
+    /// <param name="route">The route that is about to run, which names the script in the message.</param>
+    /// <exception cref="PythonScriptException">The file names a template that is not a plain file name.</exception>
+    internal static void RequireSafeChatTemplateNames(string filePath, string json, ExportRoute route)
+    {
+        if (json == null)
+        {
+            return;
+        }
+
+        string problem = FindUnsafeChatTemplateName(json);
+        if (problem != null)
+        {
+            throw new PythonScriptException(
+                Feature,
+                ScriptFor(route),
+                "it was not run, because the bundle file " + filePath + " " + problem
+                    + "; transformers would write that name as a file path when it saves the tokenizer,"
+                    + " which can land outside the output folder (CVE-2026-9856)",
+                null);
+        }
+    }
+
+    /// <summary>
+    /// Looks through a file's <c>chat_template</c> entries for a template name that is not a plain file
+    /// name.
+    /// </summary>
+    /// <param name="json">The file's text.</param>
+    /// <returns>The end of a sentence describing the first problem, or <see langword="null"/> when there is none.</returns>
+    internal static string FindUnsafeChatTemplateName(string json)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(json);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            //EnumerateObject yields a repeated key every time it appears; Python keeps the last one, so
+            //every occurrence is checked.
+            foreach (JsonProperty property in document.RootElement.EnumerateObject())
+            {
+                if (!string.Equals(property.Name, "chat_template", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                string problem = FindUnsafeName(property.Value);
+                if (problem != null)
+                {
+                    return problem;
+                }
+            }
+            return null;
+        }
+        catch (Exception exception) when (exception is JsonException || exception is InvalidOperationException
+                                          || exception is ArgumentException)
+        {
+            return "cannot be read as JSON, so the chat template names in it cannot be checked";
+        }
+    }
+
+    /// <summary>
+    /// Whether a chat template name is a plain file name: 1 to 64 ASCII letters, digits, <c>_</c>,
+    /// <c>.</c> or <c>-</c>, and neither <c>.</c> nor <c>..</c>.
+    /// </summary>
+    /// <param name="name">The template name.</param>
+    /// <returns><see langword="true"/> when it is safe to write as a file name.</returns>
+    internal static bool IsSafeChatTemplateName(string name)
+    {
+        if (string.IsNullOrEmpty(name) || name.Length > MaximumChatTemplateNameLength
+            || name == "." || name == "..")
+        {
+            return false;
+        }
+
+        foreach (char character in name)
+        {
+            if (!char.IsAsciiLetterOrDigit(character) && character != '_' && character != '.' && character != '-')
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Checks one <c>chat_template</c> value: a dict's keys, or a list's <c>name</c> entries.
+    /// </summary>
+    /// <param name="value">The value.</param>
+    /// <returns>The end of a sentence describing the first problem, or <see langword="null"/>.</returns>
+    private static string FindUnsafeName(JsonElement value)
+    {
+        if (value.ValueKind == JsonValueKind.Object)
+        {
+            foreach (JsonProperty template in value.EnumerateObject())
+            {
+                if (!IsSafeChatTemplateName(template.Name))
+                {
+                    return "names a chat template " + Quote(template.Name) + " that is not a plain file name";
+                }
+            }
+            return null;
+        }
+
+        if (value.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        foreach (JsonElement template in value.EnumerateArray())
+        {
+            if (template.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            foreach (JsonProperty entry in template.EnumerateObject())
+            {
+                if (!string.Equals(entry.Name, "name", StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                if (entry.Value.ValueKind != JsonValueKind.String)
+                {
+                    return "names a chat template with a name that is not a string";
+                }
+
+                string name = entry.Value.GetString();
+                if (!IsSafeChatTemplateName(name))
+                {
+                    return "names a chat template " + Quote(name) + " that is not a plain file name";
+                }
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Quotes a name for a message, with control characters shown as <c>?</c> and a long name cut short.
+    /// </summary>
+    /// <param name="name">The name as the file spells it.</param>
+    /// <returns>The quoted name.</returns>
+    private static string Quote(string name)
+    {
+        const int shown = 120;
+        string cut = name.Length > shown ? name.Substring(0, shown) : name;
+        var builder = new StringBuilder(cut.Length + 5);
+        builder.Append('\'');
+        foreach (char character in cut)
+        {
+            builder.Append(char.IsControl(character) ? '?' : character);
+        }
+        builder.Append(name.Length > shown ? "...'" : "'");
+        return builder.ToString();
+    }
+
+    /// <summary>
     /// Runs the export script one of the Python routes uses, after checking that the modules it imports
     /// are installed.
     /// </summary>
@@ -448,9 +692,7 @@ internal static class OnnxExport
         string task,
         CancellationToken cancellationToken)
     {
-        string scriptName = IsMuseCoco(route) ? PythonScripts.ExportMuseCoco : route == ExportRoute.GenAiBuilder
-            ? PythonScripts.ExportGenAi
-            : PythonScripts.ExportOptimum;
+        string scriptName = ScriptFor(route);
 
         var parameters = new Dictionary<string, object>(StringComparer.Ordinal)
         {
@@ -479,7 +721,8 @@ internal static class OnnxExport
         }
 
         IReadOnlyDictionary<string, object> reported = await PythonHost.RunScriptAsync(
-            pythonOptions, Feature, scriptName, parameters, ModulesFor(route), cancellationToken)
+            pythonOptions, Feature, scriptName, parameters, ModulesFor(route), FloorsWaivedBy(route, options),
+            cancellationToken)
             .ConfigureAwait(false);
 
         return ReadRun(scriptName, ToolFor(route), reported);

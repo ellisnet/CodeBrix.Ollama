@@ -42,7 +42,7 @@ public sealed class OllamaTemplateExecuteTests
         };
 
         //Act
-        var rendered = OllamaTemplate.Parse(template).Render(values);
+        var rendered = OllamaTemplate.Parse(template).Render(values, TestContext.Current.CancellationToken);
 
         //Assert
         rendered.Should().Be("[INST] Hello friend![/INST] Hello human![INST] What is your name?[/INST] ");
@@ -69,7 +69,7 @@ public sealed class OllamaTemplateExecuteTests
         };
 
         //Act
-        var rendered = OllamaTemplate.Parse(template).Render(values);
+        var rendered = OllamaTemplate.Parse(template).Render(values, TestContext.Current.CancellationToken);
 
         //Assert
         rendered.Should().Be("[INST] You are a helpful assistant!\n\nHello friend![/INST] Hello human!"
@@ -99,7 +99,7 @@ public sealed class OllamaTemplateExecuteTests
         };
 
         //Act
-        var rendered = OllamaTemplate.Parse(template).Render(values);
+        var rendered = OllamaTemplate.Parse(template).Render(values, TestContext.Current.CancellationToken);
 
         //Assert
         rendered.Should().Be("[INST] Hello friend![/INST] Hello human![INST] What is your name?[/INST] "
@@ -129,7 +129,7 @@ public sealed class OllamaTemplateExecuteTests
         };
 
         //Act
-        var rendered = OllamaTemplate.Parse(template).Render(values);
+        var rendered = OllamaTemplate.Parse(template).Render(values, TestContext.Current.CancellationToken);
 
         //Assert
         rendered.Should().Be("<|im_start|>system\nYou are a helpful assistant!<|im_end|>\n"
@@ -151,7 +151,7 @@ public sealed class OllamaTemplateExecuteTests
         };
 
         //Act
-        var rendered = template.Render(values);
+        var rendered = template.Render(values, TestContext.Current.CancellationToken);
 
         //Assert
         rendered.Should().Be("hello");
@@ -166,7 +166,7 @@ public sealed class OllamaTemplateExecuteTests
         var values = new OllamaTemplateValues { Prompt = "def add(", Suffix = "return x" };
 
         //Act
-        var rendered = template.Render(values);
+        var rendered = template.Render(values, TestContext.Current.CancellationToken);
 
         //Assert
         rendered.Should().Be("<PRE> def add( <SUF>return x <MID>");
@@ -184,7 +184,7 @@ public sealed class OllamaTemplateExecuteTests
         };
 
         //Act
-        var rendered = template.Render(values);
+        var rendered = template.Render(values, TestContext.Current.CancellationToken);
 
         //Assert
         rendered.Should().Be("Hello Today is " + DateTime.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
@@ -203,7 +203,7 @@ public sealed class OllamaTemplateExecuteTests
         };
 
         //Act
-        var rendered = template.Render(values);
+        var rendered = template.Render(values, TestContext.Current.CancellationToken);
 
         //Assert
         rendered.Should().Be("Hello Yesterday was "
@@ -237,7 +237,7 @@ public sealed class OllamaTemplateExecuteTests
         };
 
         //Act
-        var rendered = template.Render(values);
+        var rendered = template.Render(values, TestContext.Current.CancellationToken);
 
         //Assert
         rendered.Should().StartWith("{");
@@ -268,7 +268,7 @@ public sealed class OllamaTemplateExecuteTests
         };
 
         //Act
-        var rendered = template.Render(values);
+        var rendered = template.Render(values, TestContext.Current.CancellationToken);
 
         //Assert
         rendered.Should().Be("city=Tokyo;");
@@ -283,7 +283,7 @@ public sealed class OllamaTemplateExecuteTests
             "{{- range .Messages }}{{- end }}{{- range .Tools }}{{ .Function.Parameters.Properties }}{{- end }}");
 
         //Act
-        var rendered = template.Render(ToolValues());
+        var rendered = template.Render(ToolValues(), TestContext.Current.CancellationToken);
 
         //Assert
         rendered.Should().StartWith("{");
@@ -300,7 +300,7 @@ public sealed class OllamaTemplateExecuteTests
             + "{{- end }}{{- end }}");
 
         //Act
-        var rendered = template.Render(ToolValues());
+        var rendered = template.Render(ToolValues(), TestContext.Current.CancellationToken);
 
         //Assert
         rendered.Should().Be("location:string;");
@@ -314,7 +314,7 @@ public sealed class OllamaTemplateExecuteTests
         var template = OllamaTemplate.Parse("{{- range .Messages }}{{- end }}{{ .Tools }}");
 
         //Act
-        var rendered = template.Render(ToolValues());
+        var rendered = template.Render(ToolValues(), TestContext.Current.CancellationToken);
 
         //Assert
         rendered.Should().Be("[{\"type\":\"function\",\"function\":{\"name\":\"get_weather\","
@@ -342,7 +342,7 @@ public sealed class OllamaTemplateExecuteTests
         };
 
         //Act
-        var rendered = template.Render(values);
+        var rendered = template.Render(values, TestContext.Current.CancellationToken);
 
         //Assert
         rendered.Should().Be(expected);
@@ -361,7 +361,7 @@ public sealed class OllamaTemplateExecuteTests
         };
 
         //Act
-        var rendered = template.Render(values);
+        var rendered = template.Render(values, TestContext.Current.CancellationToken);
 
         //Assert
         rendered.Should().Be("Be brief.|system:Be brief.;user:hi;");
@@ -379,7 +379,7 @@ public sealed class OllamaTemplateExecuteTests
         };
 
         //Act
-        OllamaTemplate.Parse("{{ range .Messages }}{{ .Content }}{{ end }}").Render(values);
+        OllamaTemplate.Parse("{{ range .Messages }}{{ .Content }}{{ end }}").Render(values, TestContext.Current.CancellationToken);
 
         //Assert
         first.Content.Should().Be("Hello");
@@ -404,7 +404,7 @@ public sealed class OllamaTemplateExecuteTests
         };
 
         //Act
-        var rendered = template.Render(values);
+        var rendered = template.Render(values, TestContext.Current.CancellationToken);
 
         //Assert
         rendered.Should().Be("<s>|one|two</s><s>|three|");

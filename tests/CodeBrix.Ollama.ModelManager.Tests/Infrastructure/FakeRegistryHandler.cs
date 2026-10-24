@@ -30,6 +30,18 @@ public sealed class FakeRegistryHandler : FakeHttpHandlerBase
     /// <summary>The host blob requests are redirected to when <see cref="RedirectBlobsToCdn"/> is set.</summary>
     public string CdnHost { get; set; } = "cdn.test";
 
+    /// <summary>
+    /// The scheme of the address blob requests are redirected to when <see cref="RedirectBlobsToCdn"/>
+    /// is set. Default "https"; "http" makes the redirect a downgrade.
+    /// </summary>
+    public string CdnScheme { get; set; } = "https";
+
+    /// <summary>
+    /// Whether the content delivery host answers every request with a 401 and a challenge, as a host
+    /// fishing for a token would.
+    /// </summary>
+    public bool ChallengeOnCdn { get; set; }
+
     /// <summary>Whether requests to the registry host must carry the expected bearer token.</summary>
     public bool RequireAuthorization { get; set; }
 
@@ -118,6 +130,11 @@ public sealed class FakeRegistryHandler : FakeHttpHandlerBase
         bool isCdn = string.Equals(uri.Host, CdnHost, StringComparison.OrdinalIgnoreCase);
 
         if (RequireAuthorization && !isCdn && !HasExpectedToken(request))
+        {
+            return Task.FromResult(CreateChallenge());
+        }
+
+        if (ChallengeOnCdn && isCdn)
         {
             return Task.FromResult(CreateChallenge());
         }
@@ -215,7 +232,7 @@ public sealed class FakeRegistryHandler : FakeHttpHandlerBase
         if (RedirectBlobsToCdn && !isCdn)
         {
             var redirect = new HttpResponseMessage(HttpStatusCode.TemporaryRedirect);
-            redirect.Headers.Location = new Uri("https://" + CdnHost + "/blobs/" + digest + "?signature=fake");
+            redirect.Headers.Location = new Uri(CdnScheme + "://" + CdnHost + "/blobs/" + digest + "?signature=fake");
             redirect.Content = new ByteArrayContent(Array.Empty<byte>());
             return redirect;
         }

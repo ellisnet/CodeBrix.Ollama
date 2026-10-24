@@ -332,6 +332,225 @@ public sealed class RegistryClientTests
         handler.Requests[0].Method.Should().Be(HttpMethod.Head);
     }
 
+    [Fact]
+    public async Task GetManifestAsync_over_http_never_sends_the_token_even_after_a_challenge()
+    {
+        //Arrange
+        using var handler = new FakeRegistryHandler { RequireAuthorization = true, ExpectedBearerToken = "secret" };
+        handler.AddManifest(Repository, "latest", CreateManifest());
+        ModelStoreOptions options = CreateOptions(handler);
+        options.AllowInsecureHttp = true;
+        options.BearerToken = "secret";
+        using var client = new RegistryClient(options);
+        ModelName name = ModelName.Parse("http://registry.test/library/test:latest");
+
+        //Act
+        Func<Task> act = () => client.GetManifestAsync(name, TestContext.Current.CancellationToken);
+
+        //Assert
+        RegistryException exception = (await act.Should().ThrowAsync<RegistryException>()).Which;
+        exception.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        handler.Requests.Should().HaveCount(1);
+        handler.AnyAuthorizationSentTo(RegistryHost).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task A_challenge_from_one_registry_does_not_send_the_token_up_front_to_another_origin()
+    {
+        //Arrange
+        using var handler = new FakeRegistryHandler { RequireAuthorization = true, ExpectedBearerToken = "secret" };
+        handler.AddManifest(Repository, "latest", CreateManifest());
+        ModelStoreOptions options = CreateOptions(handler);
+        options.BearerToken = "secret";
+        using var client = new RegistryClient(options);
+        await client.GetManifestAsync(CreateName(), TestContext.Current.CancellationToken);
+        ModelName onAnotherPort = ModelName.Parse("registry.test:5000/library/test:latest");
+
+        //Act
+        await client.GetManifestAsync(onAnotherPort, TestContext.Current.CancellationToken);
+
+        //Assert
+        IReadOnlyList<HttpRequestMessage> requests = handler.Requests;
+        requests.Should().HaveCount(4);
+        requests[2].RequestUri.Port.Should().Be(5000);
+        FakeRegistryHandler.GetHeader(requests[2], "Authorization").Should().BeNull();
+        FakeRegistryHandler.GetHeader(requests[3], "Authorization").Should().Be("Bearer secret");
+    }
+
+    [Fact]
+    public async Task A_challenge_from_the_registry_never_sends_the_token_to_a_host_it_does_not_belong_to()
+    {
+        //Arrange
+        using var handler = new FakeRegistryHandler { RequireAuthorization = true, ExpectedBearerToken = "secret" };
+        handler.AddManifest(Repository, "latest", CreateManifest());
+        string digest = handler.AddBlob(new byte[100]);
+        ModelStoreOptions options = CreateOptions(handler);
+        options.BearerToken = "secret";
+        using var client = new RegistryClient(options);
+        await client.GetManifestAsync(CreateName(), TestContext.Current.CancellationToken);
+        var foreign = new Uri("https://foreign.test/v2/library/test/blobs/" + digest);
+
+        //Act
+        Func<Task> act = () => client.GetContentLengthAsync(foreign, false, TestContext.Current.CancellationToken);
+
+        //Assert
+        RegistryException exception = (await act.Should().ThrowAsync<RegistryException>()).Which;
+        exception.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        handler.RequestCountForHost("foreign.test").Should().Be(1);
+        handler.AnyAuthorizationSentTo("foreign.test").Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task UseBearerTokenProactively_sends_the_token_up_front_to_the_hub_only()
+    {
+        //Arrange
+        using var handler = new FakeRegistryHandler { RequireAuthorization = true, ExpectedBearerToken = "secret" };
+        handler.AddManifest(Repository, "latest", CreateManifest());
+        ModelStoreOptions options = CreateOptions(handler);
+        options.BearerToken = "secret";
+        using var client = new RegistryClient(options);
+        client.UseBearerTokenProactively();
+
+        //Act
+        await client.GetManifestAsync(CreateName(), TestContext.Current.CancellationToken);
+
+        //Assert
+        IReadOnlyList<HttpRequestMessage> requests = handler.Requests;
+        requests.Should().HaveCount(2);
+        FakeRegistryHandler.GetHeader(requests[0], "Authorization").Should().BeNull();
+        FakeRegistryHandler.GetHeader(requests[1], "Authorization").Should().Be("Bearer secret");
+    }
+
+    [Fact]
+    public async Task A_401_from_the_host_a_redirect_led_to_is_never_answered_with_the_token()
+    {
+        //Arrange
+        using var handler = new FakeRegistryHandler
+        {
+            RedirectBlobsToCdn = true,
+            ChallengeOnCdn = true
+        };
+        string digest = handler.AddBlob(new byte[100]);
+        ModelStoreOptions options = CreateOptions(handler);
+        options.BearerToken = "secret";
+        using var client = new RegistryClient(options);
+
+        //Act
+        Func<Task> act = () => client.GetBlobSizeAsync(CreateName(), digest, TestContext.Current.CancellationToken);
+
+        //Assert
+        RegistryException exception = (await act.Should().ThrowAsync<RegistryException>()).Which;
+        exception.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        handler.Requests.Should().HaveCount(2);
+        handler.AnyAuthorizationSentTo("cdn.test").Should().BeFalse();
+        handler.AnyAuthorizationSentTo(RegistryHost).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task GetBlobSizeAsync_follows_a_redirect_to_a_public_host()
+    {
+        //Arrange
+        using var handler = new FakeRegistryHandler { RedirectBlobsToCdn = true };
+        string digest = handler.AddBlob(new byte[1234]);
+        using var client = new RegistryClient(CreateOptions(handler));
+
+        //Act
+        long size = await client.GetBlobSizeAsync(CreateName(), digest, TestContext.Current.CancellationToken);
+
+        //Assert
+        size.Should().Be(1234L);
+        handler.RequestCountForHost("cdn.test").Should().Be(1);
+    }
+
+    [Theory]
+    [InlineData("127.0.0.1")]
+    [InlineData("10.1.2.3")]
+    [InlineData("172.20.0.1")]
+    [InlineData("192.168.1.1")]
+    [InlineData("169.254.169.254")]
+    [InlineData("0.0.0.0")]
+    [InlineData("[::1]")]
+    [InlineData("[fd00::1]")]
+    [InlineData("[fe80::1]")]
+    [InlineData("[::ffff:127.0.0.1]")]
+    [InlineData("localhost")]
+    public async Task GetBlobSizeAsync_refuses_a_redirect_to_a_non_public_address(string target)
+    {
+        //Arrange
+        using var handler = new FakeRegistryHandler { RedirectBlobsToCdn = true, CdnHost = target };
+        string digest = handler.AddBlob(new byte[1234]);
+        using var client = new RegistryClient(CreateOptions(handler));
+
+        //Act
+        Func<Task> act = () => client.GetBlobSizeAsync(CreateName(), digest, TestContext.Current.CancellationToken);
+
+        //Assert
+        RegistryException exception = (await act.Should().ThrowAsync<RegistryException>()).Which;
+        exception.Message.Should().Contain("non-public address");
+        handler.Requests.Should().HaveCount(1);
+    }
+
+    [Fact]
+    public async Task GetBlobSizeAsync_refuses_a_redirect_from_https_to_http()
+    {
+        //Arrange
+        using var handler = new FakeRegistryHandler { RedirectBlobsToCdn = true, CdnScheme = "http" };
+        string digest = handler.AddBlob(new byte[1234]);
+        using var client = new RegistryClient(CreateOptions(handler));
+
+        //Act
+        Func<Task> act = () => client.GetBlobSizeAsync(CreateName(), digest, TestContext.Current.CancellationToken);
+
+        //Assert
+        RegistryException exception = (await act.Should().ThrowAsync<RegistryException>()).Which;
+        exception.Message.Should().Contain("plain HTTP");
+        handler.Requests.Should().HaveCount(1);
+    }
+
+    [Fact]
+    public async Task GetBlobSizeAsync_with_insecure_http_allowed_follows_a_redirect_to_http()
+    {
+        //Arrange
+        using var handler = new FakeRegistryHandler { RedirectBlobsToCdn = true, CdnScheme = "http" };
+        string digest = handler.AddBlob(new byte[1234]);
+        ModelStoreOptions options = CreateOptions(handler);
+        options.AllowInsecureHttp = true;
+        using var client = new RegistryClient(options);
+
+        //Act
+        long size = await client.GetBlobSizeAsync(CreateName(), digest, TestContext.Current.CancellationToken);
+
+        //Assert
+        size.Should().Be(1234L);
+        handler.Requests[1].RequestUri.Scheme.Should().Be("http");
+    }
+
+    [Theory]
+    [InlineData("https://127.0.0.1/x", true)]
+    [InlineData("https://127.8.9.10/x", true)]
+    [InlineData("https://10.0.0.1/x", true)]
+    [InlineData("https://172.16.0.1/x", true)]
+    [InlineData("https://172.31.255.255/x", true)]
+    [InlineData("https://172.32.0.1/x", false)]
+    [InlineData("https://192.168.0.1/x", true)]
+    [InlineData("https://169.254.169.254/x", true)]
+    [InlineData("https://0.0.0.0/x", true)]
+    [InlineData("https://[::]/x", true)]
+    [InlineData("https://[::1]/x", true)]
+    [InlineData("https://[fc00::1]/x", true)]
+    [InlineData("https://[fe80::1]/x", true)]
+    [InlineData("https://[::ffff:10.0.0.1]/x", true)]
+    [InlineData("https://localhost/x", true)]
+    [InlineData("https://8.8.8.8/x", false)]
+    [InlineData("https://[2001:db8::1]/x", false)]
+    [InlineData("https://cdn-lfs.hf.co/x", false)]
+    [InlineData("https://storage.googleapis.com/x", false)]
+    public void IsNonPublicHost_judges_the_address_as_written(string address, bool expected)
+    {
+        //Act and assert
+        RegistryClient.IsNonPublicHost(new Uri(address)).Should().Be(expected);
+    }
+
     /// <summary>
     /// Builds the options every test here uses: the fake registry, and part sizes and timings small
     /// enough that a download splits and retries within a test run.

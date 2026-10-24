@@ -26,10 +26,12 @@ internal static class Sha256Digest
     private const int BufferSize = 128 * 1024;
 
     /// <summary>
-    /// Matches both digest spellings, exactly as Ollama's <c>digestPattern</c> in manifest/paths.go does.
+    /// Matches both digest spellings, as Ollama's <c>digestPattern</c> in manifest/paths.go does, but
+    /// anchored with <c>\z</c>: a .NET <c>$</c> also matches before a final line feed, which would let
+    /// <c>"sha256:&lt;hex&gt;\n"</c> through as a digest and into a blob path.
     /// </summary>
     private static readonly Regex DigestPattern = new Regex(
-        "^sha256[:-][0-9a-fA-F]{64}$",
+        "^sha256[:-][0-9a-fA-F]{64}\\z",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     /// <summary>
@@ -96,9 +98,15 @@ internal static class Sha256Digest
     }
 
     /// <summary>
-    /// Converts a digest to the file name a blob carries on disk, turning the colon into a hyphen.
-    /// A digest already spelled with a hyphen is returned unchanged.
+    /// Converts a digest to the file name a blob carries on disk, turning the colon into a hyphen and
+    /// the hexadecimal into lower case. A digest already spelled that way is returned unchanged.
     /// </summary>
+    /// <remarks>
+    /// Upper-case hexadecimal is accepted as a digest, as Ollama accepts it, but every digest this store
+    /// computes is lower case and every comparison it makes is against the lower-case form, so one blob
+    /// must have one file name: otherwise a manifest that spelled a digest in upper case would name a
+    /// second file for the same content on a case-sensitive file system.
+    /// </remarks>
     /// <param name="digest">The digest, in either spelling.</param>
     /// <returns>The blob file name.</returns>
     public static string ToFileName(string digest)
@@ -107,7 +115,7 @@ internal static class Sha256Digest
         {
             throw new ArgumentNullException(nameof(digest));
         }
-        return digest.Replace(':', '-');
+        return digest.Replace(':', '-').ToLowerInvariant();
     }
 
     /// <summary>

@@ -108,9 +108,6 @@ internal static class JinjaFunctions
         }
     }
 
-    /// <summary>The largest list <c>range()</c> will build before it refuses.</summary>
-    private const long MaximumRangeLength = 10000000L;
-
     private static object Range(IList<object> arguments)
     {
         if (arguments == null || arguments.Count == 0)
@@ -143,12 +140,7 @@ internal static class JinjaFunctions
         double estimate = step > 0
             ? Math.Ceiling(((double)stop - start) / step)
             : Math.Ceiling(((double)start - stop) / -(double)step);
-        if (estimate > MaximumRangeLength)
-        {
-            throw JinjaValues.RuntimeError(
-                "'range' would produce more than "
-                + MaximumRangeLength.ToString(CultureInfo.InvariantCulture) + " values.");
-        }
+        TemplateBudget.CheckItems(estimate);
 
         var result = new List<object>();
         if (step > 0)

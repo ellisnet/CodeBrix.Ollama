@@ -36,6 +36,9 @@ public sealed class BundleListing
     /// </param>
     /// <param name="files">The files, already filtered, in the order the source listed them.</param>
     /// <exception cref="ArgumentNullException"><paramref name="files"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">
+    /// Two files have the same path, or paths that differ only in case.
+    /// </exception>
     public BundleListing(
         string repositoryId, string resolvedRevision, LicenseRecord license, IReadOnlyList<BundleFile> files)
     {
@@ -48,6 +51,20 @@ public sealed class BundleListing
         ResolvedRevision = string.IsNullOrWhiteSpace(resolvedRevision) ? null : resolvedRevision.Trim();
         License = license ?? LicenseRecord.None;
         _files = new List<BundleFile>(files).AsReadOnly();
+
+        // Two paths that differ only in case are one file on Windows and on a default macOS volume, so
+        // the second would silently overwrite the first when the bundle is laid out there.
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (BundleFile file in _files)
+        {
+            if (file != null && !seen.Add(file.Path))
+            {
+                throw new ArgumentException(
+                    "The listing names '" + file.Path + "' twice, or beside a path that differs from it only"
+                        + " in case; a bundle file path must be unique without regard to case.",
+                    nameof(files));
+            }
+        }
 
         long total = 0;
         foreach (BundleFile file in _files)

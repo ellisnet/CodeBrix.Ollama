@@ -71,6 +71,10 @@ public static class PythonSupport
     /// A module the feature needs is not installed in the interpreter that would run it. The message
     /// carries the command that installs it there.
     /// </exception>
+    /// <exception cref="PythonModuleTooOldException">
+    /// A module the feature needs is installed at a version older than the lowest this library runs -
+    /// <see cref="PythonModuleReport.MinimumVersion"/>. The message carries the command that upgrades it.
+    /// </exception>
     public static void Require(PythonOptions options, string feature, params string[] requiredModules)
         => PythonHost.Require(options, feature, requiredModules);
 

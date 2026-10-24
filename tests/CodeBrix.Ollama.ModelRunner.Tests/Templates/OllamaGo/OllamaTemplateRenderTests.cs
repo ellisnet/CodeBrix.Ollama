@@ -33,7 +33,7 @@ public sealed class OllamaTemplateRenderTests
             conversation));
 
         //Act
-        var actual = template.Render(new OllamaTemplateValues { Messages = Conversation(conversation) });
+        var actual = template.Render(new OllamaTemplateValues { Messages = Conversation(conversation) }, TestContext.Current.CancellationToken);
 
         //Assert
         if (Array.IndexOf(TrailingSpaceTemplates, name) >= 0 && actual.EndsWith(" ", StringComparison.Ordinal))

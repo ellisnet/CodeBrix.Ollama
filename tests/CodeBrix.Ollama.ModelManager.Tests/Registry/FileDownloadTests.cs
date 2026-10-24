@@ -156,6 +156,71 @@ public sealed class FileDownloadTests : IDisposable
     }
 
     [Fact]
+    public async Task DownloadFileAsync_never_offers_the_token_to_a_listed_host_that_answers_401()
+    {
+        //Arrange
+        using var handler = new FakeRegistryHandler { RequireAuthorization = true, ExpectedBearerToken = "secret" };
+        byte[] data = CreateData(10000);
+        string digest = handler.AddBlob(data);
+        var file = new BundleFile("big.bin", "https://files.test/v2/library/test/blobs/" + digest, data.Length);
+        ModelStoreOptions options = CreateOptions(handler);
+        options.BearerToken = "secret";
+        using var downloader = new FileDownloader(options, _store.Paths, RetryBaseDelay);
+
+        //Act
+        Func<Task> act = () => downloader.DownloadFileAsync(file, false, null, TestContext.Current.CancellationToken);
+
+        //Assert
+        RegistryException exception = (await act.Should().ThrowAsync<RegistryException>()).Which;
+        exception.StatusCode.Should().Be(System.Net.HttpStatusCode.Unauthorized);
+        handler.Requests.Should().HaveCount(1);
+        handler.AnyAuthorizationSentTo("files.test").Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task DownloadFileAsync_of_a_plain_http_address_is_refused_before_any_request()
+    {
+        //Arrange
+        byte[] data = CreateData(100);
+        using var handler = new FakeRegistryHandler();
+        string digest = handler.AddBlob(data);
+        var file = new BundleFile("small.bin", "http://files.test/v2/library/test/blobs/" + digest, data.Length);
+        using var downloader = new FileDownloader(CreateOptions(handler), _store.Paths, RetryBaseDelay);
+
+        //Act
+        Func<Task> act = () => downloader.DownloadFileAsync(file, false, null, TestContext.Current.CancellationToken);
+
+        //Assert
+        RegistryException exception = (await act.Should().ThrowAsync<RegistryException>()).Which;
+        exception.Message.Should().StartWith("insecure protocol http");
+        handler.Requests.Should().BeEmpty();
+        File.Exists(_store.Paths.GetPartialDataPath(file.Url)).Should().BeFalse();
+        File.Exists(_store.Paths.GetPartialStatePath(file.Url)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task DownloadFileAsync_of_a_plain_http_address_with_insecure_http_allowed_downloads_it_without_the_token()
+    {
+        //Arrange
+        byte[] data = CreateData(100);
+        using var handler = new FakeRegistryHandler();
+        string digest = handler.AddBlob(data);
+        var file = new BundleFile("small.bin", "http://huggingface.co/v2/library/test/blobs/" + digest, data.Length);
+        ModelStoreOptions options = CreateOptions(handler);
+        options.AllowInsecureHttp = true;
+        options.BearerToken = "secret";
+        using var downloader = new FileDownloader(options, _store.Paths, RetryBaseDelay);
+
+        //Act
+        BlobDownloadResult result = await downloader.DownloadFileAsync(
+            file, false, null, TestContext.Current.CancellationToken);
+
+        //Assert
+        result.Digest.Should().Be(digest);
+        handler.AnyAuthorizationSentTo("huggingface.co").Should().BeFalse();
+    }
+
+    [Fact]
     public async Task DownloadFileAsync_verifies_an_md5_when_that_is_the_only_hash_stated()
     {
         //Arrange
@@ -208,7 +273,8 @@ public sealed class FileDownloadTests : IDisposable
         byte[] data = CreateData(3000);
         using FakeHubHandler handler = CreateHub(data);
         handler.AddFile(Repository, Commit, "plain.bin", data, false);
-        BundleFile file = await ListFileAsync(handler, "plain.bin");
+        var file = new BundleFile(
+            "plain.bin", HuggingFaceHubSource.BuildFileUrl(Repository, Commit, "plain.bin"), data.Length);
         using var downloader = new FileDownloader(CreateOptions(handler), _store.Paths, RetryBaseDelay);
 
         //Act
@@ -349,7 +415,8 @@ public sealed class FileDownloadTests : IDisposable
         byte[] data = CreateData(100);
         using FakeHubHandler handler = CreateHub(data);
         handler.AddFile(Repository, Commit, "plain.bin", data, false);
-        BundleFile file = await ListFileAsync(handler, "plain.bin");
+        var file = new BundleFile(
+            "plain.bin", HuggingFaceHubSource.BuildFileUrl(Repository, Commit, "plain.bin"), data.Length);
         using var downloader = new FileDownloader(CreateOptions(handler), _store.Paths, RetryBaseDelay);
 
         //Act
@@ -358,7 +425,97 @@ public sealed class FileDownloadTests : IDisposable
         //Assert
         ModelManagerException exception = (await act.Should().ThrowAsync<ModelManagerException>()).Which;
         exception.Message.Should().Contain("plain.bin");
-        exception.Message.Should().Contain("no sha256 and no md5");
+        exception.Message.Should().Contain("no sha256, no md5 and no git blob id");
+    }
+
+    [Fact]
+    public async Task DownloadFileAsync_that_must_have_a_hash_accepts_a_small_hub_file_by_its_git_blob_id()
+    {
+        //Arrange
+        byte[] data = CreateData(100);
+        using FakeHubHandler handler = CreateHub(data);
+        handler.AddFile(Repository, Commit, "plain.bin", data, false);
+        BundleFile file = await ListFileAsync(handler, "plain.bin");
+        using var downloader = new FileDownloader(CreateOptions(handler), _store.Paths, RetryBaseDelay);
+
+        //Act
+        BlobDownloadResult result = await downloader.DownloadFileAsync(
+            file, true, null, TestContext.Current.CancellationToken);
+
+        //Assert
+        file.Sha256.Should().BeNull();
+        file.GitSha1.Should().Be(FakeHubHandler.ComputeGitBlobSha1(data));
+        result.Digest.Should().Be(FakeHubHandler.ComputeDigest(data));
+        File.Exists(result.FilePath).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task DownloadFileAsync_with_bytes_that_do_not_match_the_stated_git_blob_id_fails_and_removes_them()
+    {
+        //Arrange
+        byte[] data = CreateData(3000);
+        using FakeHubHandler handler = CreateHub(data);
+        handler.AddFile(Repository, Commit, "config.json", data, false);
+        string promised = new string('c', 40);
+        var file = new BundleFile(
+            "config.json",
+            HuggingFaceHubSource.BuildFileUrl(Repository, Commit, "config.json"),
+            data.Length,
+            null,
+            null,
+            promised);
+        using var downloader = new FileDownloader(CreateOptions(handler), _store.Paths, RetryBaseDelay);
+
+        //Act
+        Func<Task> act = () => downloader.DownloadFileAsync(file, false, null, TestContext.Current.CancellationToken);
+
+        //Assert
+        DigestMismatchException exception = (await act.Should().ThrowAsync<DigestMismatchException>()).Which;
+        exception.ExpectedDigest.Should().Be("git-sha1:" + promised);
+        exception.ActualDigest.Should().Be("git-sha1:" + FakeHubHandler.ComputeGitBlobSha1(data));
+        File.Exists(_store.Paths.GetPartialDataPath(file.Url)).Should().BeFalse();
+        File.Exists(_store.Paths.GetPartialStatePath(file.Url)).Should().BeFalse();
+        File.Exists(_store.Paths.GetBlobPath(FakeHubHandler.ComputeDigest(data))).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task DownloadFileAsync_with_a_stated_sha256_does_not_hold_the_bytes_to_the_git_blob_id()
+    {
+        //Arrange
+        byte[] data = CreateData(2000);
+        using FakeHubHandler handler = CreateHub(data);
+        var file = new BundleFile(
+            "big.bin",
+            HuggingFaceHubSource.BuildFileUrl(Repository, Commit, "big.bin"),
+            data.Length,
+            FakeHubHandler.ComputeDigest(data).Substring("sha256:".Length),
+            null,
+            new string('d', 40));
+        using var downloader = new FileDownloader(CreateOptions(handler), _store.Paths, RetryBaseDelay);
+
+        //Act
+        BlobDownloadResult result = await downloader.DownloadFileAsync(
+            file, false, null, TestContext.Current.CancellationToken);
+
+        //Assert
+        result.Digest.Should().Be(FakeHubHandler.ComputeDigest(data));
+    }
+
+    [Theory]
+    [InlineData("", "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391")]
+    [InlineData("hello\n", "ce013625030ba8dba906f756967f9e9ca394464a")]
+    public async Task ComputeGitBlobSha1Async_matches_what_git_hash_object_answers(string text, string expected)
+    {
+        //Arrange
+        string path = Path.Combine(_store.DirectoryPath, "blob.txt");
+        await File.WriteAllTextAsync(path, text, TestContext.Current.CancellationToken);
+
+        //Act
+        string actual = await FileDownloader.ComputeGitBlobSha1Async(path, TestContext.Current.CancellationToken);
+
+        //Assert
+        actual.Should().Be(expected);
+        FakeHubHandler.ComputeGitBlobSha1(System.Text.Encoding.UTF8.GetBytes(text)).Should().Be(expected);
     }
 
     [Fact]

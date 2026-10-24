@@ -219,7 +219,9 @@ internal static class JinjaValues
     /// <summary>Formats a value the way Python's <c>str()</c> does.</summary>
     /// <param name="value">The value to format.</param>
     /// <returns>The text.</returns>
-    internal static string ToDisplayString(object value)
+    internal static string ToDisplayString(object value) => ToDisplayString(value, 0);
+
+    private static string ToDisplayString(object value, int level)
     {
         switch (value)
         {
@@ -237,6 +239,7 @@ internal static class JinjaValues
                 return FormatDouble(number);
             case IDictionary<string, object> mapping:
                 {
+                    TemplateBudget.CheckValueDepth(level + 1);
                     var builder = new StringBuilder("{");
                     bool first = true;
                     foreach (KeyValuePair<string, object> pair in mapping)
@@ -247,8 +250,10 @@ internal static class JinjaValues
                         }
 
                         first = false;
-                        builder.Append(ToRepresentation(pair.Key)).Append(": ")
-                            .Append(ToRepresentation(pair.Value));
+                        builder.Append(ToRepresentation(pair.Key, level + 1)).Append(": ")
+                            .Append(ToRepresentation(pair.Value, level + 1));
+                        TemplateBudget.CheckString(builder.Length);
+                        TemplateBudget.Poll();
                     }
 
                     return builder.Append('}').ToString();
@@ -256,6 +261,7 @@ internal static class JinjaValues
 
             case IList<object> list:
                 {
+                    TemplateBudget.CheckValueDepth(level + 1);
                     var builder = new StringBuilder("[");
                     for (int i = 0; i < list.Count; i++)
                     {
@@ -264,7 +270,9 @@ internal static class JinjaValues
                             builder.Append(", ");
                         }
 
-                        builder.Append(ToRepresentation(list[i]));
+                        builder.Append(ToRepresentation(list[i], level + 1));
+                        TemplateBudget.CheckString(builder.Length);
+                        TemplateBudget.Poll();
                     }
 
                     return builder.Append(']').ToString();
@@ -278,11 +286,13 @@ internal static class JinjaValues
     /// <summary>Formats a value the way Python's <c>repr()</c> does.</summary>
     /// <param name="value">The value to format.</param>
     /// <returns>The text.</returns>
-    internal static string ToRepresentation(object value)
+    internal static string ToRepresentation(object value) => ToRepresentation(value, 0);
+
+    private static string ToRepresentation(object value, int level)
     {
         if (!(value is string text))
         {
-            return ToDisplayString(value);
+            return ToDisplayString(value, level);
         }
 
         char quote = text.IndexOf('\'') >= 0 && text.IndexOf('"') < 0 ? '"' : '\'';
@@ -408,7 +418,10 @@ internal static class JinjaValues
     {
         if (operation == JinjaOperator.Concat)
         {
-            return ToDisplayString(left) + ToDisplayString(right);
+            string leftPart = ToDisplayString(left);
+            string rightPart = ToDisplayString(right);
+            TemplateBudget.CheckString((double)leftPart.Length + rightPart.Length);
+            return leftPart + rightPart;
         }
 
         if (left is JinjaUndefined undefinedLeft)
@@ -425,11 +438,13 @@ internal static class JinjaValues
         {
             if (left is string leftText && right is string rightText)
             {
+                TemplateBudget.CheckString((double)leftText.Length + rightText.Length);
                 return leftText + rightText;
             }
 
             if (left is IList<object> leftList && right is IList<object> rightList)
             {
+                TemplateBudget.CheckItems((double)leftList.Count + rightList.Count);
                 var combined = new List<object>(leftList);
                 combined.AddRange(rightList);
                 return combined;
@@ -441,12 +456,14 @@ internal static class JinjaValues
             if (left is string repeated && TryGetNumber(right, out double count, out bool countIsInteger)
                 && countIsInteger)
             {
+                if (count > 0) TemplateBudget.CheckString((double)repeated.Length * count);
                 return count <= 0 ? string.Empty : string.Concat(Enumerable_Repeat(repeated, (int)count));
             }
 
             if (right is string repeatedRight && TryGetNumber(left, out double leftCount, out bool leftIsInteger)
                 && leftIsInteger)
             {
+                if (leftCount > 0) TemplateBudget.CheckString((double)repeatedRight.Length * leftCount);
                 return leftCount <= 0 ? string.Empty : string.Concat(Enumerable_Repeat(repeatedRight, (int)leftCount));
             }
         }
@@ -671,7 +688,9 @@ internal static class JinjaValues
     /// <param name="left">The left operand.</param>
     /// <param name="right">The right operand.</param>
     /// <returns>True when the values are equal.</returns>
-    internal static bool AreEqual(object left, object right)
+    internal static bool AreEqual(object left, object right) => AreEqual(left, right, 0);
+
+    private static bool AreEqual(object left, object right, int level)
     {
         if (left is JinjaUndefined || right is JinjaUndefined)
         {
@@ -700,9 +719,11 @@ internal static class JinjaValues
                 return false;
             }
 
+            TemplateBudget.CheckValueDepth(level + 1);
             foreach (KeyValuePair<string, object> pair in leftMap)
             {
-                if (!rightMap.TryGetValue(pair.Key, out object other) || !AreEqual(pair.Value, other))
+                TemplateBudget.Poll();
+                if (!rightMap.TryGetValue(pair.Key, out object other) || !AreEqual(pair.Value, other, level + 1))
                 {
                     return false;
                 }
@@ -718,9 +739,11 @@ internal static class JinjaValues
                 return false;
             }
 
+            TemplateBudget.CheckValueDepth(level + 1);
             for (int i = 0; i < leftList.Count; i++)
             {
-                if (!AreEqual(leftList[i], rightList[i]))
+                TemplateBudget.Poll();
+                if (!AreEqual(leftList[i], rightList[i], level + 1))
                 {
                     return false;
                 }
@@ -741,7 +764,9 @@ internal static class JinjaValues
     /// <param name="left">The left operand.</param>
     /// <param name="right">The right operand.</param>
     /// <returns>A negative number, zero or a positive number.</returns>
-    internal static int Compare(object left, object right)
+    internal static int Compare(object left, object right) => Compare(left, right, 0);
+
+    private static int Compare(object left, object right, int level)
     {
         if (left is JinjaUndefined undefined)
         {
@@ -765,10 +790,12 @@ internal static class JinjaValues
 
         if (left is IList<object> leftList && right is IList<object> rightList)
         {
+            TemplateBudget.CheckValueDepth(level + 1);
             int shared = Math.Min(leftList.Count, rightList.Count);
             for (int i = 0; i < shared; i++)
             {
-                int item = Compare(leftList[i], rightList[i]);
+                TemplateBudget.Poll();
+                int item = Compare(leftList[i], rightList[i], level + 1);
                 if (item != 0)
                 {
                     return item;
@@ -805,6 +832,7 @@ internal static class JinjaValues
             case IList<object> list:
                 foreach (object element in list)
                 {
+                    TemplateBudget.Poll();
                     if (AreEqual(element, item))
                     {
                         return true;
@@ -1019,6 +1047,7 @@ internal static class JinjaValues
                 throw RuntimeError("None cannot be iterated.");
             case string text:
                 {
+                    TemplateBudget.CheckItems(text.Length);
                     var characters = new List<object>(text.Length);
                     foreach (char character in text)
                     {

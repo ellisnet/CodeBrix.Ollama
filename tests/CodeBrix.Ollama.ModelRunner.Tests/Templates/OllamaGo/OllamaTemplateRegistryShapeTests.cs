@@ -62,7 +62,7 @@ public sealed class OllamaTemplateRegistryShapeTests
         };
 
         //Act
-        var rendered = template.Render(values);
+        var rendered = template.Render(values, TestContext.Current.CancellationToken);
 
         //Assert
         rendered.Should().Be("<|start_header_id|>system<|end_header_id|>\n\nBe brief.<|eot_id|>"
@@ -92,7 +92,7 @@ public sealed class OllamaTemplateRegistryShapeTests
         };
 
         //Act
-        var rendered = template.Render(values);
+        var rendered = template.Render(values, TestContext.Current.CancellationToken);
 
         //Assert
         rendered.Should().Contain("You have tools.");
@@ -127,7 +127,7 @@ public sealed class OllamaTemplateRegistryShapeTests
         };
 
         //Act
-        var rendered = template.Render(values);
+        var rendered = template.Render(values, TestContext.Current.CancellationToken);
 
         //Assert
         rendered.Should().Contain("{\"name\": \"get_weather\", \"parameters\": {\"city\":\"Tokyo\"}}");

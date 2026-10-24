@@ -314,7 +314,10 @@ internal sealed class BlobDownload
     /// address with a redirect to a content delivery host, and that redirected address carries its own
     /// signature, so it is used without the <c>Authorization</c> header. A 200 means the registry
     /// serves the blob itself, and then the blob address is used with the header. A Hugging Face
-    /// resolve address behaves exactly like the first case.
+    /// resolve address behaves exactly like the first case. The header is only ever sent to an address
+    /// the token belongs to (see <see cref="TokenBelongsToSource"/>). A redirect is checked with
+    /// <see cref="RegistryClient.EnsureRedirectAllowed"/> before it is used, and a refused one fails the
+    /// download at once rather than being retried.
     /// </summary>
     /// <param name="cancellationToken">A token that cancels the lookup.</param>
     /// <returns>
@@ -329,6 +332,7 @@ internal sealed class BlobDownload
         CancellationToken cancellationToken)
     {
         Uri blobUri = _fromRegistry ? _client.GetBlobUri(_name, _digest) : _sourceUrl;
+        bool tokenBelongsHere = TokenBelongsToSource();
 
         // Ollama gives this step 30 seconds. Here the budget is thirty times the retry base delay,
         // which is the same 30 seconds at the default one-second delay and stays proportional when a
@@ -342,7 +346,7 @@ internal sealed class BlobDownload
             try
             {
                 using HttpResponseMessage response = await _client.SendWithChallengeAsync(
-                    HttpMethod.Get, blobUri, null, null, true, true, cancellationToken).ConfigureAwait(false);
+                    HttpMethod.Get, blobUri, null, null, tokenBelongsHere, true, cancellationToken).ConfigureAwait(false);
 
                 if (response.StatusCode == HttpStatusCode.NotFound)
                 {
@@ -361,13 +365,15 @@ internal sealed class BlobDownload
                 if (RegistryClient.IsRedirect(response.StatusCode) && response.Headers.Location != null)
                 {
                     Uri location = new Uri(blobUri, response.Headers.Location);
-                    bool sameHost = string.Equals(location.Host, blobUri.Host, StringComparison.OrdinalIgnoreCase);
-                    return (location, sameHost, ReadStatedSize(response));
+                    _client.EnsureRedirectAllowed(blobUri, location);
+                    bool sameOrigin = string.Equals(
+                        RegistryClient.GetOrigin(location), RegistryClient.GetOrigin(blobUri), StringComparison.Ordinal);
+                    return (location, tokenBelongsHere && sameOrigin, ReadStatedSize(response));
                 }
 
                 if (response.StatusCode == HttpStatusCode.OK)
                 {
-                    return (blobUri, true, ReadStatedSize(response));
+                    return (blobUri, tokenBelongsHere, ReadStatedSize(response));
                 }
 
                 string body = await RegistryClient.ReadBodyAsync(response, cancellationToken).ConfigureAwait(false);
@@ -377,6 +383,11 @@ internal sealed class BlobDownload
                         + " for " + _subject,
                     response.StatusCode,
                     body);
+            }
+            catch (AddressRefusedException)
+            {
+                // A refused address or redirect stays refused however often it is asked again.
+                throw;
             }
             catch (RegistryException exception)
             {
@@ -458,6 +469,10 @@ internal sealed class BlobDownload
                     throw;
                 }
                 catch (IOException exception) when (IsOutOfSpace(exception))
+                {
+                    throw;
+                }
+                catch (AddressRefusedException)
                 {
                     throw;
                 }
@@ -973,7 +988,18 @@ internal sealed class BlobDownload
     {
         return _fromRegistry
             ? _client.GetBlobSizeAsync(_name, _digest, cancellationToken)
-            : _client.GetContentLengthAsync(_sourceUrl, true, cancellationToken);
+            : _client.GetContentLengthAsync(_sourceUrl, TokenBelongsToSource(), cancellationToken);
+    }
+
+    /// <summary>
+    /// Whether the bearer token belongs to the address this download starts at: always for a registry
+    /// blob, whose registry the model name chose, and for an address download only when the address is
+    /// on the Hugging Face Hub. The client still sends it only over https and only to that exact origin.
+    /// </summary>
+    /// <returns><see langword="true"/> when the token may be offered to the starting address.</returns>
+    private bool TokenBelongsToSource()
+    {
+        return _fromRegistry || RegistryClient.IsTokenAddressForFile(_sourceUrl);
     }
 
     /// <summary>

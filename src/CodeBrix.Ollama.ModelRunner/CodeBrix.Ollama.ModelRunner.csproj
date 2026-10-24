@@ -172,4 +172,14 @@
     <EmbeddedResource Include="Templates\OllamaGo\BuiltIn\**\*" />
   </ItemGroup>
 
+  <!--
+    The SHA-256 of every committed native, in sha256sum format, compiled into the assembly so the loader can
+    refuse a native whose bytes are not the ones this package shipped. Regenerated at adoption time - see
+    llama-native-tools/README.txt, ADOPTING A BUILD - and checked against runtimes/ by the test suite.
+  -->
+  <ItemGroup>
+    <None Remove="Native\SHA256SUMS" />
+    <EmbeddedResource Include="Native\SHA256SUMS" LogicalName="CodeBrix.Ollama.ModelRunner.Native.SHA256SUMS" />
+  </ItemGroup>
+
 </Project>

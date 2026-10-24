@@ -265,14 +265,25 @@ internal sealed class OnnxModel
             yield break;
         }
 
-        foreach (OnnxTensorProto tensor in EnumerateGraphTensors(Proto.Graph))
+        foreach (OnnxTensorProto tensor in EnumerateGraphTensors(Proto.Graph, 0))
         {
             yield return tensor;
         }
     }
 
-    private static IEnumerable<OnnxTensorProto> EnumerateGraphTensors(OnnxGraphProto graph)
+    //The same cap the parser puts on sub-graph nesting. A parsed model never exceeds it; the check is here for
+    //a graph assembled in memory, so this walk cannot overflow the stack either.
+    private const int MaxSubGraphDepth = 64;
+
+    private static IEnumerable<OnnxTensorProto> EnumerateGraphTensors(OnnxGraphProto graph, int depth)
     {
+        if (depth > MaxSubGraphDepth)
+        {
+            throw new InvalidDataException(
+                "The ONNX model nests sub-graphs more than " + MaxSubGraphDepth + " deep, which no real model "
+                + "does; it is refused rather than walked.");
+        }
+
         foreach (OnnxTensorProto initializer in graph.Initializers)
         {
             yield return initializer;
@@ -294,7 +305,7 @@ internal sealed class OnnxModel
 
                 if (attribute.Graph != null)
                 {
-                    foreach (OnnxTensorProto tensor in EnumerateGraphTensors(attribute.Graph))
+                    foreach (OnnxTensorProto tensor in EnumerateGraphTensors(attribute.Graph, depth + 1))
                     {
                         yield return tensor;
                     }
@@ -302,7 +313,7 @@ internal sealed class OnnxModel
 
                 foreach (OnnxGraphProto subGraph in attribute.Graphs)
                 {
-                    foreach (OnnxTensorProto tensor in EnumerateGraphTensors(subGraph))
+                    foreach (OnnxTensorProto tensor in EnumerateGraphTensors(subGraph, depth + 1))
                     {
                         yield return tensor;
                     }

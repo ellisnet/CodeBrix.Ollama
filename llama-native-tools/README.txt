@@ -179,6 +179,27 @@ application's OUTPUT FOLDER, where a file named plainly LICENSE collides with
 any other package that ships one there.
 
 
+ADOPTING A BUILD: REGENERATE THE HASH TABLE
+--------------------------------------------------------------------------------
+The ModelRunner assembly carries the SHA-256 of every shipped native, in
+src/CodeBrix.Ollama.ModelRunner/Native/SHA256SUMS (compiled in as an embedded
+resource), and its loader REFUSES any native whose hash is not the line for its
+RID. So whenever a built library is copied into
+src/CodeBrix.Ollama.ModelRunner/runtimes/<rid>/native/, regenerate the table in
+the same change, from the repository root:
+
+    cd src/CodeBrix.Ollama.ModelRunner/runtimes
+    sha256sum */native/*codebrix_llama.* > ../Native/SHA256SUMS
+    sha256sum -c ../Native/SHA256SUMS
+
+One line per RID, "<sha256>  <rid>/native/<file>", LF line endings (on
+Windows, run it from Git Bash or WSL rather than writing the file by hand).
+Each new line must equal the "SHA256" of that RID's entry in
+BUILD-PROVENANCE.txt. If the table is not regenerated, the ModelRunner test
+suite fails (NativeLibraryHashesTests) and the native cannot be loaded at all -
+including a dev build from output/<rid>/ dropped into the tree to try it.
+
+
 THE VENDORED COMMIT
 --------------------------------------------------------------------------------
   llama.cpp tag b10221 = commit 815a2a5915f22ce6a760c676389c5dfe8535c08f
@@ -189,6 +210,27 @@ It is the commit LLamaSharp v0.29.0+34 pins its bindings to, so the managed
 binding in CodeBrix.Ollama.ModelRunner, this source and the shipped natives all
 describe one C API. llama.cpp/UPSTREAM.txt explains the choice and records how
 to verify the snapshot against upstream.
+
+
+SECURITY REBASE POLICY
+--------------------------------------------------------------------------------
+The shipped natives parse untrusted model files in-process, so the vendored
+commit is not left to age on its own. The rule:
+
+  1. WATCH llama.cpp's security advisories - the GitHub security advisories of
+     ggml-org/llama.cpp and the oss-security mailing list - at least before
+     every release of this repository, and whenever one is announced.
+  2. RE-VENDOR on any fix that touches gguf, ggml, the model loader or the LoRA
+     adapter loader (src/llama-adapter.cpp), whether or not it has a CVE: move
+     the snapshot to an upstream tag that carries the fix (the rsync command
+     in llama.cpp/UPSTREAM.txt), rebuild every RID, check the managed binding
+     in CodeBrix.Ollama.ModelRunner against the new C API, and release. If the
+     binding cannot move yet, carry the fix as a ../patches/*.patch instead and
+     say so in UPSTREAM.txt.
+  3. RECORD the check: llama.cpp/UPSTREAM.txt carries a "Last checked against
+     advisories" line with the date of the most recent check and the tag it
+     was checked for. Update that line every time the advisories are read,
+     even when nothing needed doing.
 
 
 LICENCES AND NOTICES

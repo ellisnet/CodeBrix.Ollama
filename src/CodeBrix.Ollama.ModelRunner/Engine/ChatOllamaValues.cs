@@ -19,7 +19,7 @@ internal static class ChatOllamaValues
 {
     /// <summary>Builds the values for one request.</summary>
     /// <param name="request">The chat request.</param>
-    /// <returns>The values, ready for <see cref="OllamaTemplate.Render"/>.</returns>
+    /// <returns>The values, ready for <see cref="OllamaTemplate.Render(OllamaTemplateValues)"/>.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="request"/> is <see langword="null"/>.</exception>
     public static OllamaTemplateValues Build(ChatRequest request)
     {

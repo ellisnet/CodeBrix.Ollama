@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
+using System.Threading;
 
 namespace CodeBrix.Ollama.ModelRunner; //was previously: golang/go src/text/template/exec.go (BSD-3-Clause);
 
@@ -27,6 +28,7 @@ internal sealed class GoTemplateExecutor
     private readonly StringBuilder _output;
     private readonly List<KeyValuePair<string, object>> _vars = new List<KeyValuePair<string, object>>();
     private GoTemplateTree _tree;
+    private TemplateBudget _budget;
     private int _depth;
 
     /// <summary>Creates an executor for a template.</summary>
@@ -52,9 +54,15 @@ internal sealed class GoTemplateExecutor
                 "template: {0} is an incomplete or empty template", GoQuote.Quote(_template.Name)));
         }
 
-        _vars.Add(new KeyValuePair<string, object>("$", data));
-        Walk(data, _tree.Root);
-        return _output.ToString();
+        //charged to the budget the caller opened - OllamaTemplate.Render opens one with the template's
+        //limits and the request's token - or to a default one when none is open
+        using (TemplateBudget.Open(null, CancellationToken.None))
+        {
+            _budget = TemplateBudget.Current;
+            _vars.Add(new KeyValuePair<string, object>("$", data));
+            Walk(data, _tree.Root);
+            return _output.ToString();
+        }
     }
 
     private static ChatTemplateException Error(string format, params object[] args)
@@ -107,7 +115,41 @@ internal sealed class GoTemplateExecutor
         throw Error("undefined variable: {0}", name);
     }
 
+    private void Write(string text)
+    {
+        TemplateBudget.CheckOutput((long)_output.Length + text.Length);
+        _output.Append(text);
+    }
+
     private int Walk(object dot, GoNode node)
+    {
+        _budget.Step();
+        _budget.Enter();
+        try
+        {
+            return WalkCore(dot, node);
+        }
+        finally
+        {
+            _budget.Exit();
+        }
+    }
+
+    private object EvalPipeline(object dot, GoPipeNode pipe)
+    {
+        _budget.Step();
+        _budget.Enter();
+        try
+        {
+            return EvalPipelineCore(dot, pipe);
+        }
+        finally
+        {
+            _budget.Exit();
+        }
+    }
+
+    private int WalkCore(object dot, GoNode node)
     {
         switch (node)
         {
@@ -141,7 +183,7 @@ internal sealed class GoTemplateExecutor
             }
 
             case GoTextNode text:
-                _output.Append(text.Text);
+                Write(text.Text);
                 return SignalNone;
             case GoBranchNode branch when branch.NodeType == GoNodeType.Range:
                 return WalkRange(dot, branch);
@@ -347,7 +389,7 @@ internal sealed class GoTemplateExecutor
         }
     }
 
-    private object EvalPipeline(object dot, GoPipeNode pipe)
+    private object EvalPipelineCore(object dot, GoPipeNode pipe)
     {
         if (pipe == null)
         {
@@ -580,7 +622,9 @@ internal sealed class GoTemplateExecutor
             values.Add(final);
         }
 
-        return function.Invoke(values);
+        object result = function.Invoke(values);
+        if (result is string text) TemplateBudget.CheckString(text.Length);
+        return result;
     }
 
     private object EvalArg(object dot, GoNode node)
@@ -631,10 +675,10 @@ internal sealed class GoTemplateExecutor
     {
         if (ReferenceEquals(value, Missing))
         {
-            _output.Append("<no value>");
+            Write("<no value>");
             return;
         }
 
-        _output.Append(GoFormat.Print(value));
+        Write(GoFormat.Print(value));
     }
 }

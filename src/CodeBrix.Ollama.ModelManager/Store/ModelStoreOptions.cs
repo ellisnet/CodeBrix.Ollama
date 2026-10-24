@@ -33,17 +33,33 @@ public sealed class ModelStoreOptions
     public string DefaultTag { get; set; } = "latest";
 
     /// <summary>
-    /// Whether a name whose scheme is <c>http://</c> may be pulled over plain HTTP. Default
-    /// <see langword="false"/>: such a name is rejected. HTTPS is always allowed.
+    /// Whether plain HTTP may be used at all. Default <see langword="false"/>: a model name whose scheme
+    /// is <c>http://</c>, an <c>http://</c> address in a file list, and a redirect from anywhere to an
+    /// <c>http://</c> address (an https to http downgrade included) are all refused before any request
+    /// goes to them. When <see langword="true"/>, all three are allowed. HTTPS is always allowed, and
+    /// <see cref="BearerToken"/> is never sent over plain HTTP either way.
     /// </summary>
     public bool AllowInsecureHttp { get; set; }
 
     /// <summary>
-    /// A bearer token offered as <c>Authorization: Bearer</c> when a registry answers a request with
-    /// 401 and a challenge, as Ollama does; it is never sent before a challenge, and never to a host
-    /// a download was redirected to. <see langword="null"/> to have no credentials to offer. Public
-    /// models need none.
+    /// A bearer token offered as <c>Authorization: Bearer</c>. <see langword="null"/> to have no
+    /// credentials to offer. Public models need none.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The token belongs to two kinds of address only: the registry a model name being pulled points at,
+    /// and the Hugging Face Hub (<c>huggingface.co</c> and <c>hf.co</c>). An address in a file list on any
+    /// other host never receives it, whatever that host answers. It is only ever sent over https, and only
+    /// to the exact scheme, host and port a request was addressed to - never to a host a redirect leads
+    /// to, and never in answer to a 401 from one.
+    /// </para>
+    /// <para>
+    /// A registry is offered the token after it answers 401 with a challenge, as Ollama does; from then
+    /// on that one registry gets it with every request, and every other host still has to ask for it
+    /// itself. A Hugging Face Hub source sends it with its first request to the Hub, because the Hub
+    /// answers an anonymous request for a private repository with a plain 404 rather than a challenge.
+    /// </para>
+    /// </remarks>
     public string BearerToken { get; set; }
 
     /// <summary>
@@ -80,8 +96,10 @@ public sealed class ModelStoreOptions
 
     /// <summary>
     /// The handler every registry request goes through. When <see langword="null"/>, a
-    /// <see cref="SocketsHttpHandler"/> that follows redirects is created. Tests supply a fake handler
-    /// here; nothing in the library reaches the network any other way.
+    /// <see cref="SocketsHttpHandler"/> with automatic redirects switched off is created, and the
+    /// library follows and checks every redirect itself. A handler supplied here is used exactly as
+    /// configured; one that follows redirects on its own bypasses the library's redirect checks. Tests
+    /// supply a fake handler here; nothing in the library reaches the network any other way.
     /// </summary>
     public HttpMessageHandler HttpMessageHandler { get; set; }
 

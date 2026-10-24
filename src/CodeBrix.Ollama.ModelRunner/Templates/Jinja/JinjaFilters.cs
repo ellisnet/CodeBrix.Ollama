@@ -333,6 +333,8 @@ internal static class JinjaFilters
 
             first = false;
             builder.Append(AsText(attribute == null ? item : ReadAttributePath(item, attribute)));
+            TemplateBudget.CheckString(builder.Length);
+            TemplateBudget.Poll();
         }
 
         return builder.ToString();
@@ -407,11 +409,14 @@ internal static class JinjaFilters
         object width = Argument(arguments, keywords, 0, "width");
         bool first = JinjaValues.IsTruthy(Argument(arguments, keywords, 1, "first"));
         bool blank = JinjaValues.IsTruthy(Argument(arguments, keywords, 2, "blank"));
-        string padding = width is string padText
-            ? padText
-            : new string(' ', width == null || width is JinjaUndefined ? 4 : JinjaValues.ToIndex(width, "width"));
+        int padWidth = width is string || width == null || width is JinjaUndefined
+            ? 4
+            : JinjaValues.ToIndex(width, "width");
+        TemplateBudget.CheckString(padWidth);
+        string padding = width is string padText ? padText : new string(' ', Math.Max(0, padWidth));
 
         string[] lines = text.Split('\n');
+        TemplateBudget.CheckString(text.Length + ((double)padding.Length * lines.Length));
         var builder = new StringBuilder();
         for (int i = 0; i < lines.Length; i++)
         {
@@ -539,6 +544,7 @@ internal static class JinjaFilters
             bool found = false;
             foreach (object previous in seen)
             {
+                TemplateBudget.Poll();
                 if (JinjaValues.AreEqual(previous, key))
                 {
                     found = true;
@@ -786,6 +792,7 @@ internal static class JinjaFilters
 
         Array.Sort(order, (left, right) =>
         {
+            TemplateBudget.Poll();
             int result = comparison(source[left], source[right]);
             return result != 0 ? result : left.CompareTo(right);
         });
@@ -800,6 +807,11 @@ internal static class JinjaFilters
     {
         int size = JinjaValues.ToIndex(Argument(arguments, keywords, 0, "linecount"), "linecount");
         object fill = Argument(arguments, keywords, 1, "fill_with");
+        if (fill != null)
+        {
+            TemplateBudget.CheckItems(size);
+        }
+
         var result = new List<object>();
         var current = new List<object>();
         foreach (object item in JinjaValues.Iterate(value))
@@ -837,6 +849,8 @@ internal static class JinjaFilters
         {
             throw JinjaValues.RuntimeError("'slice' needs a positive slice count.");
         }
+
+        TemplateBudget.CheckItems(slices);
 
         object fill = Argument(arguments, keywords, 1, "fill_with");
         IList<object> items = JinjaValues.Iterate(value);
@@ -876,6 +890,7 @@ internal static class JinjaFilters
             return text;
         }
 
+        TemplateBudget.CheckString(width);
         int total = width - text.Length;
         int left = (total / 2) + (total & width & 1);
         return new string(fill, left) + text + new string(fill, total - left);
@@ -1023,7 +1038,7 @@ internal static class JinjaFilters
             int width = 0;
             while (cursor < format.Length && char.IsDigit(format[cursor]))
             {
-                width = (width * 10) + (format[cursor] - '0');
+                width = (int)Math.Min(int.MaxValue, (width * 10L) + (format[cursor] - '0'));
                 cursor++;
             }
 
@@ -1034,10 +1049,15 @@ internal static class JinjaFilters
                 precision = 0;
                 while (cursor < format.Length && char.IsDigit(format[cursor]))
                 {
-                    precision = (precision * 10) + (format[cursor] - '0');
+                    precision = (int)Math.Min(int.MaxValue, (precision * 10L) + (format[cursor] - '0'));
                     cursor++;
                 }
             }
+
+            // A width or a precision is how much text the conversion will write, so both are refused
+            // before anything is padded or formatted.
+            TemplateBudget.CheckString(width);
+            TemplateBudget.CheckString(precision);
 
             if (cursor >= format.Length)
             {

@@ -45,6 +45,19 @@ internal sealed class GoTemplate
     /// <returns>The parsed template.</returns>
     /// <exception cref="ChatTemplateException">The template text is not valid.</exception>
     internal static GoTemplate Parse(string name, string text, IReadOnlyDictionary<string, GoFunction> funcs)
+        => Parse(name, text, funcs, TemplateLimits.Default.MaxNestingDepth);
+
+    /// <summary>
+    /// Parses template text against a function table, refusing a template that nests too deeply.
+    /// </summary>
+    /// <param name="name">The name to give the top-level template.</param>
+    /// <param name="text">The template text.</param>
+    /// <param name="funcs">The functions the template may call, on top of Go's own built-ins.</param>
+    /// <param name="maxDepth">How deeply the template may nest.</param>
+    /// <returns>The parsed template.</returns>
+    /// <exception cref="ChatTemplateException">The template text is not valid, or nests too deeply.</exception>
+    internal static GoTemplate Parse(string name, string text, IReadOnlyDictionary<string, GoFunction> funcs,
+        int maxDepth)
     {
         Dictionary<string, GoFunction> table = new Dictionary<string, GoFunction>(StringComparer.Ordinal);
         foreach (KeyValuePair<string, GoFunction> builtin in GoFuncs.Builtins)
@@ -61,7 +74,7 @@ internal sealed class GoTemplate
         }
 
         HashSet<string> names = new HashSet<string>(table.Keys, StringComparer.Ordinal);
-        Dictionary<string, GoTemplateTree> trees = GoTemplateTree.Parse(name, text, names);
+        Dictionary<string, GoTemplateTree> trees = GoTemplateTree.Parse(name, text, names, maxDepth);
         return new GoTemplate(name, trees, table);
     }
 

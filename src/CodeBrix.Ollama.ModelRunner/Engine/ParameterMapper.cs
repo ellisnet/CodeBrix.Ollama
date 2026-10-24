@@ -91,6 +91,8 @@ internal static unsafe class ParameterMapper
                 + "leave it null for no cap.", nameof(options));
         }
 
+        TemplateLimits.ValidatedCopy(options.TemplateLimits, nameof(options));
+
         if (!File.Exists(options.ModelPath))
         {
             throw new ModelLoadException($"There is no model file at '{options.ModelPath}'.");

@@ -205,7 +205,7 @@ hands back:
 
 THE ModelRunner STATIC CLASS
 ============================
-Five members, and they are the only way into the engine.
+Six members, and they are the only way into the engine.
 
     static Task<IRunningModel> LoadAsync(ModelRunnerOptions options,
                                          CancellationToken)
@@ -218,6 +218,7 @@ Five members, and they are the only way into the engine.
                                               CancellationToken)
     static NativeRuntimeInfo   GetNativeRuntimeInfo()
     static void SetLogHandler(Action<ModelRunnerLogLevel, string> handler)
+    static bool AllowSystemNativeLibrary { get; set; }   default false
 
 LoadAsync
 ---------
@@ -284,6 +285,14 @@ SetLogHandler
 -------------
 Routes the native engine's log to a handler of yours. See LOGGING below.
 
+AllowSystemNativeLibrary
+------------------------
+False by default, and leave it so: the engine is then loaded only from the
+package's own files, and only when each one's SHA-256 is the one the package
+shipped. True lets the operating system's library search path supply the
+engine when the package's copy is not found - unchecked. Set it before
+anything loads the engine. See THE NATIVE LIBRARY at the end.
+
 
 LOADING A MODEL (ModelRunnerOptions)
 ====================================
@@ -326,11 +335,14 @@ and is NOT the same as zero.
     ChatTemplateDialect ChatTemplateDialect = Auto
     string   OllamaTemplate     = null    a Modelfile TEMPLATE, as text
     string   JinjaTemplate      = null    replaces the file's own template
+    TemplateLimits TemplateLimits = new() the budget every chat template render
+                                          is held to; see TEMPLATE LIMITS
     IProgress<float> LoadProgress = null  0.0 to 1.0 while loading
 
 VALIDATED BEFORE ANYTHING NATIVE IS TOUCHED: a blank ModelPath, a zero
 BatchSize, PhysicalBatchSize or MaxSequences, a PhysicalBatchSize larger than
 BatchSize, a ContextSize of 0, a Threads, BatchThreads or MaxThreads below 1,
+a TemplateLimits count below 1 or a RenderTimeout that is not positive,
 and a LoraAdapterOptions with no path, are all ArgumentException. A ModelPath or an
 adapter path that names no file is ModelLoadException. Nothing has been
 allocated by the time either is thrown.
@@ -772,6 +784,41 @@ starts with the token's own text, the tokenizer is told not to add another.
 You do not have to do anything about this; it is here so you know it is
 handled, and so you do not try to handle it yourself.
 
+TEMPLATE LIMITS. A chat template is code that arrives with a model file or a
+Modelfile, so every parse and render - in both the Jinja and the Ollama
+dialect - is held to ModelRunnerOptions.TemplateLimits:
+
+    int       MaxRenderSteps     = 1,000,000   statements, expressions and loop
+                                               iterations, one step each
+    int       MaxOutputChars     = 8,000,000   text one render may write
+    int       MaxStringChars     = 8,000,000   longest string it may build
+                                               (repeat, padding and format
+                                               widths are checked BEFORE
+                                               anything is allocated)
+    int       MaxCollectionItems = 1,000,000   largest list or mapping: range(),
+                                               batch, slice, extend, ...
+    int       MaxNestingDepth    = 256         blocks, parentheses, operator and
+                                               filter chains at parse; macro and
+                                               {{template}} recursion at render;
+                                               a value that nests or contains
+                                               itself
+    TimeSpan? RenderTimeout      = 10 s        null for none; checked as the
+                                               render goes, no thread or timer
+
+A template that exceeds one is refused with ChatTemplateException, and the
+message names the limit (for example "TemplateLimits.MaxRenderSteps"). The
+model stays loaded and the next request renders normally. The defaults are far
+above anything a real template needs, even on a long chat with many tools, so
+leave them alone unless you have a reason. Raise MaxNestingDepth far above its default only if you
+must; as a backstop, a template that would exhaust the rendering thread's stack
+is refused with ChatTemplateException rather than allowed to overflow it, which
+would end the process.
+
+The request's CancellationToken is checked while a Jinja or Ollama template
+renders, and those two dialects render on the thread pool, not on the model's
+engine thread, so a slow template never holds up the engine. The native
+dialect still renders on the engine thread, because it calls into the engine.
+
 
 THINKING AND TOOL CALLS
 =======================
@@ -1211,6 +1258,12 @@ inside it, which may name a sub-folder ("onnx/model_base.onnx"); the third
 takes (logical file name -> path) pairs, which is what a content-addressed
 store needs, since it keeps every file under a digest rather than under the
 publisher's name for it.
+
+A SIDE FILE NEVER COMES FROM OUTSIDE THE MODEL. All three routes confine the
+locations a graph names: LoadAsync to the graph's own folder and its
+sub-folders, LoadFromDirectoryAsync to the bundle directory, LoadFromFilesAsync
+to the names in the set. An absolute location, a drive-qualified one, or a
+"../" that climbs out is refused with a ModelLoadException rather than read.
 
     IOnnxModel : IDisposable, IAsyncDisposable
         OnnxModelMetadata  Metadata { get; }
@@ -2665,7 +2718,10 @@ and none of them needs the native library.
 JinjaTemplate
 -------------
     static JinjaTemplate Parse(string source)
+    static JinjaTemplate Parse(string source, TemplateLimits limits)
     string Render(IReadOnlyDictionary<string, object> variables)
+    string Render(IReadOnlyDictionary<string, object> variables,
+                  CancellationToken token)
     string Source { get; }
 
 An original implementation of the Jinja template language, rendered the way
@@ -2693,16 +2749,21 @@ accepted and converted. Values are copied when Render is called, so a template
 that appends to a list cannot change your data, and mapping key order is
 preserved because that is what `| tojson` writes. ChatTemplateException for a
 source that does not parse (with the line and column) and for a failure while
-rendering, including the message of a template's own raise_exception().
+rendering, including the message of a template's own raise_exception(), and
+for a template that exceeds a TemplateLimits limit. The overloads take your
+own limits (null for the defaults; they are copied) and a CancellationToken
+that is checked as the render goes.
 
 OllamaTemplate and OllamaTemplateValues
 ---------------------------------------
     static OllamaTemplate Parse(string text)
+    static OllamaTemplate Parse(string text, TemplateLimits limits)
     static OllamaTemplate BuiltIn(string name)
     static IReadOnlyList<string> BuiltInNames { get; }
     static IReadOnlyList<string> BuiltInStopStrings(string name)
     static string NamedBuiltIn(string text)
     string Render(OllamaTemplateValues values)
+    string Render(OllamaTemplateValues values, CancellationToken token)
     string Source { get; }   IReadOnlyList<string> Variables { get; }
 
 A port of Ollama's template layer, template language and all, so a model
@@ -2732,7 +2793,7 @@ OllamaTemplateValues carries IList<ChatMessage> Messages, IList<ToolDefinition>
 Tools, string Prompt and string Suffix (the fill-in-the-middle pair), string
 System (instructions prepended as a system message), bool? Think and string
 ThinkLevel. ChatTemplateException for a template that will not parse or will
-not render.
+not render, or that exceeds a TemplateLimits limit.
 
 ThinkingParser, ThinkingParserState and ThinkingTags
 ---------------------------------------------------
@@ -2836,8 +2897,11 @@ Exception. Catch the base type to catch all of it.
     ModelRunnerException         the base
       NativeLibraryException     the native engine could not be loaded -- the
                                  message lists every path that was tried -- or
-                                 the library that was found is the wrong build
-                                 or the wrong runtime identifier
+                                 the file that was found is not byte for byte
+                                 the one the package shipped (its SHA-256 and
+                                 the expected one are both in the message), or
+                                 the library is the wrong build or the wrong
+                                 runtime identifier
       ModelLoadException         no file at ModelPath or at a LoRA adapter's
                                  path; the engine would not read the file as a
                                  model; no inference context could be created;
@@ -2904,15 +2968,37 @@ directory the managed assembly sits in:
 
     <dir>/runtimes/<rid>/native/<file>      the package's own layout
     <dir>/<file>                            a loose copy beside the assembly
-    <file>                                  the operating system's search path
 
 That works both for a publish WITH a runtime identifier, where the build
 system copies the right native beside the application, and for one without,
 where the natives stay in their runtimes folders and nothing else would look
 there.
 
+EVERY FILE FOUND THERE IS HASHED BEFORE IT IS LOADED. The package carries the
+SHA-256 of each native it ships, compiled into the managed assembly, and a
+file whose bytes are not exactly the shipped ones is refused with a
+NativeLibraryException naming the path, the hash it has and the hash it
+should have - it is not loaded and none of its code runs. Replacing or
+patching the native in an application's output folder is therefore not
+possible; restore the package's own copy instead.
+
+THE OPERATING SYSTEM'S SEARCH PATH IS NOT USED (LD_LIBRARY_PATH, the DYLD_*
+variables, the Windows DLL search order), so a library of the same name
+planted on that path is never picked up. An application that deliberately
+wants a system-installed build sets, before anything loads the engine:
+
+    ModelRunner.AllowSystemNativeLibrary = true;
+
+Then, ONLY if the package's own copy is not found, the bare library name is
+handed to the operating system's loader. A library found that way cannot be
+hash-checked - it is not a build this package knows - so only the identity
+check below applies, and NativeRuntimeInfo.LoadedPath reads
+"codebrix_llama (operating-system search path, not hash-checked)". Leave it
+false unless you control every directory on that search path.
+
 WHEN IT CANNOT BE LOADED you get a NativeLibraryException that lists every
-path it tried, one per line, and then says:
+path it tried, one per line, says whether the operating system's search path
+was tried, and then says:
 
     The package ships this library under runtimes/<rid>/native/. If it is
     missing, the application was probably published in a way that dropped it -

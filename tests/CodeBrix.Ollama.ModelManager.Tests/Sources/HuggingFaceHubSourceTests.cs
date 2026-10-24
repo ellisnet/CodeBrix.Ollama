@@ -156,7 +156,7 @@ public sealed class HuggingFaceHubSourceTests
     }
 
     [Fact]
-    public async Task ListAsync_with_a_revision_that_is_already_a_commit_resolves_nothing()
+    public async Task ListAsync_with_a_revision_that_is_the_head_commit_lists_that_commit()
     {
         //Arrange
         using FakeHubHandler handler = CreateHub();
@@ -167,7 +167,80 @@ public sealed class HuggingFaceHubSourceTests
 
         //Assert
         listing.ResolvedRevision.Should().Be(Commit);
-        handler.RequestedUrls().Any(url => url.Contains("/revision/")).Should().BeFalse();
+        handler.RequestedUrls().Any(url => url.EndsWith("/revision/" + Commit, StringComparison.Ordinal))
+            .Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ListAsync_with_a_commit_other_than_the_head_lists_that_commit_and_not_the_head()
+    {
+        //Arrange
+        using FakeHubHandler handler = CreateHub();
+        handler.AddFile(Repository, OlderCommit, "config.json", Bytes("older config"), false);
+        using var source = new HuggingFaceHubSource(Repository, OlderCommit, null, CreateOptions(handler));
+
+        //Act
+        BundleListing listing = await source.ListAsync(TestContext.Current.CancellationToken);
+
+        //Assert
+        listing.ResolvedRevision.Should().Be(OlderCommit);
+        Paths(listing).Should().Equal("config.json");
+        listing.Files.All(file => file.Url.AbsoluteUri.Contains(OlderCommit)).Should().BeTrue();
+        handler.RequestedUrls().Any(url => url.EndsWith("/revision/" + OlderCommit, StringComparison.Ordinal))
+            .Should().BeTrue();
+        handler.RequestedUrls().Any(url => url.Contains(Commit)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ListAsync_with_an_upper_case_commit_lists_it_in_lower_case()
+    {
+        //Arrange
+        using FakeHubHandler handler = CreateHub();
+        handler.AddRevision(Repository, OlderCommit.ToUpperInvariant(), OlderCommit);
+        handler.AddFile(Repository, OlderCommit, "config.json", Bytes("older config"), false);
+        using var source = new HuggingFaceHubSource(
+            Repository, OlderCommit.ToUpperInvariant(), null, CreateOptions(handler));
+
+        //Act
+        BundleListing listing = await source.ListAsync(TestContext.Current.CancellationToken);
+
+        //Assert
+        listing.ResolvedRevision.Should().Be(OlderCommit);
+        Paths(listing).Should().Equal("config.json");
+    }
+
+    [Fact]
+    public async Task ListAsync_with_a_commit_the_hub_answers_with_another_commit_is_refused()
+    {
+        //Arrange
+        using FakeHubHandler handler = CreateHub();
+        handler.AddFile(Repository, OlderCommit, "config.json", Bytes("older config"), false);
+        handler.RepositoryShaOverride = Commit;
+        using var source = new HuggingFaceHubSource(Repository, OlderCommit, null, CreateOptions(handler));
+
+        //Act
+        Func<Task> act = () => source.ListAsync(TestContext.Current.CancellationToken);
+
+        //Assert
+        RegistryException exception = (await act.Should().ThrowAsync<RegistryException>()).Which;
+        exception.Message.Should().Contain(OlderCommit);
+        exception.Message.Should().Contain(Commit);
+        handler.RequestedUrls().Any(url => url.Contains("/tree/")).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ListAsync_states_the_git_blob_id_of_a_small_file_as_git_computes_it()
+    {
+        //Arrange
+        using FakeHubHandler handler = CreateHub();
+        using var source = new HuggingFaceHubSource(Repository, null, null, CreateOptions(handler));
+
+        //Act
+        BundleListing listing = await source.ListAsync(TestContext.Current.CancellationToken);
+
+        //Assert
+        Find(listing, "config.json").GitSha1.Should().Be(
+            FakeHubHandler.ComputeGitBlobSha1(Bytes("{\"model_type\":\"MIDIModel\"}")));
     }
 
     [Fact]

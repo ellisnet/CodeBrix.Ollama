@@ -255,7 +255,7 @@ public sealed class JinjaErrorTests
         ChatTemplateException exception = act.Should().Throw<ChatTemplateException>().Which;
 
         //Assert
-        exception.Message.Should().Contain("more than");
+        exception.Message.Should().Contain("TemplateLimits.MaxCollectionItems");
     }
 
     /// <summary>tojson gives up on a value nested past its depth cap.</summary>

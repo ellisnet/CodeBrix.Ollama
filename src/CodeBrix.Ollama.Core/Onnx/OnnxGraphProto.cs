@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 
 namespace CodeBrix.Ollama.Core;
 
@@ -9,6 +10,15 @@ namespace CodeBrix.Ollama.Core;
 /// </summary>
 internal sealed class OnnxGraphProto : IProtobufMessage
 {
+    /// <summary>
+    /// How deeply sub-graphs may nest below a model's main graph, through control-flow attributes such as
+    /// <c>If</c> and <c>Loop</c> bodies. Real models nest a handful of levels at most.
+    /// </summary>
+    private const int MaxNestingDepth = 64;
+
+    [ThreadStatic]
+    private static int _nestingDepth;
+
     private int _cachedSize;
 
     /// <summary>The nodes, in the order they were written.</summary>
@@ -44,7 +54,35 @@ internal sealed class OnnxGraphProto : IProtobufMessage
     /// <summary>Reads one graph from a message body.</summary>
     /// <param name="body">The encoded message body.</param>
     /// <returns>The parsed graph.</returns>
+    /// <exception cref="InvalidDataException">
+    /// The graph holds sub-graphs nested more than <see cref="MaxNestingDepth"/> deep, or the body is not a
+    /// well-formed message.
+    /// </exception>
     internal static OnnxGraphProto Parse(ReadOnlySpan<byte> body)
+    {
+        //A graph reaches its sub-graphs through node -> attribute -> graph, and that is the one place this
+        //codec recurses. Each level costs three stack frames, so a crafted file a few megabytes long nested
+        //deeply enough would overflow the stack - which no catch block survives, so it ends the process.
+        //The depth is counted per thread because a parse never leaves the thread it started on.
+        if (_nestingDepth > MaxNestingDepth)
+        {
+            throw new InvalidDataException(
+                "The ONNX file nests sub-graphs more than " + MaxNestingDepth + " deep, which no real model "
+                + "does; it is refused rather than parsed.");
+        }
+
+        _nestingDepth++;
+        try
+        {
+            return ParseBody(body);
+        }
+        finally
+        {
+            _nestingDepth--;
+        }
+    }
+
+    private static OnnxGraphProto ParseBody(ReadOnlySpan<byte> body)
     {
         OnnxGraphProto value = new OnnxGraphProto();
         ProtobufReader reader = new ProtobufReader(body);

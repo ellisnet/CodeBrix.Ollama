@@ -307,7 +307,7 @@ public sealed class JinjaTemplateTests
         };
 
         //Act
-        string rendered = template.Render(variables);
+        string rendered = template.Render(variables, TestContext.Current.CancellationToken);
 
         //Assert
         rendered.Should().Be("qwen|3|0.5|True|a,b|value");
@@ -321,8 +321,8 @@ public sealed class JinjaTemplateTests
         JinjaTemplate template = JinjaTemplate.Parse("{{ x }}");
 
         //Act
-        string first = template.Render(new Dictionary<string, object> { ["x"] = 1 });
-        string second = template.Render(new Dictionary<string, object> { ["x"] = 2 });
+        string first = template.Render(new Dictionary<string, object> { ["x"] = 1 }, TestContext.Current.CancellationToken);
+        string second = template.Render(new Dictionary<string, object> { ["x"] = 2 }, TestContext.Current.CancellationToken);
 
         //Assert
         first.Should().Be("1");
@@ -338,7 +338,7 @@ public sealed class JinjaTemplateTests
         JinjaTemplate template = JinjaTemplate.Parse("{% do items.append(2) %}{{ items }}");
 
         //Act
-        string rendered = template.Render(new Dictionary<string, object> { ["items"] = items });
+        string rendered = template.Render(new Dictionary<string, object> { ["items"] = items }, TestContext.Current.CancellationToken);
 
         //Assert
         rendered.Should().Be("[1, 2]");
@@ -460,7 +460,7 @@ public sealed class JinjaTemplateTests
             "{% for item in items|sort(attribute='k') %}{{ item.v }},{% endfor %}");
 
         //Act
-        string rendered = template.Render(new Dictionary<string, object> { ["items"] = items });
+        string rendered = template.Render(new Dictionary<string, object> { ["items"] = items }, TestContext.Current.CancellationToken);
 
         //Assert
         rendered.Should().Be(string.Concat(Enumerable.Range(0, 40).Select(i => i + ",")));
@@ -481,7 +481,7 @@ public sealed class JinjaTemplateTests
             "{% for pair in m|dictsort(by='value') %}{{ pair[0] }},{% endfor %}");
 
         //Act
-        string rendered = template.Render(new Dictionary<string, object> { ["m"] = mapping });
+        string rendered = template.Render(new Dictionary<string, object> { ["m"] = mapping }, TestContext.Current.CancellationToken);
 
         //Assert
         rendered.Should().Be(string.Concat(

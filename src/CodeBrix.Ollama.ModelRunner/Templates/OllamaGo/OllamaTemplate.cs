@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Threading;
 
 namespace CodeBrix.Ollama.ModelRunner; //was previously: ollama/ollama template/template.go;
 
@@ -25,10 +26,13 @@ public sealed class OllamaTemplate
 
     private readonly GoTemplate _template;
 
-    private OllamaTemplate(string source, GoTemplate template)
+    private readonly TemplateLimits _limits;
+
+    private OllamaTemplate(string source, GoTemplate template, TemplateLimits limits)
     {
         Source = source;
         _template = template;
+        _limits = limits;
         Variables = CollectVariables(template);
     }
 
@@ -38,7 +42,7 @@ public sealed class OllamaTemplate
     /// <summary>
     /// The lower-cased names of the fields and variables the template refers to, in alphabetical order.
     /// Ollama uses this to tell a <c>.Messages</c> template from an older one; so does
-    /// <see cref="Render"/>.
+    /// <see cref="Render(OllamaTemplateValues)"/>.
     /// </summary>
     public IReadOnlyList<string> Variables { get; }
 
@@ -53,13 +57,32 @@ public sealed class OllamaTemplate
     /// </summary>
     /// <param name="text">The template text.</param>
     /// <returns>The parsed template.</returns>
-    /// <exception cref="ChatTemplateException">The template text is not a valid Go text/template, or it
-    /// invokes a template with no pipeline at all, which Ollama rejects while it collects the variables.
-    /// A <c>{{template "name" .}}</c> that names a template the text never defines parses cleanly; that
-    /// is only noticed by <see cref="Render"/>.</exception>
-    public static OllamaTemplate Parse(string text)
+    /// <exception cref="ChatTemplateException">The template text is not a valid Go text/template, it
+    /// nests deeper than <see cref="TemplateLimits.MaxNestingDepth"/>, or it invokes a template with no
+    /// pipeline at all, which Ollama rejects while it collects the variables. A
+    /// <c>{{template "name" .}}</c> that names a template the text never defines parses cleanly; that is
+    /// only noticed by <see cref="Render(OllamaTemplateValues)"/>.</exception>
+    /// <remarks>The template is held to the default <see cref="TemplateLimits"/>.</remarks>
+    public static OllamaTemplate Parse(string text) => Parse(text, null);
+
+    /// <summary>
+    /// Parses an Ollama chat template under the given limits, which every render of it is held to.
+    /// </summary>
+    /// <param name="text">The template text.</param>
+    /// <param name="limits">
+    /// The limits, or <see langword="null"/> for the defaults. They are copied, so later changes to the
+    /// object do not reach this template.
+    /// </param>
+    /// <returns>The parsed template.</returns>
+    /// <exception cref="ArgumentException">A limit is out of range.</exception>
+    /// <exception cref="ChatTemplateException">The template text is not a valid Go text/template, it
+    /// nests deeper than <see cref="TemplateLimits.MaxNestingDepth"/>, or it invokes a template with no
+    /// pipeline at all.</exception>
+    public static OllamaTemplate Parse(string text, TemplateLimits limits)
     {
-        GoTemplate template = GoTemplate.Parse(string.Empty, text ?? string.Empty, OllamaTemplateFuncs.Funcs);
+        TemplateLimits copy = TemplateLimits.ValidatedCopy(limits, nameof(limits));
+        GoTemplate template = GoTemplate.Parse(string.Empty, text ?? string.Empty, OllamaTemplateFuncs.Funcs,
+            copy.MaxNestingDepth);
         IReadOnlyList<string> variables = CollectVariables(template);
         if (!variables.Contains("messages") && !variables.Contains("response"))
         {
@@ -67,7 +90,7 @@ public sealed class OllamaTemplate
             template.Root.Append(ResponseAction());
         }
 
-        return new OllamaTemplate(text ?? string.Empty, template);
+        return new OllamaTemplate(text ?? string.Empty, template, copy);
     }
 
     /// <summary>
@@ -123,8 +146,35 @@ public sealed class OllamaTemplate
     /// </summary>
     /// <param name="values">The conversation and the settings to render with.</param>
     /// <returns>The rendered prompt.</returns>
-    /// <exception cref="ChatTemplateException">The template could not be rendered.</exception>
-    public string Render(OllamaTemplateValues values)
+    /// <exception cref="ChatTemplateException">The template could not be rendered, or a
+    /// <see cref="TemplateLimits"/> limit was exceeded.</exception>
+    public string Render(OllamaTemplateValues values) => Render(values, CancellationToken.None);
+
+    /// <summary>
+    /// Renders a chat request into the prompt text the model sees, checking the token as the render goes.
+    /// </summary>
+    /// <param name="values">The conversation and the settings to render with.</param>
+    /// <param name="cancellationToken">A token to cancel the render.</param>
+    /// <returns>The rendered prompt.</returns>
+    /// <exception cref="OperationCanceledException">The token was cancelled.</exception>
+    /// <exception cref="ChatTemplateException">The template could not be rendered, or a
+    /// <see cref="TemplateLimits"/> limit was exceeded.</exception>
+    public string Render(OllamaTemplateValues values, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        using (TemplateBudget.Open(_limits, cancellationToken))
+        {
+            return RenderWithin(values);
+        }
+    }
+
+    private static void AppendChecked(StringBuilder output, string text)
+    {
+        TemplateBudget.CheckOutput((long)output.Length + text.Length);
+        output.Append(text);
+    }
+
+    private string RenderWithin(OllamaTemplateValues values)
     {
         OllamaTemplateValues v = values ?? new OllamaTemplateValues();
         Collate(v, out string system, out List<ChatMessage> messages);
@@ -169,7 +219,7 @@ public sealed class OllamaTemplate
                 case ChatRole.System:
                     if (prompt.Length > 0 || response.Length > 0)
                     {
-                        output.Append(_template.Execute(LegacyData(system, prompt, response, think, thinkLevel,
+                        AppendChecked(output, _template.Execute(LegacyData(system, prompt, response, think, thinkLevel,
                             isThinkSet)));
                         system = string.Empty;
                         prompt = string.Empty;
@@ -181,7 +231,7 @@ public sealed class OllamaTemplate
                 case ChatRole.User:
                     if (response.Length > 0)
                     {
-                        output.Append(_template.Execute(LegacyData(system, prompt, response, think, thinkLevel,
+                        AppendChecked(output, _template.Execute(LegacyData(system, prompt, response, think, thinkLevel,
                             isThinkSet)));
                         system = string.Empty;
                         prompt = string.Empty;
@@ -198,7 +248,7 @@ public sealed class OllamaTemplate
 
         GoListNode truncated = TruncateAfterResponse(_template.Root.CopyList());
         GoTemplate tail = GoTemplate.FromRoot(string.Empty, truncated, _template.Funcs);
-        output.Append(tail.Execute(LegacyData(system, prompt, response, think, thinkLevel, isThinkSet)));
+        AppendChecked(output, tail.Execute(LegacyData(system, prompt, response, think, thinkLevel, isThinkSet)));
         return output.ToString();
     }
 

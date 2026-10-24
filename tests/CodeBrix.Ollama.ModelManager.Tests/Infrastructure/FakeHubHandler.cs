@@ -82,6 +82,13 @@ public sealed class FakeHubHandler : FakeHttpHandlerBase
     /// </summary>
     public int TreePageSize { get; set; }
 
+    /// <summary>
+    /// The commit every repository document names regardless of what was asked for, or
+    /// <see langword="null"/> to name the commit the revision resolves to. Set it to play a Hub that
+    /// answers a pinned commit with another one.
+    /// </summary>
+    public string RepositoryShaOverride { get; set; }
+
     /// <summary>Whether a <c>resolve</c> address answers with a redirect to <see cref="CdnHost"/>.</summary>
     public bool RedirectResolveToCdn { get; set; } = true;
 
@@ -140,7 +147,7 @@ public sealed class FakeHubHandler : FakeHttpHandlerBase
                 IsDirectory = false,
                 LargeFileStorage = largeFileStorage,
                 Sha256 = Convert.ToHexStringLower(SHA256.HashData(data)),
-                GitSha1 = Convert.ToHexStringLower(SHA1.HashData(data))
+                GitSha1 = ComputeGitBlobSha1(data)
             });
 
             _files[(repository, commit, path)] = data;
@@ -174,6 +181,22 @@ public sealed class FakeHubHandler : FakeHttpHandlerBase
                 GitSha1 = Convert.ToHexStringLower(SHA1.HashData(Encoding.UTF8.GetBytes(path)))
             });
         }
+    }
+
+    /// <summary>
+    /// The git blob identifier of some bytes - the SHA-1 of <c>"blob " + length + "\0"</c> followed by
+    /// the bytes - which is what the real Hub states as the <c>oid</c> of a file outside large-file
+    /// storage.
+    /// </summary>
+    /// <param name="data">The bytes.</param>
+    /// <returns>The identifier in lower-case hexadecimal.</returns>
+    public static string ComputeGitBlobSha1(byte[] data)
+    {
+        byte[] header = Encoding.ASCII.GetBytes("blob " + data.Length.ToString(CultureInfo.InvariantCulture) + "\0");
+        byte[] whole = new byte[header.Length + data.Length];
+        Buffer.BlockCopy(header, 0, whole, 0, header.Length);
+        Buffer.BlockCopy(data, 0, whole, header.Length, data.Length);
+        return Convert.ToHexStringLower(SHA1.HashData(whole));
     }
 
     /// <summary>
@@ -320,7 +343,7 @@ public sealed class FakeHubHandler : FakeHttpHandlerBase
         {
             ["_id"] = "000000000000000000000000",
             ["id"] = repository,
-            ["sha"] = commit,
+            ["sha"] = RepositoryShaOverride ?? commit,
             ["lastModified"] = "2024-10-31T02:12:45.000Z",
             ["private"] = Restricted,
             ["gated"] = Gated ? (object)GatedMode : false,

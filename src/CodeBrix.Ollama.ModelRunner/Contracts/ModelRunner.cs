@@ -121,6 +121,38 @@ public static class ModelRunner
     }
 
     /// <summary>
+    /// Whether the native engine may be loaded from the operating system's own search path when the package's
+    /// copy is not found. False - the default - means the engine is loaded only from this package's own
+    /// locations, and only when its SHA-256 is the one this package recorded for the platform.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The package's own locations are <c>runtimes/&lt;rid&gt;/native/</c> and a loose copy beside the
+    /// application or the managed assembly. Every file found there is hashed before it is loaded and refused
+    /// with a <see cref="NativeLibraryException"/> if its bytes are not the ones the package shipped, whatever
+    /// this property says.
+    /// </para>
+    /// <para>
+    /// Setting it to <see langword="true"/> adds ONE further, last step: the bare library name handed to the
+    /// operating system's loader, which searches <c>LD_LIBRARY_PATH</c> and the linker cache on Linux,
+    /// <c>DYLD_*</c> and the standard library folders on macOS, and the safe DLL directories on Windows. A
+    /// library found that way is a build this package never saw, so its hash cannot be checked; only the
+    /// identity check (upstream commit and runtime identifier) still applies, and
+    /// <see cref="NativeRuntimeInfo.LoadedPath"/> says it was not hash-checked. Anyone who can set those
+    /// variables or write to those folders chooses the code that runs in the process, which is why it is off.
+    /// </para>
+    /// <para>
+    /// Set it before the first call that loads the engine; once a library is loaded it stays loaded for the
+    /// life of the process and changing the property has no effect.
+    /// </para>
+    /// </remarks>
+    public static bool AllowSystemNativeLibrary
+    {
+        get => NativeLibraryLoader.AllowSystemLibrary;
+        set => NativeLibraryLoader.AllowSystemLibrary = value;
+    }
+
+    /// <summary>
     /// Routes the native engine's log output to a handler. <see langword="null"/> discards it, which is the
     /// default. The handler is called on the engine's threads and must return quickly.
     /// </summary>

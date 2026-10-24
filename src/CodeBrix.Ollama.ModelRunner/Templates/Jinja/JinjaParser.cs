@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 
 namespace CodeBrix.Ollama.ModelRunner;
 
@@ -13,9 +14,6 @@ namespace CodeBrix.Ollama.ModelRunner;
 /// </summary>
 internal sealed class JinjaParser
 {
-    /// <summary>How deeply expressions may nest before the parser refuses the template.</summary>
-    private const int MaximumDepth = 500;
-
     private static readonly string[] NoTerminators = new string[0];
 
     private static readonly string[] TestArgumentStoppers =
@@ -31,22 +29,38 @@ internal sealed class JinjaParser
 
     private int _index;
 
+    /// <summary>
+    /// How deeply the template may nest - statements, parentheses and operator, filter and attribute chains
+    /// all counted together - before the parser refuses it. The tree is walked recursively both here and
+    /// when it renders, so this is what keeps both inside the stack.
+    /// </summary>
+    private readonly int _maximumDepth;
+
     private int _depth;
 
-    private JinjaParser(string source, IReadOnlyList<JinjaToken> tokens)
+    private JinjaParser(string source, IReadOnlyList<JinjaToken> tokens, int maximumDepth)
     {
         _source = source;
         _tokens = tokens;
+        _maximumDepth = maximumDepth;
     }
 
-    /// <summary>Parses a template body.</summary>
+    /// <summary>Parses a template body under the default nesting limit.</summary>
     /// <param name="source">The raw template source.</param>
     /// <returns>The top-level nodes.</returns>
     /// <exception cref="ChatTemplateException">The template is not valid Jinja.</exception>
     internal static IList<JinjaNode> Parse(string source)
+        => Parse(source, TemplateLimits.Default.MaxNestingDepth);
+
+    /// <summary>Parses a template body.</summary>
+    /// <param name="source">The raw template source.</param>
+    /// <param name="maximumDepth">How deeply the template may nest.</param>
+    /// <returns>The top-level nodes.</returns>
+    /// <exception cref="ChatTemplateException">The template is not valid Jinja, or nests too deeply.</exception>
+    internal static IList<JinjaNode> Parse(string source, int maximumDepth)
     {
         string prepared = JinjaLexer.PrepareSource(source);
-        var parser = new JinjaParser(prepared, JinjaLexer.Tokenize(prepared));
+        var parser = new JinjaParser(prepared, JinjaLexer.Tokenize(prepared), maximumDepth);
         IList<JinjaNode> body = parser.ParseBody(NoTerminators, out string terminator);
         if (terminator != null)
         {
@@ -163,7 +177,15 @@ internal sealed class JinjaParser
             }
 
             _index++;
-            nodes.Add(ParseStatement());
+            EnterDepth();
+            try
+            {
+                nodes.Add(ParseStatement());
+            }
+            finally
+            {
+                _depth--;
+            }
         }
     }
 
@@ -514,7 +536,8 @@ internal sealed class JinjaParser
                 otherwise = ParseExpression(true);
             }
 
-            return new JinjaConditionalExpression(condition, expression, otherwise);
+            return Track(new JinjaConditionalExpression(condition, expression, otherwise),
+                condition, expression, otherwise);
         }
         finally
         {
@@ -524,11 +547,63 @@ internal sealed class JinjaParser
 
     private void EnterDepth()
     {
+        TemplateBudget.EnsureStack();
         _depth++;
-        if (_depth > MaximumDepth)
+        if (_depth > _maximumDepth)
         {
-            throw Error(Current, "the expression nests more than " + MaximumDepth + " levels deep");
+            throw DepthError();
         }
+    }
+
+    private ChatTemplateException DepthError()
+        => Error(Current, "the template nests more than " + _maximumDepth + " levels deep ("
+            + nameof(TemplateLimits) + "." + nameof(TemplateLimits.MaxNestingDepth) + ")");
+
+    /// <summary>
+    /// Records how tall the tree under a new node is, and refuses it when that height on top of the
+    /// nesting the parser is already inside would exceed the limit.
+    /// </summary>
+    /// <remarks>
+    /// A chain such as <c>a + b + c</c>, <c>x | f | g</c> or <c>a.b.c</c> is parsed by a loop, not by
+    /// recursion, but it builds a tree one level deeper for every link, and the renderer walks that tree
+    /// recursively. Counting the parser's own recursion is therefore not enough: the height of what it
+    /// builds is checked as well.
+    /// </remarks>
+    /// <typeparam name="T">The node type.</typeparam>
+    /// <param name="node">The new node.</param>
+    /// <param name="children">Its child expressions; null entries are ignored.</param>
+    /// <returns>The node.</returns>
+    private T Track<T>(T node, params JinjaExpression[] children)
+        where T : JinjaExpression
+    {
+        int tallest = 0;
+        foreach (JinjaExpression child in children)
+        {
+            if (child != null && child.Height > tallest)
+            {
+                tallest = child.Height;
+            }
+        }
+
+        node.Height = tallest + 1;
+        if (node.Height + _depth > _maximumDepth)
+        {
+            throw DepthError();
+        }
+
+        return node;
+    }
+
+    private T TrackArguments<T>(T node, JinjaExpression source, IList<JinjaArgument> arguments)
+        where T : JinjaExpression
+    {
+        var children = new List<JinjaExpression> { source };
+        foreach (JinjaArgument argument in arguments)
+        {
+            children.Add(argument.Value);
+        }
+
+        return Track(node, children.ToArray());
     }
 
     private JinjaExpression ParseOr()
@@ -537,7 +612,8 @@ internal sealed class JinjaParser
         while (Current.IsName("or"))
         {
             _index++;
-            left = new JinjaBinaryExpression(JinjaOperator.Or, left, ParseAnd());
+            JinjaExpression right = ParseAnd();
+            left = Track(new JinjaBinaryExpression(JinjaOperator.Or, left, right), left, right);
         }
 
         return left;
@@ -549,7 +625,8 @@ internal sealed class JinjaParser
         while (Current.IsName("and"))
         {
             _index++;
-            left = new JinjaBinaryExpression(JinjaOperator.And, left, ParseNot());
+            JinjaExpression right = ParseNot();
+            left = Track(new JinjaBinaryExpression(JinjaOperator.And, left, right), left, right);
         }
 
         return left;
@@ -563,7 +640,8 @@ internal sealed class JinjaParser
             EnterDepth();
             try
             {
-                return new JinjaUnaryExpression(JinjaOperator.Not, ParseNot());
+                JinjaExpression operand = ParseNot();
+                return Track(new JinjaUnaryExpression(JinjaOperator.Not, operand), operand);
             }
             finally
             {
@@ -621,7 +699,8 @@ internal sealed class JinjaParser
             }
 
             _index++;
-            left = new JinjaBinaryExpression(operation, left, ParseAdditive());
+            JinjaExpression right = ParseAdditive();
+            left = Track(new JinjaBinaryExpression(operation, left, right), left, right);
         }
     }
 
@@ -631,7 +710,8 @@ internal sealed class JinjaParser
         while (Current.IsOperator("+") || Current.IsOperator("-"))
         {
             JinjaOperator operation = Advance().Value == "+" ? JinjaOperator.Add : JinjaOperator.Subtract;
-            left = new JinjaBinaryExpression(operation, left, ParseConcat());
+            JinjaExpression right = ParseConcat();
+            left = Track(new JinjaBinaryExpression(operation, left, right), left, right);
         }
 
         return left;
@@ -643,7 +723,8 @@ internal sealed class JinjaParser
         while (Current.IsOperator("~"))
         {
             _index++;
-            left = new JinjaBinaryExpression(JinjaOperator.Concat, left, ParseMultiplicative());
+            JinjaExpression right = ParseMultiplicative();
+            left = Track(new JinjaBinaryExpression(JinjaOperator.Concat, left, right), left, right);
         }
 
         return left;
@@ -673,7 +754,8 @@ internal sealed class JinjaParser
                     break;
             }
 
-            left = new JinjaBinaryExpression(operation, left, ParsePower());
+            JinjaExpression right = ParsePower();
+            left = Track(new JinjaBinaryExpression(operation, left, right), left, right);
         }
 
         return left;
@@ -685,7 +767,8 @@ internal sealed class JinjaParser
         while (Current.IsOperator("**"))
         {
             _index++;
-            left = new JinjaBinaryExpression(JinjaOperator.Power, left, ParseUnary(true));
+            JinjaExpression right = ParseUnary(true);
+            left = Track(new JinjaBinaryExpression(JinjaOperator.Power, left, right), left, right);
         }
 
         return left;
@@ -700,7 +783,8 @@ internal sealed class JinjaParser
             EnterDepth();
             try
             {
-                node = new JinjaUnaryExpression(operation, ParseUnary(false));
+                JinjaExpression operand = ParseUnary(false);
+                node = Track(new JinjaUnaryExpression(operation, operand), operand);
             }
             finally
             {
@@ -724,11 +808,12 @@ internal sealed class JinjaParser
                 _index++;
                 if (Current.Kind == JinjaTokenKind.Integer)
                 {
-                    node = new JinjaSubscriptExpression(node, new JinjaLiteralExpression(Advance().Number));
+                    var index = new JinjaLiteralExpression(Advance().Number);
+                    node = Track(new JinjaSubscriptExpression(node, index), node, index);
                     continue;
                 }
 
-                node = new JinjaAttributeExpression(node, ExpectName());
+                node = Track(new JinjaAttributeExpression(node, ExpectName()), node);
                 continue;
             }
 
@@ -740,7 +825,8 @@ internal sealed class JinjaParser
 
             if (Current.IsOperator("("))
             {
-                node = new JinjaCallExpression(node, ParseCallArguments());
+                IList<JinjaArgument> arguments = ParseCallArguments();
+                node = TrackArguments(new JinjaCallExpression(node, arguments), node, arguments);
                 continue;
             }
 
@@ -766,7 +852,8 @@ internal sealed class JinjaParser
 
             if (Current.IsOperator("("))
             {
-                node = new JinjaCallExpression(node, ParseCallArguments());
+                IList<JinjaArgument> arguments = ParseCallArguments();
+                node = TrackArguments(new JinjaCallExpression(node, arguments), node, arguments);
                 continue;
             }
 
@@ -783,7 +870,7 @@ internal sealed class JinjaParser
             IList<JinjaArgument> arguments = Current.IsOperator("(")
                 ? ParseCallArguments()
                 : new List<JinjaArgument>();
-            node = new JinjaFilterExpression(node, name, arguments);
+            node = TrackArguments(new JinjaFilterExpression(node, name, arguments), node, arguments);
         }
 
         return node;
@@ -810,7 +897,7 @@ internal sealed class JinjaParser
             arguments.Add(new JinjaArgument(null, ParsePostfix(ParsePrimary())));
         }
 
-        return new JinjaTestExpression(node, name, arguments, negated);
+        return TrackArguments(new JinjaTestExpression(node, name, arguments, negated), node, arguments);
     }
 
     private static bool IsTestArgumentStart(JinjaToken token)
@@ -842,7 +929,7 @@ internal sealed class JinjaParser
         if (!Current.IsOperator(":"))
         {
             ExpectOperator("]");
-            return new JinjaSubscriptExpression(node, start);
+            return Track(new JinjaSubscriptExpression(node, start), node, start);
         }
 
         _index++;
@@ -863,7 +950,7 @@ internal sealed class JinjaParser
         }
 
         ExpectOperator("]");
-        return new JinjaSliceExpression(node, start, stop, step);
+        return Track(new JinjaSliceExpression(node, start, stop, step), node, start, stop, step);
     }
 
     private JinjaExpression ParsePrimary()
@@ -896,13 +983,19 @@ internal sealed class JinjaParser
             case JinjaTokenKind.String:
                 {
                     _index++;
-                    string text = token.Value;
-                    while (Current.Kind == JinjaTokenKind.String)
+                    if (Current.Kind != JinjaTokenKind.String)
                     {
-                        text += Advance().Value;
+                        return new JinjaLiteralExpression(token.Value);
                     }
 
-                    return new JinjaLiteralExpression(text);
+                    // Adjacent literals are one string, as in Python. A builder keeps a long run linear.
+                    var text = new StringBuilder(token.Value);
+                    while (Current.Kind == JinjaTokenKind.String)
+                    {
+                        text.Append(Advance().Value);
+                    }
+
+                    return new JinjaLiteralExpression(text.ToString());
                 }
 
             case JinjaTokenKind.Integer:
@@ -956,7 +1049,7 @@ internal sealed class JinjaParser
         }
 
         ExpectOperator(")");
-        return isTuple ? new JinjaSequenceExpression(items) : items[0];
+        return isTuple ? Track(new JinjaSequenceExpression(items), items.ToArray()) : items[0];
     }
 
     private JinjaExpression ParseListLiteral()
@@ -976,7 +1069,7 @@ internal sealed class JinjaParser
         }
 
         ExpectOperator("]");
-        return new JinjaSequenceExpression(items);
+        return Track(new JinjaSequenceExpression(items), items.ToArray());
     }
 
     private JinjaExpression ParseMappingLiteral()
@@ -999,6 +1092,8 @@ internal sealed class JinjaParser
         }
 
         ExpectOperator("}");
-        return new JinjaMappingExpression(keys, values);
+        var children = new List<JinjaExpression>(keys);
+        children.AddRange(values);
+        return Track(new JinjaMappingExpression(keys, values), children.ToArray());
     }
 }

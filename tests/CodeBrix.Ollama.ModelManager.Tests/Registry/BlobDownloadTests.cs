@@ -174,6 +174,78 @@ public sealed class BlobDownloadTests : IDisposable
     }
 
     [Fact]
+    public async Task DownloadBlobAsync_refuses_a_redirect_to_a_private_address_without_retrying_it()
+    {
+        //Arrange
+        using var handler = new FakeRegistryHandler { RedirectBlobsToCdn = true, CdnHost = "169.254.169.254" };
+        byte[] data = CreateData(10000);
+        string digest = handler.AddBlob(data);
+        using var client = new RegistryClient(RegistryClientTests.CreateOptions(handler), RetryBaseDelay);
+
+        //Act
+        Func<Task> act = () => client.DownloadBlobAsync(
+            RegistryClientTests.CreateName(), digest, data.Length,
+            Destination, PartialData, PartialState, null, TestContext.Current.CancellationToken);
+
+        //Assert
+        RegistryException exception = (await act.Should().ThrowAsync<RegistryException>()).Which;
+        exception.Message.Should().Contain("non-public address");
+        handler.Requests.Should().HaveCount(1);
+        handler.RequestCountForHost("169.254.169.254").Should().Be(0);
+        File.Exists(Destination).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task DownloadBlobAsync_refuses_a_redirect_from_https_to_http()
+    {
+        //Arrange
+        using var handler = new FakeRegistryHandler { RedirectBlobsToCdn = true, CdnScheme = "http" };
+        byte[] data = CreateData(10000);
+        string digest = handler.AddBlob(data);
+        using var client = new RegistryClient(RegistryClientTests.CreateOptions(handler), RetryBaseDelay);
+
+        //Act
+        Func<Task> act = () => client.DownloadBlobAsync(
+            RegistryClientTests.CreateName(), digest, data.Length,
+            Destination, PartialData, PartialState, null, TestContext.Current.CancellationToken);
+
+        //Assert
+        RegistryException exception = (await act.Should().ThrowAsync<RegistryException>()).Which;
+        exception.Message.Should().Contain("plain HTTP");
+        handler.RequestCountForHost("cdn.test").Should().Be(0);
+    }
+
+    [Fact]
+    public async Task DownloadBlobAsync_never_answers_a_challenge_from_the_redirect_target_with_the_token()
+    {
+        //Arrange
+        using var handler = new FakeRegistryHandler
+        {
+            RequireAuthorization = true,
+            ExpectedBearerToken = "secret",
+            RedirectBlobsToCdn = true,
+            ChallengeOnCdn = true
+        };
+        byte[] data = CreateData(10000);
+        string digest = handler.AddBlob(data);
+        ModelStoreOptions options = RegistryClientTests.CreateOptions(handler);
+        options.BearerToken = "secret";
+        options.MaxRetries = 1;
+        using var client = new RegistryClient(options, RetryBaseDelay);
+
+        //Act
+        Func<Task> act = () => client.DownloadBlobAsync(
+            RegistryClientTests.CreateName(), digest, data.Length,
+            Destination, PartialData, PartialState, null, TestContext.Current.CancellationToken);
+
+        //Assert
+        await act.Should().ThrowAsync<RegistryException>();
+        handler.AnyAuthorizationSentTo("registry.test").Should().BeTrue();
+        handler.RequestCountForHost("cdn.test").Should().BeGreaterThan(0);
+        handler.AnyAuthorizationSentTo("cdn.test").Should().BeFalse();
+    }
+
+    [Fact]
     public async Task DownloadBlobAsync_with_bytes_that_do_not_match_the_digest_throws_and_removes_the_partial_files()
     {
         //Arrange

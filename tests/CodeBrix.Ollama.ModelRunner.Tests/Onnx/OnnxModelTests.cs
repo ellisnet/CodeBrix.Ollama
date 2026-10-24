@@ -136,6 +136,75 @@ public sealed class OnnxModelTests
             .Which.Message.Should().Contain("model.onnx.data");
     }
 
+    /// <summary>A graph loaded on its own still finds the side file beside it.</summary>
+    [Fact]
+    public async Task LoadAsync_follows_a_side_file_beside_the_graph()
+    {
+        //Arrange
+        var fixture = OnnxFixtures.Load("external_weights");
+        var source = Path.Combine(OnnxFixtures.Directory, "external_weights");
+
+        //Act
+        await using var model = await OnnxModel.LoadAsync(
+            Path.Combine(source, "model.onnx"), null, TestContext.Current.CancellationToken);
+        var produced = model.Run(fixture.Inputs);
+
+        //Assert
+        OnnxComparison.Compare(fixture.Expected["y"], produced["y"])
+            .RelativeToLargest.Should().BeLessThan(1e-5);
+    }
+
+    /// <summary>
+    /// A graph loaded on its own whose side-file location climbs out of its folder, or is absolute, is refused
+    /// - even when a file really is there - rather than read into a weight.
+    /// </summary>
+    /// <param name="location">
+    /// The location written into the crafted graph, the same length as the fixture's own "model.onnx.data"
+    /// so the protobuf lengths around it stay valid.
+    /// </param>
+    /// <param name="expected">Text the refusal has to carry.</param>
+    [Theory]
+    [InlineData("../model.data00", "escapes its bundle")]
+    [InlineData("/nonexistent/ab", "must have a relative filename")]
+    public async Task LoadAsync_refuses_a_side_file_outside_the_graph_folder(string location, string expected)
+    {
+        //Arrange
+        var source = Path.Combine(OnnxFixtures.Directory, "external_weights");
+        using var scratch = new TempScratchDirectory();
+        var folder = scratch.Combine("graph");
+        Directory.CreateDirectory(folder);
+        var graph = Path.Combine(folder, "model.onnx");
+        File.WriteAllBytes(graph, ReplaceAscii(
+            File.ReadAllBytes(Path.Combine(source, "model.onnx")), "model.onnx.data", location));
+
+        // The real weights, one folder up, where the "../" location points: before the guard they were read.
+        File.Copy(Path.Combine(source, "model.onnx.data"), scratch.Combine("model.data00"));
+
+        //Act
+        Func<Task> act = async () => await OnnxModel.LoadAsync(
+            graph, null, TestContext.Current.CancellationToken);
+
+        //Assert
+        (await act.Should().ThrowAsync<ModelLoadException>())
+            .Which.Message.Should().Contain(expected);
+    }
+
+    private static byte[] ReplaceAscii(byte[] content, string from, string to)
+    {
+        var find = System.Text.Encoding.ASCII.GetBytes(from);
+        var replace = System.Text.Encoding.ASCII.GetBytes(to);
+        int replaced = 0;
+        for (int i = 0; i + find.Length <= content.Length; i++)
+        {
+            if (!content.AsSpan(i, find.Length).SequenceEqual(find)) continue;
+            replace.CopyTo(content, i);
+            replaced++;
+        }
+
+        replaced.Should().BeGreaterThan(0);
+        return content;
+    }
+
     /// <summary>Every graph the engine has to turn away is turned away, and the message says why.</summary>
     /// <param name="name">The graph's name.</param>
     /// <param name="expected">Text the refusal has to carry.</param>

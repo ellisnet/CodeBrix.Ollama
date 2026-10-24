@@ -46,6 +46,51 @@ public sealed class PythonSupportReportTests
     }
 
     [Fact]
+    public void IsUsable_is_false_when_one_module_is_older_than_its_floor()
+    {
+        //Arrange
+        var modules = new[]
+        {
+            new PythonModuleReport("onnx", true, null, "1.22.0", "1.16", true),
+            new PythonModuleReport("torch", true, null, "2.5.1+cpu", "2.6", false),
+        };
+
+        //Act
+        PythonSupportReport report = Build(true, Supported, true, modules);
+
+        //Assert
+        report.IsUsable.Should().BeFalse();
+        report.Modules[1].InstalledVersion.Should().Be("2.5.1+cpu");
+        report.Modules[1].MinimumVersion.Should().Be("2.6");
+    }
+
+    [Fact]
+    public void IsUsable_is_true_when_every_module_meets_its_floor()
+    {
+        //Arrange
+        var modules = new[]
+        {
+            new PythonModuleReport("onnx", true, null, "1.22.0", "1.16", true),
+            new PythonModuleReport("numpy", true, null, "2.5.3", null, true),
+        };
+
+        //Act and assert
+        Build(true, Supported, true, modules).IsUsable.Should().BeTrue();
+    }
+
+    [Fact]
+    public void a_module_report_made_without_a_floor_meets_it()
+    {
+        //Act
+        var module = new PythonModuleReport("sys", true, null);
+
+        //Assert
+        module.MinimumVersion.Should().BeNull();
+        module.InstalledVersion.Should().BeNull();
+        module.MeetsMinimumVersion.Should().BeTrue();
+    }
+
+    [Fact]
     public void Modules_is_never_null()
         => Build(true, Supported, true, null).Modules.Should().BeEmpty();
 

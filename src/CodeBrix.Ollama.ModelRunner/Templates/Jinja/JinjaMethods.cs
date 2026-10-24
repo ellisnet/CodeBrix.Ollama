@@ -150,13 +150,11 @@ internal static class JinjaMethods
             case "islower":
                 return HasCased(text) && text == text.ToLowerInvariant();
             case "zfill":
-                return text.PadLeft(JinjaValues.ToIndex(Argument(arguments, 0), "zfill width"), '0');
+                return text.PadLeft(PadWidth(Argument(arguments, 0), "zfill width"), '0');
             case "ljust":
-                return text.PadRight(
-                    JinjaValues.ToIndex(Argument(arguments, 0), "ljust width"), FillCharacter(arguments));
+                return text.PadRight(PadWidth(Argument(arguments, 0), "ljust width"), FillCharacter(arguments));
             case "rjust":
-                return text.PadLeft(
-                    JinjaValues.ToIndex(Argument(arguments, 0), "rjust width"), FillCharacter(arguments));
+                return text.PadLeft(PadWidth(Argument(arguments, 0), "rjust width"), FillCharacter(arguments));
             case "center":
                 return JinjaFilters.Center(
                     text, JinjaValues.ToIndex(Argument(arguments, 0), "center width"), FillCharacter(arguments));
@@ -245,6 +243,20 @@ internal static class JinjaMethods
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Reads a padding width and refuses one wider than a string may be, before anything is padded. A
+    /// negative width pads nothing, as it does in Python.
+    /// </summary>
+    /// <param name="value">The width argument.</param>
+    /// <param name="what">What the width is, for the error message.</param>
+    /// <returns>The width, never negative.</returns>
+    private static int PadWidth(object value, string what)
+    {
+        int width = JinjaValues.ToIndex(value, what);
+        TemplateBudget.CheckString(width);
+        return Math.Max(0, width);
     }
 
     private static int CountOccurrences(string text, string needle)
@@ -412,6 +424,7 @@ internal static class JinjaMethods
             return text;
         }
 
+        TemplateBudget.CheckString(text.Length + ((double)newValue.Length * limit));
         var builder = new StringBuilder();
         int inserted = 0;
         for (int i = 0; i <= text.Length; i++)
@@ -482,6 +495,13 @@ internal static class JinjaMethods
         if (oldValue.Length == 0)
         {
             return ReplaceEmpty(text, newValue, count);
+        }
+
+        if (newValue.Length > oldValue.Length)
+        {
+            // The only way a replacement grows the text, so the result's length is known before it is built.
+            TemplateBudget.CheckString(text.Length
+                + ((double)CountOccurrences(text, oldValue) * (newValue.Length - oldValue.Length)));
         }
 
         if (count == null || count is JinjaUndefined)
@@ -562,6 +582,8 @@ internal static class JinjaMethods
 
             first = false;
             builder.Append(JinjaValues.ToDisplayString(item));
+            TemplateBudget.CheckString(builder.Length);
+            TemplateBudget.Poll();
         }
 
         return builder.ToString();
@@ -592,15 +614,21 @@ internal static class JinjaMethods
         switch (name)
         {
             case "append":
+                TemplateBudget.CheckItems(list.Count + 1.0);
                 list.Add(Argument(arguments, 0));
                 return null;
             case "extend":
-                foreach (object item in JinjaValues.Iterate(Argument(arguments, 0)))
                 {
-                    list.Add(item);
-                }
+                    // Copied first, because a list extended with itself is the list being enumerated.
+                    var items = new List<object>(JinjaValues.Iterate(Argument(arguments, 0)));
+                    TemplateBudget.CheckItems((double)list.Count + items.Count);
+                    foreach (object item in items)
+                    {
+                        list.Add(item);
+                    }
 
-                return null;
+                    return null;
+                }
             case "pop":
                 {
                     if (list.Count == 0)
@@ -636,6 +664,7 @@ internal static class JinjaMethods
                     }
 
                     position = Math.Max(0, Math.Min(position, list.Count));
+                    TemplateBudget.CheckItems(list.Count + 1.0);
                     list.Insert(position, Argument(arguments, 1));
                     return null;
                 }
@@ -747,6 +776,7 @@ internal static class JinjaMethods
                     object source = Argument(arguments, 0);
                     if (source is IDictionary<string, object> other)
                     {
+                        TemplateBudget.CheckItems((double)mapping.Count + other.Count);
                         foreach (KeyValuePair<string, object> pair in other)
                         {
                             mapping[pair.Key] = pair.Value;

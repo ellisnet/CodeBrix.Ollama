@@ -26,6 +26,14 @@ namespace CodeBrix.Ollama.ModelRunner; //was previously: CodeBrix.VideoPlayback.
 /// single-file bundle that did not extract - and the list of paths is what answers it.
 /// </para>
 /// <para>
+/// Every candidate file is hashed BEFORE it is loaded, and a file whose SHA-256 is not the one this package
+/// recorded for its runtime identifier (<see cref="NativeLibraryHashes"/>) is refused with an exception that
+/// names the path and both hashes. Loading a native runs its initializers, so a check after the load would
+/// be a check after the fact. The operating system's own search path - <c>LD_LIBRARY_PATH</c>,
+/// <c>DYLD_*</c>, the Windows DLL search order - is NOT consulted unless the application opted in through
+/// <see cref="ModelRunner.AllowSystemNativeLibrary"/>, and a library found that way cannot be hash-checked.
+/// </para>
+/// <para>
 /// Once something has loaded, its own identity is checked before anything else calls into it: the library
 /// reports the upstream commit it was built from and the runtime identifier it was built for, and both have
 /// to agree with what this binding expects. A library that answers to the name but is a different build
@@ -53,11 +61,24 @@ internal static class NativeLibraryLoader
     private static bool checkedAndInitialized;
     private static string buildInfo;
     private static string reportedRuntimeIdentifier;
+    private static volatile bool allowSystemLibrary;
+
+    /// <summary>
+    /// Whether the operating system's own search path may be tried, after the package's own locations, for a
+    /// native library that cannot be hash-checked. False unless the application set
+    /// <see cref="ModelRunner.AllowSystemNativeLibrary"/>.
+    /// </summary>
+    public static bool AllowSystemLibrary
+    {
+        get => allowSystemLibrary;
+        set => allowSystemLibrary = value;
+    }
 
     /// <summary>The full path of the native library that was loaded, once one has been.</summary>
     /// <remarks>
-    /// Reads "codebrix_llama (operating-system search path)" when the library was found by the platform
-    /// loader rather than beside the assembly, because in that case there is no path this code ever saw.
+    /// Reads "codebrix_llama (operating-system search path, not hash-checked)" when the application allowed
+    /// the platform loader's own search and the library was found that way, because in that case there is no
+    /// path this code ever saw.
     /// </remarks>
     public static string LoadedPath
     {
@@ -147,8 +168,9 @@ internal static class NativeLibraryLoader
     /// initializes the engine's backends once.
     /// </summary>
     /// <exception cref="NativeLibraryException">
-    /// The library could not be found - the message lists every path that was tried - or it reports an
-    /// upstream commit or a runtime identifier this binding was not written against.
+    /// The library could not be found - the message lists every path that was tried - or a file that was found
+    /// is not byte for byte the one this package shipped, or it reports an upstream commit or a runtime
+    /// identifier this binding was not written against.
     /// </exception>
     public static void EnsureLoaded()
     {
@@ -227,6 +249,19 @@ internal static class NativeLibraryLoader
         IReadOnlyList<string> baseDirectories,
         string runtimeIdentifier,
         string fileName)
+        => DescribeLoadFailure(baseDirectories, runtimeIdentifier, fileName, AllowSystemLibrary);
+
+    /// <summary>Builds the "nothing could be loaded" message for a stated search-path setting.</summary>
+    /// <param name="baseDirectories">The directories to probe, in order.</param>
+    /// <param name="runtimeIdentifier">The runtime identifier folder to look under.</param>
+    /// <param name="fileName">The native file name to look for.</param>
+    /// <param name="systemSearchAllowed">Whether the operating system's own search path was tried as well.</param>
+    /// <returns>The message.</returns>
+    internal static string DescribeLoadFailure(
+        IReadOnlyList<string> baseDirectories,
+        string runtimeIdentifier,
+        string fileName,
+        bool systemSearchAllowed)
     {
         StringBuilder message = new StringBuilder();
         message.Append("The native inference library could not be loaded. ");
@@ -240,10 +275,21 @@ internal static class NativeLibraryLoader
         }
 
         message.Append(Environment.NewLine);
-        message.Append("    ");
-        message.Append(fileName);
-        message.Append("  (the operating system's own search path)");
-        message.Append(Environment.NewLine);
+        if (systemSearchAllowed)
+        {
+            message.Append("    ");
+            message.Append(fileName);
+            message.Append("  (the operating system's own search path)");
+            message.Append(Environment.NewLine);
+        }
+        else
+        {
+            message.Append(
+                "The operating system's own search path was not tried; ModelRunner.AllowSystemNativeLibrary "
+                + "allows it.");
+            message.Append(Environment.NewLine);
+        }
+
         message.Append(
             "The package ships this library under runtimes/" + runtimeIdentifier + "/native/. If it is missing, "
             + "the application was probably published in a way that dropped it - a trimmed or single-file "
@@ -385,7 +431,45 @@ internal static class NativeLibraryLoader
         lock (Gate)
         {
             if (handle != IntPtr.Zero) return handle;
-            return LoadNoLock();
+            if (LoadNoLock() != IntPtr.Zero) return handle;
+
+            // Handing IntPtr.Zero back would let the runtime run its own search for the bare name - the very
+            // search the loader leaves out - so a failure here is thrown, and reaches the import's caller.
+            throw new NativeLibraryException(DescribeLoadFailure(BaseDirectories(), RuntimeIdentifier, NativeFileName));
+        }
+    }
+
+    /// <summary>
+    /// Refuses a native library file whose SHA-256 is not the one this package recorded for its runtime
+    /// identifier and file name.
+    /// </summary>
+    /// <param name="bytes">The file's contents, read from the current position to the end.</param>
+    /// <param name="path">The file's path, which goes into the message.</param>
+    /// <param name="runtimeIdentifier">The runtime identifier the file is being loaded for.</param>
+    /// <param name="fileName">The native file name being looked for.</param>
+    /// <exception cref="NativeLibraryException">
+    /// Nothing is recorded for that runtime identifier and file name, or the file's hash differs from the one
+    /// that is.
+    /// </exception>
+    internal static void VerifyIntegrity(Stream bytes, string path, string runtimeIdentifier, string fileName)
+    {
+        string expected = NativeLibraryHashes.ExpectedFor(runtimeIdentifier, fileName);
+        if (expected == null)
+        {
+            throw new NativeLibraryException(
+                $"The native inference library at '{path}' was not loaded: this package records no SHA-256 for "
+                + $"'{fileName}' on runtime identifier '{runtimeIdentifier}', so there is nothing to check it "
+                + "against.");
+        }
+
+        string actual = NativeLibraryHashes.Compute(bytes);
+        if (!string.Equals(actual, expected, StringComparison.Ordinal))
+        {
+            throw new NativeLibraryException(
+                $"The native inference library at '{path}' was not loaded: its SHA-256 is {actual}, but the one "
+                + $"this package shipped for {runtimeIdentifier} is {expected}. The file has been replaced or "
+                + "altered since the package was built. Restore it from the package, or remove it so the "
+                + "package's own copy is found.");
         }
     }
 
@@ -408,7 +492,15 @@ internal static class NativeLibraryLoader
             foreach (string candidate in EnumerateProbePaths(BaseDirectories(), runtimeIdentifier, fileName))
             {
                 if (!File.Exists(candidate)) continue;
-                if (!System.Runtime.InteropServices.NativeLibrary.TryLoad(candidate, out IntPtr found)) continue;
+
+                // The file stays open, shared for reading only, from the hash through the load, so on Windows
+                // nothing can rewrite it in between. A Unix file system takes no such lock.
+                IntPtr found;
+                using (FileStream bytes = new FileStream(candidate, FileMode.Open, FileAccess.Read, FileShare.Read))
+                {
+                    VerifyIntegrity(bytes, candidate, runtimeIdentifier, fileName);
+                    if (!System.Runtime.InteropServices.NativeLibrary.TryLoad(candidate, out found)) continue;
+                }
 
                 handle = found;
                 loadedPath = candidate;
@@ -416,11 +508,14 @@ internal static class NativeLibraryLoader
             }
         }
 
-        if (System.Runtime.InteropServices.NativeLibrary.TryLoad(
+        // A library found by the operating system's own search has no path this code ever saw and no hash it
+        // could check, so that search runs only when the application asked for it.
+        if (AllowSystemLibrary
+            && System.Runtime.InteropServices.NativeLibrary.TryLoad(
                 LibraryName, typeof(NativeLibraryLoader).Assembly, null, out IntPtr system))
         {
             handle = system;
-            loadedPath = LibraryName + " (operating-system search path)";
+            loadedPath = LibraryName + " (operating-system search path, not hash-checked)";
             return system;
         }
 

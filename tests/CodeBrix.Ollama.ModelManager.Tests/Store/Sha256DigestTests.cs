@@ -82,6 +82,8 @@ public sealed class Sha256DigestTests
     [InlineData("sha512:" + SixtyFourHex)]
     [InlineData("sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdeg")]
     [InlineData("sha256-" + SixtyFourHex + ".codebrix-partial")]
+    [InlineData("sha256:" + SixtyFourHex + "\n")]
+    [InlineData("sha256-" + SixtyFourHex + "\r\n")]
     public void IsValid_for_malformed_digest_returns_false(string digest)
         => Sha256Digest.IsValid(digest).Should().BeFalse();
 
@@ -94,6 +96,11 @@ public sealed class Sha256DigestTests
     [Fact]
     public void ToFileName_for_file_name_digest_returns_it_unchanged()
         => Sha256Digest.ToFileName("sha256-" + SixtyFourHex).Should().Be("sha256-" + SixtyFourHex);
+
+    /// <summary>One blob has one file name, whatever case the manifest spelled its digest in.</summary>
+    [Fact]
+    public void ToFileName_for_upper_case_digest_returns_the_lower_case_file_name()
+        => Sha256Digest.ToFileName("sha256:" + SixtyFourHex.ToUpperInvariant()).Should().Be("sha256-" + SixtyFourHex);
 
     /// <summary>A blob file name becomes a manifest digest by way of the separator.</summary>
     [Fact]

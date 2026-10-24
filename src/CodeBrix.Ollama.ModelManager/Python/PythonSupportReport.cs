@@ -116,7 +116,8 @@ public sealed class PythonSupportReport
 
     /// <summary>
     /// Whether a Python feature can run: the library loads, its version is supported, and every module
-    /// that was asked about imports.
+    /// that was asked about imports and is at least its <see cref="PythonModuleReport.MinimumVersion"/>.
     /// </summary>
-    public bool IsUsable => LibraryLoads && IsSupportedVersion && Modules.All(module => module.IsInstalled);
+    public bool IsUsable => LibraryLoads && IsSupportedVersion
+        && Modules.All(module => module.IsInstalled && module.MeetsMinimumVersion);
 }

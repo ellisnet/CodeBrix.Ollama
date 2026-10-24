@@ -214,6 +214,71 @@ public sealed class ModelStoreExportTests
         thrown.Message.Should().Contain("exporting to ONNX");
     }
 
+    [Theory]
+    [InlineData("tokenizer_config.json", "{\"chat_template\":{\"../../../../tmp/owned\":\"{{ x }}\"}}",
+        ExportRoute.Auto, "../../../../tmp/owned")]
+    [InlineData("chat_template.json", "{\"chat_template\":[{\"name\":\"..\",\"template\":\"x\"}]}",
+        ExportRoute.GenAiBuilder, "'..'")]
+    [InlineData("processor_config.json", "{\"chat_template\":{\"default\":\"a\",\"/etc/cron.d/x\":\"b\"}}",
+        ExportRoute.Optimum, "/etc/cron.d/x")]
+    public async Task ExportToOnnxAsync_refuses_a_hostile_chat_template_name_before_any_python_runs(
+        string fileName, string json, ExportRoute route, string badKey)
+    {
+        //Arrange
+        using var directory = new TempStoreDirectory();
+        ModelStoreOptions options = CreateOptions(directory);
+        //No CPython can be found, so reaching the refusal at all proves it came before Python was looked for.
+        options.Python.LibraryPath = Path.Combine(directory.DirectoryPath, "no-such-libpython3.13.so");
+        using var store = new ModelStore(options);
+        await ImportCheckpointBundleAsync(store, directory, fileName, json);
+
+        //Act
+        Func<Task> act = () => store.ExportToOnnxAsync(
+            CheckpointName, new ExportOptions { Route = route }, null, TestContext.Current.CancellationToken);
+
+        //Assert
+        PythonScriptException thrown = (await act.Should().ThrowAsync<PythonScriptException>()).Which;
+        thrown.Feature.Should().Be("exporting to ONNX");
+        thrown.Message.Should().Contain(fileName);
+        thrown.Message.Should().Contain(badKey);
+        thrown.Message.Should().Contain("CVE-2026-9856");
+    }
+
+    [Fact]
+    public async Task ExportToOnnxAsync_lets_honest_named_chat_templates_through_to_the_python_check()
+    {
+        //Arrange
+        using var directory = new TempStoreDirectory();
+        ModelStoreOptions options = CreateOptions(directory);
+        options.Python.LibraryPath = Path.Combine(directory.DirectoryPath, "no-such-libpython3.13.so");
+        using var store = new ModelStore(options);
+        await ImportCheckpointBundleAsync(store, directory, "tokenizer_config.json",
+            "{\"chat_template\":[{\"name\":\"default\",\"template\":\"a\"},{\"name\":\"tool_use\",\"template\":\"b\"}]}");
+
+        //Act
+        Func<Task> act = () => store.ExportToOnnxAsync(
+            CheckpointName, null, null, TestContext.Current.CancellationToken);
+
+        //Assert
+        await act.Should().ThrowAsync<PythonNotAvailableException>();
+    }
+
+    [Fact]
+    public async Task ExportToOnnxAsync_pass_through_does_not_look_at_chat_templates()
+    {
+        //Arrange
+        using var directory = new TempStoreDirectory();
+        using var store = new ModelStore(CreateOptions(directory));
+        await ImportOnnxBundleAsync(store, directory, "{\"chat_template\":{\"../x\":\"t\"}}");
+
+        //Act
+        ExportResult result = await store.ExportToOnnxAsync(
+            OnnxBundleName, null, null, TestContext.Current.CancellationToken);
+
+        //Assert
+        result.RouteUsed.Should().Be(ExportRoute.PublisherOnnx);
+    }
+
     /// <summary>
     /// The options every test here uses: a temporary store directory and nothing else.
     /// </summary>
@@ -232,11 +297,20 @@ public sealed class ModelStoreExportTests
     /// </summary>
     /// <param name="store">The store to import into.</param>
     /// <param name="directory">The temporary directory the folder is written inside.</param>
+    /// <param name="tokenizerConfigJson">A <c>tokenizer_config.json</c> to include, or <see langword="null"/> for none.</param>
     /// <returns>A task that completes when the bundle is in the store.</returns>
-    private static async Task ImportOnnxBundleAsync(ModelStore store, TempStoreDirectory directory)
+    private static async Task ImportOnnxBundleAsync(
+        ModelStore store, TempStoreDirectory directory, string tokenizerConfigJson = null)
     {
         string root = Path.Combine(directory.DirectoryPath, "onnx-source");
         Directory.CreateDirectory(Path.Combine(root, "onnx"));
+
+        if (tokenizerConfigJson != null)
+        {
+            await File.WriteAllTextAsync(
+                Path.Combine(root, "tokenizer_config.json"), tokenizerConfigJson,
+                TestContext.Current.CancellationToken);
+        }
 
         await File.WriteAllTextAsync(
             Path.Combine(root, "config.json"), "{\"architectures\":[\"MidiModel\"]}",
@@ -266,11 +340,20 @@ public sealed class ModelStoreExportTests
     /// </summary>
     /// <param name="store">The store to import into.</param>
     /// <param name="directory">The temporary directory the folder is written inside.</param>
+    /// <param name="extraFileName">One more file to put in the folder, or <see langword="null"/> for none.</param>
+    /// <param name="extraFileText">That file's text.</param>
     /// <returns>A task that completes when the bundle is in the store.</returns>
-    private static async Task ImportCheckpointBundleAsync(ModelStore store, TempStoreDirectory directory)
+    private static async Task ImportCheckpointBundleAsync(
+        ModelStore store, TempStoreDirectory directory, string extraFileName = null, string extraFileText = null)
     {
         string root = Path.Combine(directory.DirectoryPath, "checkpoint-source");
         Directory.CreateDirectory(root);
+
+        if (extraFileName != null)
+        {
+            await File.WriteAllTextAsync(
+                Path.Combine(root, extraFileName), extraFileText, TestContext.Current.CancellationToken);
+        }
 
         await File.WriteAllTextAsync(
             Path.Combine(root, "config.json"), "{\"architectures\":[\"LlamaForCausalLM\"]}",

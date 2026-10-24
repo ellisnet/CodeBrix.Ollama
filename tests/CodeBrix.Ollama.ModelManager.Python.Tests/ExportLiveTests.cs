@@ -140,6 +140,10 @@ public sealed class ExportLiveTests
             Route = ExportRoute.Optimum,
             OutputName = outputName,
             AllowRemoteCode = true,
+            //optimum-onnx does not yet install beside transformers 5.10, the release that fixes
+            //CVE-2026-9856, so this route can only run on an unpatched transformers; the chat template
+            //names are still checked in .NET before any Python runs.
+            AllowUnpatchedTransformers = true,
             Overwrite = true
         };
 

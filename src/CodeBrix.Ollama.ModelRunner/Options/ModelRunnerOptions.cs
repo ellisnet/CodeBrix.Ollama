@@ -145,6 +145,14 @@ public sealed class ModelRunnerOptions
     /// </summary>
     public string JinjaTemplate { get; set; }
 
+    /// <summary>
+    /// The budget every chat template render is held to, in either dialect: steps, output and string
+    /// length, collection size, nesting depth and time. Defaults that no real template comes near; see
+    /// <see cref="CodeBrix.Ollama.ModelRunner.TemplateLimits"/>. <see langword="null"/> means the defaults. The limits are
+    /// copied at load, so changing this object afterwards does not reach a loaded model.
+    /// </summary>
+    public TemplateLimits TemplateLimits { get; set; } = new TemplateLimits();
+
     /// <summary>Receives load progress from 0.0 to 1.0. <see langword="null"/> (the default) reports nothing.</summary>
     public IProgress<float> LoadProgress { get; set; }
 }

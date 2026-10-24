@@ -303,9 +303,33 @@ Ollama's shapes works the same way, a test double included.
 
 PLAIN HTTP is refused unless asked for: a name whose scheme is "http" raises
 RegistryException, "insecure protocol http", BEFORE any request goes out unless
-ModelStoreOptions.AllowInsecureHttp is true. HTTPS is always allowed, and there
-is no option to relax certificate validation -- supply your own
-HttpMessageHandler if a lab setup needs that.
+ModelStoreOptions.AllowInsecureHttp is true. The same option governs every other
+plain-HTTP address too: an http:// entry in a file list (FileList pulls,
+HttpFileListSource, FileDownloader) is refused before anything is requested,
+and a redirect to an http:// address - an https-to-http downgrade included - is
+refused before it is followed. With AllowInsecureHttp set, all of these are
+allowed; the bearer token is never sent over plain HTTP either way. HTTPS is
+always allowed, and there is no option to relax certificate validation --
+supply your own HttpMessageHandler if a lab setup needs that.
+
+BEHAVIOUR CHANGE TO NOTE: http:// file-list entries used to be fetched without
+AllowInsecureHttp. They now need it, exactly as http:// model names do.
+
+REDIRECT RULES. Every redirect the library follows (registry blobs to their
+storage host, Hugging Face resolve addresses to their content delivery host,
+anything a file-list server answers) is checked first, and a refused one fails
+the request with RegistryException at once, without retries:
+  - a target that is neither http nor https is refused;
+  - an http:// target is refused unless AllowInsecureHttp is set;
+  - a target written as a loopback, private, link-local or unspecified IP
+    address (127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16,
+    169.254.0.0/16, 0.0.0.0/8, ::1, ::, fc00::/7, fe80::/10, the IPv4 ones also
+    in ::ffff: form) or as "localhost" is refused - unless the request itself
+    started at such an address, so a registry on a lab address may still
+    redirect within the lab. Host NAMES are not resolved for this check: a
+    public name that resolves to a private address is not caught.
+Redirects to ordinary public hosts - the content delivery and storage hosts
+the registry and the Hub use - are followed as before.
 
 
 CONFIGURING THE STORE (ModelStoreOptions)
@@ -318,9 +342,13 @@ on the store a local Ollama install would use.
     string   DefaultRegistryHost  = "registry.ollama.ai"
     string   DefaultNamespace     = "library"
     string   DefaultTag           = "latest"
-    bool     AllowInsecureHttp    = false      refuses an http:// name before
-                                               any request
-    string   BearerToken          = null       offered only after a 401
+    bool     AllowInsecureHttp    = false      refuses an http:// name, an
+                                               http:// file-list entry and a
+                                               redirect to http:// before any
+                                               request goes to them
+    string   BearerToken          = null       registry and Hub only, https
+                                               only, per host - see BEARER
+                                               TOKEN SEMANTICS
     int      MaxConcurrentParts   = 16         byte ranges of ONE blob in
                                                flight; 0 or less means 1
     long     MinPartSize, MaxPartSize  = 100 MB and 1000 MB -- the clamp on
@@ -353,20 +381,34 @@ the library creates its own it is a SocketsHttpHandler with AllowAutoRedirect
 off, no automatic decompression and a five-minute pooled connection lifetime,
 and yours is not adjusted; redirects are then followed by the library itself,
 by hand, up to ten of them, which keeps the Authorization header away from a
-redirect target. And the store does NOT dispose a handler you supplied, only
+redirect target and applies the REDIRECT RULES above. A handler of yours that
+follows redirects itself bypasses those rules (.NET's own handler does refuse
+an https-to-http redirect and drops the Authorization header on a redirect,
+but it does not check the target's address). And the store does NOT dispose a handler you supplied, only
 one it created. HttpClient.Timeout is infinite: nothing is abandoned on a clock
 except through StallTimeout or your CancellationToken.
 
-BEARER TOKEN SEMANTICS. The token is offered only after a challenge, never
-before one. A request goes out with no Authorization header; if the registry
-answers 401, the WWW-Authenticate header is parsed and, when a BearerToken is
-configured and has not already been used on this client, the same request is
-repeated once with "Authorization: Bearer <token>". A second 401, or a 401 with
-no token configured, raises RegistryException with StatusCode Unauthorized. The
-header only ever goes to the host the request started at: a blob request
-redirected to a content-delivery host is refetched WITHOUT it, because such a
-URL carries its own signature. Public models need no token, and there is no
-token exchange with the challenge realm and no ed25519 request signing.
+BEARER TOKEN SEMANTICS. The token belongs to two kinds of address and no
+others: the registry the model name being pulled points at, and the Hugging
+Face Hub (huggingface.co, hf.co). An address in a file list on any other host
+never receives it, whatever that host answers. Wherever it goes, it goes only
+over https and only to the exact scheme, host and port the request was
+addressed to.
+
+Against a registry it is offered only after a challenge. A request goes out
+with no Authorization header; if that same registry answers 401, the
+WWW-Authenticate header is parsed and, when a BearerToken is configured, the
+same request is repeated once with "Authorization: Bearer <token>". From then
+on THAT registry (that scheme, host and port) gets the token with every
+request; every other host still has to ask for it itself. A second 401, a 401
+with no token configured, and a 401 from any host the token does not belong
+to raise RegistryException with StatusCode Unauthorized. The header never goes
+to a host a redirect led to: a blob request redirected to a content-delivery
+host is refetched WITHOUT it, because such a URL carries its own signature,
+and a 401 from that host is reported, never answered with the token. A
+Hugging Face Hub source sends the token with its first request to the Hub (see
+HuggingFaceHubSource). Public models need no token, and there is no token
+exchange with the challenge realm and no ed25519 request signing.
 
 
 THE IModelStore OPERATIONS
@@ -389,6 +431,7 @@ substitute your own in tests.
     Task<bool>          ExistsAsync(string name, CancellationToken)
     Task<ModelInfo>     ShowAsync(string name, CancellationToken)
     Task<ResolvedModel> ResolveAsync(string name, CancellationToken)
+    Task<VerifyResult>  VerifyAsync(string name, CancellationToken)
     Task CopyAsync(string sourceName, string destinationName,
                    CancellationToken)
     Task DeleteAsync(string name, CancellationToken)
@@ -449,7 +492,8 @@ WHAT HAPPENS UNDERNEATH
   - CACHE HITS. A layer whose blob file already exists is not downloaded; it
     emits one report with CompletedBytes equal to TotalBytes and is skipped in
     the verification pass. (A digest shared by the config layer and a content
-    layer is still verified when either pass downloaded it.)
+    layer is still verified when either pass downloaded it.) A cache hit is
+    therefore trusted by its file name alone; VerifyAsync re-hashes it.
   - RESUME. A blob is split into byte ranges -- total / MaxConcurrentParts,
     clamped to MinPartSize and MaxPartSize, the last one shortened -- fetched
     concurrently into one partial file, with progress recorded in a JSON
@@ -474,8 +518,8 @@ WHAT HAPPENS UNDERNEATH
 
 ERRORS: ModelNotFoundException (404 for the manifest or a blob),
 RegistryException (any other error status, a 401, a transport failure that
-survived every retry, an insecure http:// name, an answer that is not a
-manifest), DigestMismatchException, ModelManagerException (safetensors). A pull
+survived every retry, an insecure http:// name, a refused redirect, an answer
+that is not a manifest), DigestMismatchException, ModelManagerException (safetensors). A pull
 of a model that is already complete is cheap but not free -- the manifest is
 fetched again, every blob confirmed present and the manifest rewritten -- so
 guard the call with ExistsAsync when you only want to know it is there.
@@ -581,6 +625,37 @@ you cannot rule that out.
     string weights  = model.ModelPath;   // give this to a runner
     string template = model.Template;    // may be null
     int contextSize = model.Parameters?.NumCtx ?? 4096;
+
+VerifyAsync
+-----------
+Re-reads and re-hashes EVERY blob a stored model's manifest names - each
+content layer and the config, each distinct digest once - and reports what it
+found. A pull hashes what it downloads, but a cache hit is not re-read, and a
+store shared with other tools can change under you; this is how you check a
+model at rest before trusting it. ModelNotFoundException when the store has no
+such model; a bad blob is REPORTED, never thrown and never deleted (it may be
+shared with other models and other tools). It costs a full read of the model.
+
+    VerifyResult    string Name; int BlobsChecked; long BytesHashed;
+                    IReadOnlyList<VerifyFailure> Failures (manifest order);
+                    bool IsIntact (no failures)
+    VerifyFailure   string Digest, MediaType, LayerName (a bundle file's
+                    path, else null); VerifyProblem Problem; long
+                    ExpectedSize, ActualSize (-1 when missing); string
+                    ActualDigest ("sha256:<hex>", or null when nothing could
+                    be hashed)
+    VerifyProblem   Missing | DigestMismatch | SizeMismatch | MalformedDigest
+
+    VerifyResult check = await store.VerifyAsync("smollm:135m");
+    if (!check.IsIntact)
+    {
+        foreach (VerifyFailure failure in check.Failures)
+            Console.WriteLine(failure);   // layer, digest, problem
+    }
+
+A blob that is present already counts as a cache hit on the next pull, so to
+repair a model delete it and pull it again; a bad blob that another model still
+references survives that delete, so verify (and delete) those models too.
 
 CopyAsync
 ---------
@@ -975,7 +1050,8 @@ PullOptions
     FileFilter Filter                never null; unset reads as
                                      FileFilter.Default
     bool RequireHashes               false; true refuses a file the source
-                                     states no hash for
+                                     states no hash for (a sha256, an md5 or
+                                     a git blob id each count)
     const  DefaultRevision "main"
     static ForRegistry(), ForHuggingFace(repository, revision, filter),
            ForFileList(files, filter)
@@ -998,8 +1074,10 @@ THE PROGRESS STREAM OF A BUNDLE PULL, IN ORDER
                                 carries its digest only in the final report,
                                 because until the bytes are all there nothing
                                 knows what it is
-    "verifying sha256 digest"   once, when every blob the new manifest will
+    "checking stored files"     once, when every blob the new manifest will
                                 name is confirmed present at the recorded size
+                                (nothing is re-hashed here; VerifyAsync does
+                                that on request)
     "writing manifest"          once, before the manifest is written
     "success"                   always the last report of a successful pull
 
@@ -1073,12 +1151,18 @@ content. A tree that arrives in pages is followed to the end.
 
   - THE COMMIT IS PINNED. NormalizeRevision turns null, empty and the store's
     default tag "latest" into "main"; the listing then resolves that to a
-    commit and names the commit in every address it builds.
+    commit and names the commit in every address it builds. Any revision other
+    than "main" - a branch, a tag, or a 40-hex commit - is asked for by name,
+    so a pinned commit lists THAT commit, not the head of main. When the Hub
+    answers a 40-hex commit with a different commit the listing is a
+    RegistryException rather than a silent swap.
   - HASHES: the sha256 of a large-file entry is the hash of the CONTENT and is
-    what a download is held to. The git object identifier is recorded as
-    BundleFile.GitSha1 and NEVER verified against, because it hashes the
-    object as git stores it, not the bytes that arrive. A small file that the
-    Hub keeps in git itself therefore states no verifiable hash at all.
+    what a download is held to. Every other file - config.json,
+    tokenizer_config.json, chat_template.jinja, *.py - states only its git
+    blob id, BundleFile.GitSha1 = SHA1("blob <length>\0" + content), and a
+    download is held to that. Every file of a Hub repository is therefore
+    verified. (For a large-file entry the git id names the pointer file, not
+    the content, so when a sha256 is stated the git id is not checked.)
   - GATED OR PRIVATE repositories are refused with a message that says what to
     do, unless ModelStoreOptions.BearerToken holds an access token. A token
     that exists travels with the FIRST request here, because the Hub answers
@@ -1101,7 +1185,10 @@ costs no request. A file whose size is unknown is asked for with a HEAD and,
 when the server refuses a HEAD, with a request for its first byte, whose
 Content-Range states the whole length; the MD5 a storage bucket sends in a
 header is taken while the server is answering. A server that will say neither
-is a RegistryException.
+is a RegistryException. An http:// entry is refused before anything is asked
+unless ModelStoreOptions.AllowInsecureHttp is set (a BEHAVIOUR CHANGE: such
+entries used to be fetched regardless), and ModelStoreOptions.BearerToken is
+never offered to an entry that is not on the Hugging Face Hub.
 
     static Task<IReadOnlyList<BundleFile>> GoogleCloudStorageListing.ListAsync(
         bucket, prefix, handler, CancellationToken)
@@ -1133,7 +1220,12 @@ the publisher uses and the path MaterializeAsync lays out on disk. A backslash
 is read as a separator and rewritten, a leading "./" is dropped, and a path
 that is rooted, that names a drive or that walks up with ".." is an
 ArgumentException - a bundle must never be able to write outside the directory
-it is materialized into. Sizes and hashes are what the SOURCE STATED, not what
+it is materialized into. So is a path that is not portable: a colon anywhere
+(an NTFS alternate data stream such as "config.json:payload"), a control
+character, a segment that is a Windows device name (CON, PRN, AUX, NUL,
+COM1-COM9, LPT1-LPT9, in any case, with or without an extension), or a segment
+that ends in a dot or a space. A BundleListing whose files repeat a path, or
+hold two paths that differ only in case, is an ArgumentException too. Sizes and hashes are what the SOURCE STATED, not what
 was measured: Size is UnknownSize when the source did not say, and each hash is
 null when the source did not state that hash. A hash that is not hexadecimal of
 the length its algorithm calls for is refused; the case is normalized to lower
@@ -1180,12 +1272,15 @@ WHAT IS VERIFIED, FILE BY FILE
                     in the store cost no request at all
     stated md5      verified as the bytes stream past, when that is the only
                     hash the source states
+    stated git id   with no sha256 stated, the finished file is held to
+                    SHA1("blob <length>\0" + content); a mismatch is a
+                    DigestMismatchException whose digests read "git-sha1:<hex>"
     nothing stated  downloaded, and the store computes the SHA-256 itself,
                     names the blob by it and records it - so a second pull
                     verifies against the first
 
 PullOptions.RequireHashes turns "nothing stated" into a ModelManagerException
-naming the file, before that file is fetched. A mismatch against either stated
+naming the file, before that file is fetched. A mismatch against any stated
 hash is a DigestMismatchException, the bad bytes are already gone, and no
 manifest is written.
 
@@ -1643,13 +1738,40 @@ NEVER THROWS. A machine with no CPython at all produces a report that says so.
         bool IsInitialized                 an interpreter is running
         PythonEngineOwner Owner            None | ModelManager | Host
         IReadOnlyList<PythonModuleReport> Modules
-                                           Name, IsInstalled, Error - one entry
+                                           Name, IsInstalled, Error,
+                                           InstalledVersion, MinimumVersion,
+                                           MeetsMinimumVersion - one entry
                                            per module asked about, in order
         IReadOnlyList<string> Problems     human sentences, empty when nothing
                                            is wrong
         bool IsUsable                      the library loads, the version is
                                            supported, and every module asked
-                                           about imports
+                                           about imports and meets its floor
+
+VERSION FLOORS. A few modules are held to a lowest version, because earlier
+releases carry a known hole a hostile model can reach through the scripts this
+package runs. A floor applies whenever that module is asked about - by Check,
+by Require, or by a feature:
+
+    torch          2.6    torch.load with weights_only=True can still run
+                          code in earlier releases (CVE-2025-32434)
+    onnx           1.16   earlier releases follow external-data paths out of
+                          the model folder (CVE-2024-27318)
+    transformers   5.10   earlier releases write a dict-form chat_template's
+                          names as file paths in save_pretrained
+                          (CVE-2026-9856)
+
+PythonModuleReport.InstalledVersion is what the module reports about itself
+("2.6.0+cpu"), MinimumVersion is the floor ("2.6") or null for a module with
+none, and MeetsMinimumVersion is false when the installed version is earlier,
+is a pre-release or development build of the floor release itself
+("2.6.0.dev20241112", "2.6.0rc1"), or cannot be read. A local label ("+cpu")
+is ignored. A module below its floor adds a sentence to Problems naming the
+module, both versions and the advisory.
+
+The transformers floor is the one floor a caller can waive, and only for an
+export: see ALLOWING AN UNPATCHED TRANSFORMERS under EXPORTING TO ONNX. Check
+reports the shortfall whether or not it is waived.
 
 TWO KINDS OF CHECK, and the difference matters:
 
@@ -1694,11 +1816,21 @@ ends every message: "exporting to ONNX", "reducing an ONNX model".
                                        PythonModuleNotInstalledException
                                        .InstallCommand(module, venv) builds the
                                        same line for your own messages.
+    PythonModuleTooOldException        a module is installed but below its
+                                       version floor. string Feature, string
+                                       ModuleName, string InstalledVersion
+                                       (null when unreadable), string
+                                       MinimumVersion, and the message
+                                       carries the command that upgrades it
+                                       in THAT interpreter.
+                                       PythonModuleTooOldException
+                                       .UpgradeCommand(module, minimum, venv)
+                                       builds the same line.
     PythonScriptException              a script this package ships failed for
                                        some other reason. string Feature,
                                        string ScriptName, string PythonMessage.
 
-All three derive from ModelManagerException.
+All four derive from ModelManagerException.
 
     try
     {
@@ -1851,7 +1983,22 @@ WHICH ROUTES NEED PYTHON, AND WHICH MODULES
 A Python route calls PythonSupport.Require BEFORE it lays anything out, so a
 machine without the modules says so in a second rather than after copying a
 checkpoint into a temporary folder. The feature is named "exporting to ONNX" in
-every message.
+every message. torch, onnx and transformers are also held to a lowest version
+(see VERSION FLOORS under PYTHON), and an older one is refused with
+PythonModuleTooOldException - unless ExportOptions.AllowUnpatchedTransformers
+waives the transformers floor (see below).
+
+CHAT TEMPLATE NAMES ARE CHECKED FIRST. GenAiBuilder and Optimum both save the
+publisher's tokenizer through transformers, which writes each template of a
+dict-form or list-form chat_template to a file NAMED AFTER IT - so a hostile
+name such as "../../x" would be written outside the output folder. Before any
+Python runs (before even the module check), every tokenizer_config.json,
+chat_template.json and processor_config.json in the bundle is read in .NET,
+and a template name that is not 1 to 64 characters of ASCII letters, digits,
+'_', '.' and '-' - or is "." or ".." - is refused with PythonScriptException
+naming the file and the name. A file that is not readable JSON is refused the
+same way. A single-string chat_template names nothing and passes. The
+pass-through and the MuseCoco routes do not save a tokenizer and do not check.
 
 ExportOptions
 
@@ -1872,6 +2019,7 @@ ExportOptions
     bool Overwrite           false; a name already in the store fails the
                              export and names this option
     bool AllowRemoteCode     false. See below
+    bool AllowUnpatchedTransformers   false. See below
 
 ExportResult   string Name (ready to show, resolve or materialize);
     IReadOnlyList<string> Files; string Tool; string ToolVersion;
@@ -1886,6 +2034,20 @@ PUBLISHER'S OWN PYTHON in your process, with everything that implies. It is
 false by default. Set it only for a model whose files you have looked at, and
 never for one you did not choose yourself. The PublisherOnnx route ignores it,
 because it runs no Python at all.
+
+ALLOWING AN UNPATCHED TRANSFORMERS. GenAiBuilder and Optimum refuse a
+transformers older than 5.10, the release that fixes CVE-2026-9856. The
+Optimum route's optimum-onnx package does not yet install beside transformers
+5.x, so on its own that floor makes Optimum impossible to run anywhere.
+ExportOptions.AllowUnpatchedTransformers = true waives that one floor for that
+one export, and with it ACCEPTS AN UNPATCHED TRANSFORMERS - and any other hole
+that release carries - in your process. It is false by default. What it does
+not change: the chat template names are still checked in .NET first (which
+closes CVE-2026-9856 itself, whatever transformers is installed), the torch and
+onnx floors still refuse, and PythonSupport.Check still reports transformers
+as below its floor. On transformers 5.10 or later it does nothing; the MuseCoco
+and PublisherOnnx routes ignore it. Set it only when the route cannot run
+otherwise, and stop setting it once the environment can be upgraded.
 
 THE PROGRESS STREAM, IN ORDER
 
@@ -1934,11 +2096,12 @@ all.
 WHAT CAN GO WRONG: ModelNotFoundException (no such model),
 InvalidOperationException (not a bundle, or PublisherOnnx named for a bundle
 with no .onnx in it), ArgumentException (a MuseCoco route asked for a
-precision other than "fp32"), PythonNotAvailableException and
-PythonModuleNotInstalledException (a Python route on a machine that cannot run
-it), PythonScriptException (the tool refused the model or failed - its own
-message is in PythonMessage), and ModelManagerException (the output name is
-taken and Overwrite is not set, or the tool wrote nothing).
+precision other than "fp32"), PythonNotAvailableException,
+PythonModuleNotInstalledException and PythonModuleTooOldException (a Python
+route on a machine that cannot run it), PythonScriptException (the tool
+refused the model or failed - its own message is in PythonMessage - or a
+chat template name was refused before the tool ran), and ModelManagerException
+(the output name is taken and Overwrite is not set, or the tool wrote nothing).
 
 
 REDUCING AN ONNX MODEL
@@ -2684,14 +2847,20 @@ Exception. Catch the base type to catch all of it.
                                    it needs is not installed in the interpreter
                                    that would run it; Feature, ModuleName, and
                                    the install command in the message
+      PythonModuleTooOldException  a Python feature was asked for and a module
+                                   it needs is installed below its version
+                                   floor; Feature, ModuleName,
+                                   InstalledVersion, MinimumVersion, and the
+                                   upgrade command in the message
       PythonNotAvailableException  a Python feature was asked for and there is
                                    no usable CPython shared library; Feature
       PythonScriptException        a Python script that ships in this package
                                    failed; Feature, ScriptName, PythonMessage
       RegistryException            an error status, a 401, a transport failure
                                    that survived every retry, an insecure
-                                   http:// name, or an answer that is not a
-                                   manifest. StatusCode is null when no
+                                   http:// name or file-list address, a
+                                   refused redirect, or an answer that is
+                                   not a manifest. StatusCode is null when no
                                    response arrived; ResponseBody holds the
                                    body when one was read, else null
 
@@ -2701,8 +2870,12 @@ WHAT THE BUNDLE PATHS ADD, exception by exception:
                                 not the Hub with PullOptions.Repository unset;
                                 a file-list pull with no files; a PullSource a
                                 bundle cannot be pulled from; a BundleFile
-                                whose path is rooted, names a drive or walks
-                                up with "..", whose address is missing,
+                                whose path is rooted, names a drive, walks
+                                up with "..", or is not portable (a colon, a
+                                control character, a Windows device name, a
+                                segment ending in a dot or space); a
+                                BundleListing with a path twice or two paths
+                                that differ only in case; whose address is missing,
                                 relative or neither http nor https, or whose
                                 stated hash is not hexadecimal of the length
                                 its algorithm calls for; a BundleDefinition
@@ -2727,9 +2900,11 @@ WHAT THE BUNDLE PATHS ADD, exception by exception:
                                 file tree or a bucket listing; a server that
                                 will say neither how large a file is nor serve
                                 a byte of it
-    DigestMismatchException     the bytes do not match the sha256 or the md5
-                                the source stated; the message says which, and
-                                the bad file is already gone
+    DigestMismatchException     the bytes do not match the sha256, the md5 or
+                                the git blob id the source stated; the
+                                message says which ("md5:" and "git-sha1:"
+                                prefixes on the digests), and the bad file is
+                                already gone
 
 Framework exceptions you will also see: ArgumentException (a null or blank
 model name or store directory; a ConvertOptions.AddedSpecialTokens entry the
@@ -2935,7 +3110,7 @@ EXAMPLE 5 - PULL A HUGGING FACE FILE REPOSITORY, MATERIALIZE IT, DELETE IT
             : $"{progress.Status} {progress.Percent:F1}%");
     }
     // listing example-org/example-model / pulling config.json 100.0% /
-    // pulling model.safetensors 12.4% ... / verifying sha256 digest /
+    // pulling model.safetensors 12.4% ... / checking stored files /
     // writing manifest / success
 
     // 2. WHAT THE STORE NOW KNOWS. The licence is REPORTED, never applied.
@@ -3238,11 +3413,11 @@ COMMON PITFALLS TO AVOID
     that never falls back: it fails loudly instead, and on Windows it needs
     developer mode or the privilege to create links.
 
-19. DO NOT set PullOptions.RequireHashes against a repository of small files.
-    It refuses any file the source states neither a sha256 nor an md5 for, and
-    for a Hugging Face repository that is every file the Hub keeps in git
-    itself. Use it when only content a publisher vouched for is acceptable,
-    and expect to pair it with a filter.
+19. DO NOT set PullOptions.RequireHashes against a plain list of addresses
+    you know nothing about. It refuses any file the source states no sha256,
+    md5 or git blob id for. Every file of a Hugging Face repository states one
+    of those, so a Hub pull passes; a FileList pull passes only for files you
+    (or a bucket's md5 header) gave a hash.
 
 20. DO NOT read a reported licence as permission. The library reports the
     identifier a source states and the address it read it from, and hands you
@@ -3286,6 +3461,12 @@ COMMON PITFALLS TO AVOID
     CHECKPOINT ships - a custom tokenizer or configuration class - which runs
     the publisher's own Python in your process. It is false by default, and
     some checkpoints simply cannot be exported without it.
+
+    Likewise, DO NOT set ExportOptions.AllowUnpatchedTransformers to make an
+    export run when the transformers in the environment can be upgraded
+    instead. It waives the floor that keeps an unpatched transformers out of
+    your process, and exists only for routes (Optimum, today) whose own
+    packages cannot yet install beside a patched one.
 
 27. DO NOT export a checkpoint with the system temporary directory in memory. A
     Python route writes the whole source bundle into a temporary folder and the
@@ -3681,7 +3862,8 @@ NAMES       [scheme://][host/][namespace/]model[:tag]; defaults
             ModelName.TryParse(s, out name) -- parsing never throws
 OPERATIONS  PullAsync (lazy, resumable), ListAsync (newest first),
             ExistsAsync, ShowAsync (opens GGUF headers), ResolveAsync (paths
-            only), CopyAsync, DeleteAsync, CreateAsync, PruneAsync(grace)
+            only), VerifyAsync (re-hashes every blob, reports failures),
+            CopyAsync, DeleteAsync, CreateAsync, PruneAsync(grace)
 PULL STATUS pulling manifest -> pulling <12 hex> (per layer) -> verifying
             sha256 digest -> writing manifest -> [removing unused] -> success
 BUNDLES     a model that is not GGUF on a registry - a Hugging Face file
@@ -3708,10 +3890,11 @@ BUNDLE OUT  MaterializeAsync(name, directory, MaterializeOptions { Link =
 BUNDLE IN   ResolvedModel.Files (ResolvedFile: Name, BlobPath, Size, Digest)
             and .Format; ModelInfo.License, .Format and .Licenses;
             ModelSummary.Config.ModelFormat tells a bundle from a GGUF model
-BUNDLE STATUS   listing <repository> -> pulling <path> (per file) -> verifying
-            sha256 digest -> writing manifest -> success
+BUNDLE STATUS   listing <repository> -> pulling <path> (per file) -> checking
+            stored files -> writing manifest -> success
 EXPORT      ExportToOnnxAsync(name, ExportOptions { Route, Precision,
-            OutputName, Overwrite, AllowRemoteCode }, IProgress<PullProgress>,
+            OutputName, Overwrite, AllowRemoteCode,
+            AllowUnpatchedTransformers }, IProgress<PullProgress>,
             ct) -> ExportResult { Name, Files, Tool, ToolVersion, RouteUsed;
             ToString() }. ExportOptions.DefaultPrecision is what an unset
             Precision reads as ("fp32").
@@ -3724,6 +3907,8 @@ EXPORT      ExportToOnnxAsync(name, ExportOptions { Route, Precision,
             architecture the builder writes -> GenAiBuilder; else Optimum.
             Auto never chooses MuseCocoMusic.
             AllowRemoteCode runs the PUBLISHER'S OWN Python; false by default.
+            AllowUnpatchedTransformers waives the transformers 5.10 floor
+            for GenAiBuilder/Optimum; false by default; Check still reports it.
             TMPDIR must be on a real file system for a converting route
 EXPORT STATUS   materializing source -> exporting -> collecting -> writing
             manifest -> success
@@ -3835,8 +4020,9 @@ PYTHON REPORT  PythonSupportReport { LibraryPath, LibrarySource, LibraryLoads,
             Version, IsSupportedVersion, VirtualEnvironment,
             VirtualEnvironmentSource, IsInitialized, Owner, Modules, Problems,
             IsUsable }; Modules is PythonModuleReport { Name, IsInstalled,
-            Error } in the order asked for; Problems is empty when nothing is
-            wrong. PythonLibrarySource: NotFound | Code | EnvironmentVariable
+            Error, InstalledVersion, MinimumVersion, MeetsMinimumVersion } in
+            the order asked for; floors: torch 2.6, onnx 1.16, transformers
+            5.10; Problems is empty when nothing is wrong. PythonLibrarySource: NotFound | Code | EnvironmentVariable
             | VirtualEnvironment | Host. PythonVirtualEnvironmentSource: None |
             Code | EnvironmentVariable | Inherited. PythonEngineOwner: None |
             ModelManager | Host
@@ -3849,15 +4035,17 @@ ERRORS      ModelManagerException: CheckpointFormatException,
             DigestMismatchException, GgufFormatException,
             InvalidModelNameException, ModelfileParseException,
             ModelNotFoundException, PickleRefusedException,
-            PythonModuleNotInstalledException,
+            PythonModuleNotInstalledException, PythonModuleTooOldException,
             PythonNotAvailableException, PythonScriptException,
             RegistryException. PickleRefusedException carries Construct, the
-            opcode or global that was refused. The Python three carry Feature;
-            the module one
+            opcode or global that was refused. The Python four carry Feature;
+            the not-installed one
             also ModuleName and the static
             PythonModuleNotInstalledException.InstallCommand(module, venv),
-            which builds the same pip line the message carries; the script one
-            also ScriptName and PythonMessage
+            which builds the same pip line the message carries; the too-old
+            one ModuleName, InstalledVersion, MinimumVersion and the static
+            PythonModuleTooOldException.UpgradeCommand(module, minimum, venv);
+            the script one also ScriptName and PythonMessage
 RUNNER      ResolvedModel.ModelPath is what an in-process GGUF runner loads;
             ResolvedModel.Files gives a (name, path) pair per file of a BUNDLE,
             which is what an ONNX load takes. CodeBrix.Ollama.ModelRunner is a

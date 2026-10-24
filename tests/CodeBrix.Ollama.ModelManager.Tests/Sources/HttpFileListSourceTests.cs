@@ -194,6 +194,71 @@ public sealed class HttpFileListSourceTests
     }
 
     [Fact]
+    public async Task ListAsync_with_a_plain_http_address_is_refused_before_anything_is_asked()
+    {
+        //Arrange
+        using FakeBucketHandler handler = GoogleCloudStorageListingTests.CreateBucket();
+        var files = new List<BundleFile>
+        {
+            new BundleFile("primers/fur_elise.mid", ObjectUrl("primers/fur_elise.mid")),
+            new BundleFile("primers/c_major_scale.mid", "http://storage.googleapis.com/" + Bucket + "/" + Prefix + "primers/c_major_scale.mid")
+        };
+        using var source = new HttpFileListSource(files, null, CreateOptions(handler));
+
+        //Act
+        Func<Task> act = () => source.ListAsync(TestContext.Current.CancellationToken);
+
+        //Assert
+        RegistryException exception = (await act.Should().ThrowAsync<RegistryException>()).Which;
+        exception.Message.Should().StartWith("insecure protocol http");
+        handler.Requests.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ListAsync_with_a_plain_http_address_and_insecure_http_allowed_asks_it()
+    {
+        //Arrange
+        using FakeBucketHandler handler = GoogleCloudStorageListingTests.CreateBucket();
+        var files = new List<BundleFile>
+        {
+            new BundleFile("primers/fur_elise.mid", "http://storage.googleapis.com/" + Bucket + "/" + Prefix + "primers/fur_elise.mid")
+        };
+        ModelStoreOptions options = CreateOptions(handler);
+        options.AllowInsecureHttp = true;
+        using var source = new HttpFileListSource(files, null, options);
+
+        //Act
+        BundleListing listing = await source.ListAsync(TestContext.Current.CancellationToken);
+
+        //Assert
+        listing.Files[0].Size.Should().Be(GoogleCloudStorageListingTests.Bytes("fur elise").Length);
+        handler.Requests[0].RequestUri.Scheme.Should().Be("http");
+    }
+
+    [Fact]
+    public async Task ListAsync_never_offers_the_token_to_a_listed_host_that_answers_401()
+    {
+        //Arrange
+        using var handler = new FakeRegistryHandler { RequireAuthorization = true, ExpectedBearerToken = "secret" };
+        string digest = handler.AddBlob(new byte[100]);
+        var files = new List<BundleFile>
+        {
+            new BundleFile("weights.bin", "https://files.test/v2/library/test/blobs/" + digest)
+        };
+        var options = new ModelStoreOptions { HttpMessageHandler = handler, BearerToken = "secret" };
+        using var source = new HttpFileListSource(files, null, options);
+
+        //Act
+        Func<Task> act = () => source.ListAsync(TestContext.Current.CancellationToken);
+
+        //Assert
+        RegistryException exception = (await act.Should().ThrowAsync<RegistryException>()).Which;
+        exception.StatusCode.Should().Be(System.Net.HttpStatusCode.Unauthorized);
+        handler.Requests.Should().HaveCount(1);
+        handler.AnyAuthorizationSentTo("files.test").Should().BeFalse();
+    }
+
+    [Fact]
     public void A_list_with_a_null_file_is_refused()
     {
         //Arrange

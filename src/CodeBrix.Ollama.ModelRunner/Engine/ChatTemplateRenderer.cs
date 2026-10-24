@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 
 namespace CodeBrix.Ollama.ModelRunner;
 
@@ -30,10 +31,13 @@ internal sealed class ChatTemplateRenderer
     private readonly string bosToken;
     private readonly string eosToken;
 
+    private readonly TemplateLimits limits;
+    private readonly object compileLock = new object();
+
     private JinjaTemplate jinja;
     private OllamaTemplate ollama;
 
-    /// <summary>Creates the renderer for one loaded model.</summary>
+    /// <summary>Creates the renderer for one loaded model, under the default template limits.</summary>
     /// <param name="dialect">The dialect <see cref="ChatTemplateStrategy.Resolve"/> settled on.</param>
     /// <param name="jinjaTemplate">The Jinja template from the options, or <see langword="null"/>.</param>
     /// <param name="ollamaTemplate">The Ollama Go template from the options, or <see langword="null"/>.</param>
@@ -47,7 +51,29 @@ internal sealed class ChatTemplateRenderer
         string embeddedTemplate,
         string bosToken,
         string eosToken)
+        : this(dialect, jinjaTemplate, ollamaTemplate, embeddedTemplate, bosToken, eosToken, null)
     {
+    }
+
+    /// <summary>Creates the renderer for one loaded model.</summary>
+    /// <param name="dialect">The dialect <see cref="ChatTemplateStrategy.Resolve"/> settled on.</param>
+    /// <param name="jinjaTemplate">The Jinja template from the options, or <see langword="null"/>.</param>
+    /// <param name="ollamaTemplate">The Ollama Go template from the options, or <see langword="null"/>.</param>
+    /// <param name="embeddedTemplate">The Jinja template the model file embeds, or <see langword="null"/>.</param>
+    /// <param name="bosToken">The vocabulary's beginning-of-sequence token text, or <see langword="null"/>.</param>
+    /// <param name="eosToken">The vocabulary's end-of-sequence token text, or <see langword="null"/>.</param>
+    /// <param name="limits">The template limits, or <see langword="null"/> for the defaults.</param>
+    /// <exception cref="ArgumentException">A limit is out of range.</exception>
+    public ChatTemplateRenderer(
+        ChatTemplateDialect dialect,
+        string jinjaTemplate,
+        string ollamaTemplate,
+        string embeddedTemplate,
+        string bosToken,
+        string eosToken,
+        TemplateLimits limits)
+    {
+        this.limits = TemplateLimits.ValidatedCopy(limits, nameof(limits));
         Dialect = dialect;
         jinjaTemplateText = ChatTemplateStrategy.JinjaTemplateText(jinjaTemplate, embeddedTemplate);
         ollamaTemplateText = ollamaTemplate;
@@ -87,22 +113,43 @@ internal sealed class ChatTemplateRenderer
     /// </summary>
     public IReadOnlyList<string> StopStrings { get; }
 
+    /// <summary>
+    /// Whether rendering calls into the engine, and so must run on the model's worker thread. Only the native
+    /// dialect does; the Jinja and Ollama dialects are managed code that touches no engine state, and they run
+    /// anywhere, which keeps a slow render from holding up the engine thread.
+    /// </summary>
+    public bool RendersOnEngine => Dialect != ChatTemplateDialect.Jinja && Dialect != ChatTemplateDialect.Ollama;
+
     /// <summary>Renders a request into the prompt the model sees.</summary>
     /// <param name="request">The request.</param>
     /// <returns>The prompt text.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="request"/> is <see langword="null"/>.</exception>
     /// <exception cref="ChatTemplateException">The template could not be compiled or could not render this request.</exception>
-    public string Render(ChatRequest request)
+    public string Render(ChatRequest request) => Render(request, CancellationToken.None);
+
+    /// <summary>Renders a request into the prompt the model sees, checking the token as the render goes.</summary>
+    /// <param name="request">The request.</param>
+    /// <param name="cancellationToken">A token to cancel the render.</param>
+    /// <returns>The prompt text.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="request"/> is <see langword="null"/>.</exception>
+    /// <exception cref="OperationCanceledException">The token was cancelled.</exception>
+    /// <exception cref="ChatTemplateException">
+    /// The template could not be compiled or could not render this request, or it exceeded a template limit.
+    /// </exception>
+    /// <remarks>Safe to call from several threads at once: a compiled template is never changed by a render.</remarks>
+    public string Render(ChatRequest request, CancellationToken cancellationToken)
     {
         if (request == null) throw new ArgumentNullException(nameof(request));
+
+        cancellationToken.ThrowIfCancellationRequested();
 
         switch (Dialect)
         {
             case ChatTemplateDialect.Ollama:
-                return RenderOllama(request);
+                return RenderOllama(request, cancellationToken);
 
             case ChatTemplateDialect.Jinja:
-                return RenderJinja(request);
+                return RenderJinja(request, cancellationToken);
 
             default:
                 return RenderNative(request);
@@ -143,39 +190,51 @@ internal sealed class ChatTemplateRenderer
         return OllamaTemplate.BuiltInStopStrings(name);
     }
 
-    private string RenderJinja(ChatRequest request)
+    private string RenderJinja(ChatRequest request, CancellationToken cancellationToken)
     {
-        if (jinja == null)
+        JinjaTemplate compiled;
+        lock (compileLock)
         {
-            if (string.IsNullOrWhiteSpace(jinjaTemplateText))
+            if (jinja == null)
             {
-                throw new ChatTemplateException(
-                    "This model has no Jinja chat template to render with. Load it with "
-                    + $"{nameof(ModelRunnerOptions)}.{nameof(ModelRunnerOptions.JinjaTemplate)} set, or with "
-                    + $"a different {nameof(ChatTemplateDialect)}.");
+                if (string.IsNullOrWhiteSpace(jinjaTemplateText))
+                {
+                    throw new ChatTemplateException(
+                        "This model has no Jinja chat template to render with. Load it with "
+                        + $"{nameof(ModelRunnerOptions)}.{nameof(ModelRunnerOptions.JinjaTemplate)} set, or with "
+                        + $"a different {nameof(ChatTemplateDialect)}.");
+                }
+
+                jinja = JinjaTemplate.Parse(jinjaTemplateText, limits);
             }
 
-            jinja = JinjaTemplate.Parse(jinjaTemplateText);
+            compiled = jinja;
         }
 
-        return jinja.Render(ChatJinjaVariables.Build(request, bosToken, eosToken));
+        return compiled.Render(ChatJinjaVariables.Build(request, bosToken, eosToken), cancellationToken);
     }
 
-    private string RenderOllama(ChatRequest request)
+    private string RenderOllama(ChatRequest request, CancellationToken cancellationToken)
     {
-        if (ollama == null)
+        OllamaTemplate compiled;
+        lock (compileLock)
         {
-            if (string.IsNullOrWhiteSpace(ollamaTemplateText))
+            if (ollama == null)
             {
-                throw new ChatTemplateException(
-                    "This model has no Ollama chat template to render with. Load it with "
-                    + $"{nameof(ModelRunnerOptions)}.{nameof(ModelRunnerOptions.OllamaTemplate)} set.");
+                if (string.IsNullOrWhiteSpace(ollamaTemplateText))
+                {
+                    throw new ChatTemplateException(
+                        "This model has no Ollama chat template to render with. Load it with "
+                        + $"{nameof(ModelRunnerOptions)}.{nameof(ModelRunnerOptions.OllamaTemplate)} set.");
+                }
+
+                ollama = OllamaTemplate.Parse(ollamaTemplateText, limits);
             }
 
-            ollama = OllamaTemplate.Parse(ollamaTemplateText);
+            compiled = ollama;
         }
 
-        return ollama.Render(ChatOllamaValues.Build(request));
+        return compiled.Render(ChatOllamaValues.Build(request), cancellationToken);
     }
 
     private string RenderNative(ChatRequest request)

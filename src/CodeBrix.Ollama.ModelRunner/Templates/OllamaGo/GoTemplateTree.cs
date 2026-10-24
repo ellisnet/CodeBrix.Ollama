@@ -14,8 +14,6 @@ namespace CodeBrix.Ollama.ModelRunner; //was previously: golang/go src/text/temp
 /// </summary>
 internal sealed class GoTemplateTree
 {
-    private const int MaxStackDepth = 10000;
-    private const int MaxBranchDepth = 500;
 
     private readonly GoTemplateItem[] _token = new GoTemplateItem[3];
     private List<string> _vars;
@@ -27,6 +25,7 @@ internal sealed class GoTemplateTree
     private int _rangeDepth;
     private int _stackDepth;
     private int _branchDepth;
+    private int _maxDepth = TemplateLimits.Default.MaxNestingDepth;
     private string _text;
 
     private GoTemplateTree(string name)
@@ -54,9 +53,23 @@ internal sealed class GoTemplateTree
     /// <exception cref="ChatTemplateException">The template text is not valid.</exception>
     internal static Dictionary<string, GoTemplateTree> Parse(string name, string text,
         HashSet<string> funcNames)
+        => Parse(name, text, funcNames, TemplateLimits.Default.MaxNestingDepth);
+
+    /// <summary>
+    /// Parses template text into a set of trees, refusing a template that nests deeper than
+    /// <paramref name="maxDepth"/> - branches, blocks and parentheses all counted together.
+    /// </summary>
+    /// <param name="name">The name to give the top-level template.</param>
+    /// <param name="text">The template text.</param>
+    /// <param name="funcNames">The names of the functions the template may call.</param>
+    /// <param name="maxDepth">How deeply the template may nest.</param>
+    /// <returns>The parsed trees, keyed by template name.</returns>
+    /// <exception cref="ChatTemplateException">The template text is not valid, or nests too deeply.</exception>
+    internal static Dictionary<string, GoTemplateTree> Parse(string name, string text,
+        HashSet<string> funcNames, int maxDepth)
     {
         Dictionary<string, GoTemplateTree> treeSet = new Dictionary<string, GoTemplateTree>(StringComparer.Ordinal);
-        GoTemplateTree tree = new GoTemplateTree(name) { _text = text };
+        GoTemplateTree tree = new GoTemplateTree(name) { _text = text, _maxDepth = maxDepth };
         tree.ParseTemplate(text, treeSet, funcNames);
         return treeSet;
     }
@@ -207,6 +220,10 @@ internal sealed class GoTemplateTree
         return token;
     }
 
+    private string DepthMessage(string what)
+        => string.Format(CultureInfo.InvariantCulture, "{0}: the template nests more than {1} levels deep ({2}.{3})",
+            what, _maxDepth, nameof(TemplateLimits), nameof(TemplateLimits.MaxNestingDepth));
+
     private void ErrorAt(string message)
     {
         Root = null;
@@ -267,7 +284,10 @@ internal sealed class GoTemplateTree
                 GoTemplateItem delim = Next();
                 if (NextNonSpace().Type == GoTemplateItemType.Define)
                 {
-                    GoTemplateTree definition = new GoTemplateTree("definition") { _text = _text, ParseName = ParseName };
+                    GoTemplateTree definition = new GoTemplateTree("definition")
+                    {
+                        _text = _text, ParseName = ParseName, _maxDepth = _maxDepth,
+                    };
                     definition.StartParse(_funcNames, _lexer, _treeSet);
                     definition.ParseDefinition();
                     continue;
@@ -516,11 +536,13 @@ internal sealed class GoTemplateTree
     private GoNode BranchControl(GoNodeType type)
     {
         string context = type == GoNodeType.If ? "if" : type == GoNodeType.Range ? "range" : "with";
-        if (_branchDepth >= MaxBranchDepth)
+        TemplateBudget.EnsureStack();
+        if (_branchDepth + _stackDepth >= _maxDepth)
         {
             //Go grows a goroutine stack instead of stopping; we cap the recursion so that a pathological
-            //template raises ChatTemplateException rather than overflowing the CLR stack
-            ErrorAt("max nesting depth exceeded");
+            //template raises ChatTemplateException rather than overflowing the CLR stack. Branches and
+            //parentheses share the one count, because both are recursion here and again when rendering.
+            ErrorAt(DepthMessage("max nesting depth exceeded"));
         }
 
         int varMark = _vars.Count;
@@ -599,8 +621,17 @@ internal sealed class GoTemplateTree
         string name = ParseTemplateName(token, context);
         GoPipeNode pipe = Pipeline(context, GoTemplateItemType.RightDelim);
 
-        GoTemplateTree block = new GoTemplateTree(name) { _text = _text, ParseName = ParseName };
+        //a block is parsed by a tree of its own, but on this one's stack: it starts as deep as its {{block}}
+        //stands, or blocks nested in blocks would recurse without limit
+        TemplateBudget.EnsureStack();
+        if (_branchDepth + _stackDepth >= _maxDepth)
+        {
+            ErrorAt(DepthMessage("max nesting depth exceeded"));
+        }
+
+        GoTemplateTree block = new GoTemplateTree(name) { _text = _text, ParseName = ParseName, _maxDepth = _maxDepth };
         block.StartParse(_funcNames, _lexer, _treeSet);
+        block._branchDepth = _branchDepth + _stackDepth + 1;
         GoNode end = block.ItemList(out GoListNode body);
         block.Root = body;
         if (end.NodeType != GoNodeType.End)
@@ -751,9 +782,10 @@ internal sealed class GoTemplateTree
             case GoTemplateItemType.Number:
                 return NewNumber(token);
             case GoTemplateItemType.LeftParen:
-                if (_stackDepth >= MaxStackDepth)
+                TemplateBudget.EnsureStack();
+                if (_branchDepth + _stackDepth >= _maxDepth)
                 {
-                    ErrorAt("max expression depth exceeded");
+                    ErrorAt(DepthMessage("max expression depth exceeded"));
                 }
 
                 _stackDepth++;

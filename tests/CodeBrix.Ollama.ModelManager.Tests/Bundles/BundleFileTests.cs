@@ -108,17 +108,65 @@ public sealed class BundleFileTests
         act.Should().Throw<ArgumentException>();
     }
 
+    [Theory]
+    [InlineData("config.json:payload")]
+    [InlineData("weights/model.bin:$DATA")]
+    [InlineData("config\u0000.json")]
+    [InlineData("config\n.json")]
+    [InlineData("logs/\u001b[31mred")]
+    [InlineData("CON")]
+    [InlineData("nul.txt")]
+    [InlineData("weights/com1.bin")]
+    [InlineData("LPT9")]
+    [InlineData("aux/config.json")]
+    [InlineData("Prn .json")]
+    [InlineData("model.bin.")]
+    [InlineData("weights./model.bin")]
+    [InlineData("weights /model.bin")]
+    public void Path_that_is_not_portable_is_refused(string path)
+    {
+        //Arrange
+        Action act = () => new BundleFile(path, Url);
+
+        //Act and assert
+        act.Should().Throw<ArgumentException>();
+    }
+
+    [Theory]
+    [InlineData("console.json")]
+    [InlineData("com10.bin")]
+    [InlineData("com0.bin")]
+    [InlineData("nullable/config.json")]
+    [InlineData("lpt.txt")]
+    [InlineData(".gitattributes")]
+    [InlineData("a/./b.bin")]
+    [InlineData("model.v1.bin")]
+    public void Path_that_only_resembles_a_refused_one_is_kept(string path)
+        => new BundleFile(path, Url).Path.Should().Be(path);
+
     [Fact]
-    public void HasVerifiableHash_is_true_for_either_hash()
+    public void Path_refusal_does_not_echo_a_control_character()
+    {
+        //Arrange
+        Action act = () => new BundleFile("logs/\u001b[2Jx", Url);
+
+        //Act and assert
+        act.Should().Throw<ArgumentException>().Which.Message.Should().NotContain("\u001b");
+    }
+
+    [Fact]
+    public void HasVerifiableHash_is_true_for_any_stated_hash()
     {
         //Arrange
         var withSha256 = new BundleFile("a.bin", Url, 1, new string('a', 64), null, null);
         var withMd5 = new BundleFile("b.ckpt", Url, 1, null, "af63fbf63ae26fe6d66140ee7c22a515", null);
+        var withGitSha1 = new BundleFile("d.json", Url, 1, null, null, "35d7676128eeed2f4fa73ec6dee6a07422d789d8");
         var withNeither = new BundleFile("c.json", Url, 1);
 
         //Act and assert
         withSha256.HasVerifiableHash.Should().BeTrue();
         withMd5.HasVerifiableHash.Should().BeTrue();
+        withGitSha1.HasVerifiableHash.Should().BeTrue();
         withNeither.HasVerifiableHash.Should().BeFalse();
     }
 

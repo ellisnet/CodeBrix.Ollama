@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Text;
+using System.Threading;
 
 namespace CodeBrix.Ollama.ModelRunner;
 
@@ -18,6 +19,8 @@ internal sealed class JinjaRenderer
     private int _loopDepth;
 
     private int _macroDepth;
+
+    private TemplateBudget _budget;
 
     /// <summary>Initializes a new instance of the <see cref="JinjaRenderer"/> class.</summary>
     /// <param name="variables">The variables the template sees; the values are normalized on the way in.</param>
@@ -38,18 +41,42 @@ internal sealed class JinjaRenderer
     /// <summary>Renders a template body.</summary>
     /// <param name="body">The top-level nodes.</param>
     /// <returns>The rendered text.</returns>
+    /// <remarks>
+    /// The render is charged to the <see cref="TemplateBudget"/> open on this thread - the one
+    /// <see cref="JinjaTemplate.Render(IReadOnlyDictionary{string, object}, CancellationToken)"/> opens
+    /// with the template's limits - or to a default one when none is open.
+    /// </remarks>
     internal string Render(IList<JinjaNode> body)
     {
-        var output = new StringBuilder();
-        Execute(body, _root, output);
-        return output.ToString();
+        using (TemplateBudget.Open(null, CancellationToken.None))
+        {
+            _budget = TemplateBudget.Current;
+            var output = new StringBuilder();
+            Execute(body, _root, output);
+            return output.ToString();
+        }
+    }
+
+    private static void Write(StringBuilder output, string text)
+    {
+        TemplateBudget.CheckOutput((long)output.Length + text.Length);
+        output.Append(text);
     }
 
     private void Execute(IList<JinjaNode> body, JinjaScope scope, StringBuilder output)
     {
-        foreach (JinjaNode node in body)
+        _budget.Enter();
+        try
         {
-            ExecuteNode(node, scope, output);
+            foreach (JinjaNode node in body)
+            {
+                _budget.Step();
+                ExecuteNode(node, scope, output);
+            }
+        }
+        finally
+        {
+            _budget.Exit();
         }
     }
 
@@ -58,10 +85,10 @@ internal sealed class JinjaRenderer
         switch (node)
         {
             case JinjaTextNode text:
-                output.Append(text.Text);
+                Write(output, text.Text);
                 return;
             case JinjaOutputNode print:
-                output.Append(JinjaValues.ToDisplayString(Evaluate(print.Expression, scope)));
+                Write(output, JinjaValues.ToDisplayString(Evaluate(print.Expression, scope)));
                 return;
             case JinjaIfNode conditional:
                 ExecuteIf(conditional, scope, output);
@@ -82,7 +109,7 @@ internal sealed class JinjaRenderer
                 {
                     var captured = new StringBuilder();
                     Execute(filter.Body, scope, captured);
-                    output.Append(JinjaValues.ToDisplayString(
+                    Write(output, JinjaValues.ToDisplayString(
                         ApplyFilterChain(filter.Filter, captured.ToString(), scope)));
                     return;
                 }
@@ -130,6 +157,7 @@ internal sealed class JinjaRenderer
             items = new List<object>();
             foreach (object candidate in source)
             {
+                _budget.Step();
                 var probe = new JinjaScope(scope);
                 BindTargets(probe, node.Targets, candidate);
                 if (JinjaValues.IsTruthy(Evaluate(node.Condition, probe)))
@@ -155,6 +183,7 @@ internal sealed class JinjaRenderer
         {
             for (int i = 0; i < items.Count; i++)
             {
+                _budget.Step();
                 loop.Index0 = i;
                 var iteration = new JinjaScope(scope);
                 BindTargets(iteration, node.Targets, items[i]);
@@ -273,7 +302,7 @@ internal sealed class JinjaRenderer
             throw JinjaValues.RuntimeError("a call block must call a macro.");
         }
 
-        output.Append(InvokeMacro(macro, arguments, keywords, caller));
+        Write(output, InvokeMacro(macro, arguments, keywords, caller));
     }
 
     private object ApplyFilterChain(JinjaExpression filter, object value, JinjaScope scope)
@@ -284,10 +313,20 @@ internal sealed class JinjaRenderer
         }
 
         var node = (JinjaFilterExpression)filter;
-        object source = node.Source == null ? value : ApplyFilterChain(node.Source, value, scope);
-        EvaluateArguments(node.Arguments, scope, out IList<object> arguments,
-            out IDictionary<string, object> keywords);
-        return JinjaFilters.Apply(node.Name, source, arguments, keywords);
+        _budget.Enter();
+        try
+        {
+            object source = node.Source == null ? value : ApplyFilterChain(node.Source, value, scope);
+            EvaluateArguments(node.Arguments, scope, out IList<object> arguments,
+                out IDictionary<string, object> keywords);
+            object result = JinjaFilters.Apply(node.Name, source, arguments, keywords);
+            CheckSize(result);
+            return result;
+        }
+        finally
+        {
+            _budget.Exit();
+        }
     }
 
     private void EvaluateArguments(
@@ -427,6 +466,46 @@ internal sealed class JinjaRenderer
     /// <param name="scope">The scope to resolve names in.</param>
     /// <returns>The value.</returns>
     internal object Evaluate(JinjaExpression expression, JinjaScope scope)
+    {
+        _budget.Step();
+        _budget.Enter();
+        object result;
+        try
+        {
+            result = EvaluateCore(expression, scope);
+        }
+        finally
+        {
+            _budget.Exit();
+        }
+
+        CheckSize(result);
+        return result;
+    }
+
+    /// <summary>
+    /// Refuses a string or a collection that has grown past its limit. Whatever is built from a width or a
+    /// count is refused before it is allocated, where it is built; this catches everything that grows a
+    /// step at a time, such as a string concatenated with itself in a loop.
+    /// </summary>
+    /// <param name="value">The value an expression produced.</param>
+    private static void CheckSize(object value)
+    {
+        switch (value)
+        {
+            case string text:
+                TemplateBudget.CheckString(text.Length);
+                break;
+            case IList<object> list:
+                TemplateBudget.CheckItems(list.Count);
+                break;
+            case IDictionary<string, object> mapping:
+                TemplateBudget.CheckItems(mapping.Count);
+                break;
+        }
+    }
+
+    private object EvaluateCore(JinjaExpression expression, JinjaScope scope)
     {
         switch (expression)
         {

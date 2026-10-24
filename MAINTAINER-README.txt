@@ -368,9 +368,12 @@ REPOSITORY LAYOUT
                                  NativeLibraryException, ModelLoadException,
                                  InferenceException, ChatTemplateException and
                                  GrammarException
-      Native/                    the binding, 68 files and 302 [LibraryImport]
+      Native/                    the binding, 70 files and 302 [LibraryImport]
                                  declarations: NativeLibraryLoader (the
-                                 resolver), the NativeMethods.* partials, the
+                                 resolver), NativeLibraryHashes and the
+                                 SHA256SUMS table it reads (the SHA-256 of
+                                 every shipped native, an embedded resource),
+                                 the NativeMethods.* partials, the
                                  blittable structs and enums transcribed from
                                  llama.h and the ggml headers, the four
                                  SafeHandles, LlamaBatchBuffer, NativeText,
@@ -908,6 +911,34 @@ at. Jeremy installs them; no agent and no test ever does. On a distribution
 that refuses a system-wide pip install, a virtual environment is the sanctioned
 route and is what this design assumes.
 
+TWO VENVS, BECAUSE OF THE TRANSFORMERS FLOOR. transformers is held to 5.10 (the
+CVE-2026-9856 fix), and optimum-onnx does not yet install beside transformers
+5.x, so no one environment can pass the whole live suite:
+
+    $HOME/venvs/codebrix-ollama-tf5   transformers 5.x, onnx-ir, onnxruntime-
+                                      genai, torch, onnx, onnxruntime; NO
+                                      optimum. Everything passes except the
+                                      Optimum export test, which reports
+                                      optimum as not installed
+    $HOME/venvs/codebrix-ollama       transformers 4.57.x with optimum and
+                                      optimum-onnx. The Optimum export test
+                                      passes (it sets
+                                      ExportOptions.AllowUnpatchedTransformers);
+                                      every GenAI builder export, the MuPT
+                                      reductions that export first, and the
+                                      Check usability test are REFUSED with
+                                      PythonModuleTooOldException - that is
+                                      the floor working, not a regression
+
+onnx-ir must be installed by name in the transformers 5.x venv: in the older
+one it arrived only as a dependency of optimum-onnx, but the reduce and builder
+scripts import it themselves. Validated on the Debian 13 laptop, 2026-10-24:
+tf5 venv (transformers 5.20.2, torch 2.14.0+cpu, onnx 1.22.0, onnxruntime
+1.30.0, onnxruntime-genai 0.15.2, onnx-ir 1.0.0) 44 / 43 passed / 1 failed
+(Optimum); the 4.57.6 venv 44 / 36 passed / 8 refused as described. When
+optimum-onnx supports transformers 5.x, fold the two back into one venv and
+drop AllowUnpatchedTransformers from the Optimum test.
+
 A VENV DOES NOT SURVIVE A MINOR-VERSION MOVE of its base interpreter. 3.13 to
 3.14 means recreating it and repointing PYTHONNET_PYDLL if it is set; point
 releases inside a minor version arrive through the package manager and need
@@ -1366,7 +1397,10 @@ that a whole tier can be tested without a network or a real model:
                              full byte-range support (206, Content-Range, 416),
                              an optional bearer challenge, an optional redirect
                              of blob requests to a second host standing in for a
-                             content delivery network, and per-attempt failure
+                             content delivery network (its scheme and host are
+                             settable, and it can be made to answer 401 itself,
+                             for the redirect and token-scoping tests), and
+                             per-attempt failure
                              injection for any range (drop after n bytes, stall
                              until cancelled, or answer a chosen status). Every
                              request is recorded. It reaches the library through
@@ -3759,7 +3793,13 @@ LICENSE, named LICENSE-LlamaCpp.txt, into
 with the pre-strip twin going to llama-native-tools/unstripped/<rid>/
 (xz-compressed on Linux, where the raw twin is 80-115 MB; its SHA256SUMS
 extended) and a BUILD-PROVENANCE.txt entry written from that build's
-output/<rid>/BUILD-INFO.txt, all together.
+output/<rid>/BUILD-INFO.txt, all together - and, in the same change, the
+regenerated hash table src/CodeBrix.Ollama.ModelRunner/Native/SHA256SUMS
+(llama-native-tools/README.txt, ADOPTING A BUILD). That table is compiled into
+the ModelRunner assembly; the loader hashes every candidate native before it
+loads it and refuses one whose SHA-256 is not the table's line for its RID,
+and NativeLibraryHashesTests fails the suite when a shipped native and the
+table disagree. A native adopted without the table cannot be loaded at all.
 
 The shipped file names are unversioned and package-unique on purpose -
 libcodebrix_llama.dylib, libcodebrix_llama.so, codebrix_llama.dll - because a

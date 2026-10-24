@@ -156,6 +156,132 @@ public sealed class OnnxExportTests
         settings["executionProvider"].Should().Be("cpu");
     }
 
+    [Theory]
+    [InlineData("default", true)]
+    [InlineData("tool_use", true)]
+    [InlineData("rag-v1.2", true)]
+    [InlineData("A", true)]
+    [InlineData("..", false)]
+    [InlineData(".", false)]
+    [InlineData("../evil", false)]
+    [InlineData("a/b", false)]
+    [InlineData("a\\b", false)]
+    [InlineData("/etc/x", false)]
+    [InlineData("name\n", false)]
+    [InlineData("na me", false)]
+    [InlineData("café", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void IsSafeChatTemplateName_takes_only_a_plain_file_name(string name, bool expected)
+        => OnnxExport.IsSafeChatTemplateName(name).Should().Be(expected);
+
+    [Fact]
+    public void IsSafeChatTemplateName_takes_64_characters_and_no_more()
+    {
+        //Act and assert
+        OnnxExport.IsSafeChatTemplateName(new string('a', 64)).Should().BeTrue();
+        OnnxExport.IsSafeChatTemplateName(new string('a', 65)).Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("{\"chat_template\":\"{{ messages }}\"}")]
+    [InlineData("{\"chat_template\":{\"default\":\"a\",\"tool_use\":\"b\"}}")]
+    [InlineData("{\"chat_template\":[{\"name\":\"default\",\"template\":\"a\"},{\"name\":\"rag\",\"template\":\"b\"}]}")]
+    [InlineData("{\"model_max_length\":2048}")]
+    [InlineData("{\"chat_template\":null}")]
+    [InlineData("[1,2,3]")]
+    public void FindUnsafeChatTemplateName_passes_what_an_honest_publisher_writes(string json)
+        => OnnxExport.FindUnsafeChatTemplateName(json).Should().BeNull();
+
+    [Theory]
+    [InlineData("{\"chat_template\":{\"../../../../tmp/owned\":\"x\"}}", "../../../../tmp/owned")]
+    [InlineData("{\"chat_template\":{\"default\":\"a\",\"..\":\"x\"}}", "'..'")]
+    [InlineData("{\"chat_template\":[{\"name\":\"default\",\"template\":\"a\"},{\"name\":\"/abs/path\",\"template\":\"b\"}]}",
+        "/abs/path")]
+    [InlineData("{\"chat_template\":{\"\\u002e\\u002e\\u002fescaped\":\"x\"}}", "../escaped")]
+    [InlineData("{\"chat_template\":\"fine\",\"chat_template\":{\"a/b\":\"x\"}}", "a/b")]
+    public void FindUnsafeChatTemplateName_names_the_bad_key(string json, string expected)
+        => OnnxExport.FindUnsafeChatTemplateName(json).Should().Contain(expected);
+
+    [Fact]
+    public void FindUnsafeChatTemplateName_refuses_a_name_that_is_not_a_string()
+        => OnnxExport.FindUnsafeChatTemplateName("{\"chat_template\":[{\"name\":7,\"template\":\"a\"}]}")
+            .Should().Contain("not a string");
+
+    [Fact]
+    public void FindUnsafeChatTemplateName_refuses_a_file_it_cannot_read()
+        => OnnxExport.FindUnsafeChatTemplateName("{\"chat_template\":{\"a\":NaN}}")
+            .Should().Contain("cannot be read as JSON");
+
+    [Theory]
+    [InlineData("tokenizer_config.json", true)]
+    [InlineData("chat_template.json", true)]
+    [InlineData("processor_config.json", true)]
+    [InlineData("sub/tokenizer_config.json", true)]
+    [InlineData("config.json", false)]
+    [InlineData("Tokenizer_Config.json", false)]
+    [InlineData("", false)]
+    public void IsChatTemplateFile_names_the_files_a_chat_template_is_read_from(string path, bool expected)
+        => OnnxExport.IsChatTemplateFile(path).Should().Be(expected);
+
+    [Theory]
+    [InlineData(ExportRoute.GenAiBuilder, true)]
+    [InlineData(ExportRoute.Optimum, true)]
+    [InlineData(ExportRoute.PublisherOnnx, false)]
+    [InlineData(ExportRoute.MuseCocoMusic, false)]
+    [InlineData(ExportRoute.MuseCocoText, false)]
+    public void SavesChatTemplates_is_true_for_the_two_routes_that_save_a_tokenizer(ExportRoute route, bool expected)
+        => OnnxExport.SavesChatTemplates(route).Should().Be(expected);
+
+    [Theory]
+    [InlineData(ExportRoute.GenAiBuilder, true)]
+    [InlineData(ExportRoute.Optimum, true)]
+    [InlineData(ExportRoute.PublisherOnnx, false)]
+    [InlineData(ExportRoute.MuseCocoMusic, false)]
+    [InlineData(ExportRoute.MuseCocoText, false)]
+    public void FloorsWaivedBy_waives_transformers_only_for_the_converting_routes_when_asked(
+        ExportRoute route, bool waived)
+    {
+        //Arrange
+        var options = new ExportOptions { AllowUnpatchedTransformers = true };
+
+        //Act and assert
+        if (waived)
+        {
+            OnnxExport.FloorsWaivedBy(route, options).Should().Equal("transformers");
+        }
+        else
+        {
+            OnnxExport.FloorsWaivedBy(route, options).Should().BeEmpty();
+        }
+    }
+
+    [Theory]
+    [InlineData(ExportRoute.GenAiBuilder)]
+    [InlineData(ExportRoute.Optimum)]
+    public void FloorsWaivedBy_waives_nothing_by_default(ExportRoute route)
+    {
+        //Act and assert
+        OnnxExport.FloorsWaivedBy(route, new ExportOptions()).Should().BeEmpty();
+        OnnxExport.FloorsWaivedBy(route, null).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void RequireSafeChatTemplateNames_throws_the_export_refusal_naming_the_file_and_the_key()
+    {
+        //Act
+        Action act = () => OnnxExport.RequireSafeChatTemplateNames(
+            "tokenizer_config.json", "{\"chat_template\":{\"../x\":\"t\"}}", ExportRoute.Optimum);
+
+        //Assert
+        PythonScriptException thrown = act.Should().Throw<PythonScriptException>().Which;
+        thrown.Feature.Should().Be("exporting to ONNX");
+        thrown.ScriptName.Should().Be(OnnxExport.ScriptFor(ExportRoute.Optimum));
+        thrown.PythonMessage.Should().Contain("tokenizer_config.json");
+        thrown.PythonMessage.Should().Contain("'../x'");
+        thrown.PythonMessage.Should().Contain("CVE-2026-9856");
+    }
+
     /// <summary>
     /// Resolved files with the names a test cares about and nothing else that matters.
     /// </summary>

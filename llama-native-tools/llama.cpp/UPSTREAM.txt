@@ -31,6 +31,10 @@ Licence        : MIT - the full text is in LICENSE beside this file
                  for Intel's SYCL backend and Arm's KleidiAI glue, among others);
                  every one of them is inventoried, with its full licence text, in
                  ../../THIRD-PARTY-NOTICES.txt at the root of this repository.
+Advisories     : Last checked against advisories: 2026-10-24, for b10221
+                 (llama.cpp GitHub security advisories and oss-security; the
+                 rule is SECURITY REBASE POLICY in ../README.txt - update this
+                 line at every check)
 
 WHY THIS COMMIT
 --------------------------------------------------------------------------------

@@ -49,7 +49,7 @@ public sealed class JinjaFixtureTests
             JinjaFixtureLoader.LoadVariables(templateName, caseName);
 
         //Act
-        string rendered = template.Render(variables);
+        string rendered = template.Render(variables, TestContext.Current.CancellationToken);
 
         //Assert
         rendered.Should().Be(JinjaFixtureLoader.LoadExpected(templateName, caseName));
@@ -86,7 +86,7 @@ public sealed class JinjaFixtureTests
     {
         //Act
         string rendered = JinjaFixtureLoader.LoadTemplate("qwen3.5-35b-a3b")
-            .Render(JinjaFixtureLoader.LoadVariables("qwen3.5-35b-a3b", "user"));
+            .Render(JinjaFixtureLoader.LoadVariables("qwen3.5-35b-a3b", "user"), TestContext.Current.CancellationToken);
 
         //Assert
         rendered.Should().Be("<|im_start|>user\nHello!<|im_end|>\n<|im_start|>assistant\n<think>\n");
@@ -98,7 +98,7 @@ public sealed class JinjaFixtureTests
     {
         //Act
         string rendered = JinjaFixtureLoader.LoadTemplate("qwen3.5-35b-a3b")
-            .Render(JinjaFixtureLoader.LoadVariables("qwen3.5-35b-a3b", "nothink"));
+            .Render(JinjaFixtureLoader.LoadVariables("qwen3.5-35b-a3b", "nothink"), TestContext.Current.CancellationToken);
 
         //Assert
         rendered.Should().EndWith("<|im_start|>assistant\n<think>\n\n</think>\n\n");
@@ -110,7 +110,7 @@ public sealed class JinjaFixtureTests
     {
         //Act
         string rendered = JinjaFixtureLoader.LoadTemplate("qwen3.5-35b-a3b")
-            .Render(JinjaFixtureLoader.LoadVariables("qwen3.5-35b-a3b", "tools"));
+            .Render(JinjaFixtureLoader.LoadVariables("qwen3.5-35b-a3b", "tools"), TestContext.Current.CancellationToken);
 
         //Assert
         rendered.Should().StartWith("<|im_start|>system\n# Tools\n");
@@ -126,7 +126,7 @@ public sealed class JinjaFixtureTests
     {
         //Act
         string rendered = JinjaFixtureLoader.LoadTemplate("qwen3.5-35b-a3b")
-            .Render(JinjaFixtureLoader.LoadVariables("qwen3.5-35b-a3b", "toolcall"));
+            .Render(JinjaFixtureLoader.LoadVariables("qwen3.5-35b-a3b", "toolcall"), TestContext.Current.CancellationToken);
 
         //Assert
         rendered.Should().Contain(
@@ -142,7 +142,7 @@ public sealed class JinjaFixtureTests
     {
         //Act
         string rendered = JinjaFixtureLoader.LoadTemplate("qwen3.5-35b-a3b")
-            .Render(JinjaFixtureLoader.LoadVariables("qwen3.5-35b-a3b", "reasoning"));
+            .Render(JinjaFixtureLoader.LoadVariables("qwen3.5-35b-a3b", "reasoning"), TestContext.Current.CancellationToken);
 
         //Assert
         rendered.Should().Contain("<|im_start|>assistant\nAnswer one.<|im_end|>\n");

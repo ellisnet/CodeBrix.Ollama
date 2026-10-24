@@ -50,7 +50,7 @@ public sealed class ModelStoreBundlePullTests
             "pulling LICENSE",
             "pulling README.md",
             "pulling " + LogPath,
-            "verifying sha256 digest",
+            "checking stored files",
             "writing manifest",
             "success");
     }
@@ -167,6 +167,32 @@ public sealed class ModelStoreBundlePullTests
         using var directory = new TempStoreDirectory();
         using FakeHubHandler handler = CreateHub();
         using var store = new ModelStore(CreateOptions(handler, directory));
+        var files = new[]
+        {
+            new BundleFile(
+                "config.json",
+                HuggingFaceHubSource.BuildFileUrl(Repository, Commit, "config.json"),
+                ConfigJson.Length)
+        };
+        PullOptions options = PullOptions.ForFileList(files, null);
+        options.RequireHashes = true;
+
+        //Act
+        Func<Task> act = () => RunPullAsync(store, BucketBundleName, options);
+
+        //Assert
+        (await act.Should().ThrowAsync<ModelManagerException>())
+            .Which.Message.Should().Contain("config.json");
+        (await store.ExistsAsync(BucketBundleName, TestContext.Current.CancellationToken)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task PullAsync_with_required_hashes_accepts_a_hugging_face_repository_by_sha256_and_git_blob_id()
+    {
+        //Arrange
+        using var directory = new TempStoreDirectory();
+        using FakeHubHandler handler = CreateHub();
+        using var store = new ModelStore(CreateOptions(handler, directory));
         var options = new PullOptions
         {
             Source = PullSource.HuggingFaceFiles,
@@ -174,12 +200,10 @@ public sealed class ModelStoreBundlePullTests
         };
 
         //Act
-        Func<Task> act = () => RunPullAsync(store, BundleName, options);
+        await RunPullAsync(store, BundleName, options);
 
         //Assert
-        (await act.Should().ThrowAsync<ModelManagerException>())
-            .Which.Message.Should().Contain("config.json");
-        (await store.ExistsAsync(BundleName, TestContext.Current.CancellationToken)).Should().BeFalse();
+        (await store.ExistsAsync(BundleName, TestContext.Current.CancellationToken)).Should().BeTrue();
     }
 
     [Fact]
@@ -434,7 +458,8 @@ public sealed class ModelStoreBundlePullTests
     /// <summary>
     /// A fake Hugging Face repository shaped like a small transformers model: a configuration file, a
     /// weights file in large-file storage, a tokenizer vocabulary, a licence, a readme and a training
-    /// log. Only the weights file states a hash, which is what the Hub does.
+    /// log. Only the weights file states a SHA-256; every other file states only its git blob identifier,
+    /// which is what the Hub does.
     /// </summary>
     /// <returns>The handler. The caller disposes it.</returns>
     internal static FakeHubHandler CreateHub()

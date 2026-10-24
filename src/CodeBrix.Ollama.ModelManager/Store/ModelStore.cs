@@ -290,6 +290,71 @@ public sealed class ModelStore : IModelStore, IDisposable
     }
 
     /// <inheritdoc />
+    public async Task<VerifyResult> VerifyAsync(string name, CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        ModelName parsed = ParseModelName(name, nameof(name));
+
+        StoredManifest stored = await RequireManifestAsync(parsed, name, cancellationToken).ConfigureAwait(false);
+
+        var layers = new List<ModelLayer>();
+        if (stored.Manifest.Layers != null)
+        {
+            layers.AddRange(stored.Manifest.Layers);
+        }
+        if (stored.Manifest.Config != null)
+        {
+            layers.Add(stored.Manifest.Config);
+        }
+
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var failures = new List<VerifyFailure>();
+        long bytesHashed = 0;
+
+        foreach (ModelLayer layer in layers)
+        {
+            if (layer == null || string.IsNullOrEmpty(layer.Digest) || !seen.Add(layer.Digest))
+            {
+                continue;
+            }
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (!Sha256Digest.IsValid(layer.Digest))
+            {
+                failures.Add(new VerifyFailure(
+                    layer.Digest, layer.MediaType, layer.Name, VerifyProblem.MalformedDigest, layer.Size, -1L, null));
+                continue;
+            }
+
+            string actual = await LayerFactory.HashBlobAsync(_paths, layer.Digest, cancellationToken)
+                .ConfigureAwait(false);
+            if (actual == null)
+            {
+                failures.Add(new VerifyFailure(
+                    layer.Digest, layer.MediaType, layer.Name, VerifyProblem.Missing, layer.Size, -1L, null));
+                continue;
+            }
+
+            long actualSize = new FileInfo(_paths.GetBlobPath(layer.Digest)).Length;
+            bytesHashed += actualSize;
+
+            string expected = Sha256Digest.ToDigest(layer.Digest).ToLowerInvariant();
+            if (!string.Equals(actual, expected, StringComparison.Ordinal))
+            {
+                failures.Add(new VerifyFailure(
+                    layer.Digest, layer.MediaType, layer.Name, VerifyProblem.DigestMismatch, layer.Size, actualSize, actual));
+            }
+            else if (layer.Size != actualSize)
+            {
+                failures.Add(new VerifyFailure(
+                    layer.Digest, layer.MediaType, layer.Name, VerifyProblem.SizeMismatch, layer.Size, actualSize, actual));
+            }
+        }
+
+        return new VerifyResult(stored.Name.DisplayShortest(), seen.Count, bytesHashed, failures);
+    }
+
+    /// <inheritdoc />
     public async Task ImportBundleAsync(
         string name,
         string directory,
@@ -402,9 +467,26 @@ public sealed class ModelStore : IModelStore, IDisposable
                 .ConfigureAwait(false);
         }
 
+        //The chat template names are checked first, in .NET, before any Python runs - even the version
+        //probe - because transformers writes each name as a file path when either converting route saves
+        //the publisher's tokenizer (CVE-2026-9856).
+        if (OnnxExport.SavesChatTemplates(route))
+        {
+            foreach (ResolvedFile file in layers.BundleFiles)
+            {
+                if (OnnxExport.IsChatTemplateFile(file.Name))
+                {
+                    string text = await ReadBundleFileTextAsync(layers.BundleFiles, file.Name, cancellationToken)
+                        .ConfigureAwait(false);
+                    OnnxExport.RequireSafeChatTemplateNames(file.Name, text, route);
+                }
+            }
+        }
+
         //Checked before anything is laid out on disk, so that a machine without the modules says so in a
         //second rather than after copying a checkpoint into a temporary folder.
-        PythonSupport.Require(_options.Python, OnnxExport.Feature, OnnxExport.ModulesFor(route));
+        PythonHost.Require(
+            _options.Python, OnnxExport.Feature, OnnxExport.ModulesFor(route), OnnxExport.FloorsWaivedBy(route, effective));
 
         string work = Path.Combine(
             Path.GetTempPath(), "codebrix-ollama-export-" + Guid.NewGuid().ToString("N"));
@@ -1686,11 +1768,12 @@ public sealed class ModelStore : IModelStore, IDisposable
     /// directory, then write one layer per file and a config that records where they came from.
     /// </summary>
     /// <remarks>
-    /// The verification step reports its status and checks that every blob the new manifest names is in
-    /// the store at the size that was recorded, rather than reading every file a second time. Each
-    /// file's SHA-256 was computed from the bytes as they were written and checked against whatever the
-    /// source stated, so there is nothing a re-read could establish that the download did not - and a
-    /// bundle is exactly the case where re-reading would mean gigabytes.
+    /// The step after the downloads reports "checking stored files" - not "verifying sha256 digest",
+    /// because it hashes nothing - and checks that every blob the new manifest names is in the store at
+    /// the size that was recorded, rather than reading every file a second time. Each file that was
+    /// downloaded had its SHA-256 computed from the bytes as they were written and checked against
+    /// whatever the source stated; a file whose stated SHA-256 already named a blob in the store was not
+    /// downloaded and is not re-read. <see cref="VerifyAsync"/> re-hashes everything on request.
     /// </remarks>
     /// <param name="name">The fully qualified model name.</param>
     /// <param name="options">Where the files come from and which of them are wanted.</param>
@@ -1758,7 +1841,7 @@ public sealed class ModelStore : IModelStore, IDisposable
             }
         }
 
-        writer.TryWrite(new PullProgress("verifying sha256 digest"));
+        writer.TryWrite(new PullProgress("checking stored files"));
         EnsureBundleBlobs(layers);
 
         ModelConfig config = BuildBundleConfig(

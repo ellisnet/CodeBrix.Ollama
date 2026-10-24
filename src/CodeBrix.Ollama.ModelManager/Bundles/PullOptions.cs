@@ -66,10 +66,11 @@ public sealed class PullOptions
     }
 
     /// <summary>
-    /// Whether a file the source states no hash for fails the pull. The default is
-    /// <see langword="false"/>: such a file is downloaded, the store computes its SHA-256 and names the
-    /// blob by it, so a second pull verifies against the first. Set it when only content a publisher
-    /// vouched for is acceptable.
+    /// Whether a file the source states no hash for fails the pull. A SHA-256, an MD5 and a git blob
+    /// identifier each count, because each is verified; every file of a Hugging Face repository states
+    /// one or the other. The default is <see langword="false"/>: such a file is downloaded, the store
+    /// computes its SHA-256 and names the blob by it, so a second pull verifies against the first. Set
+    /// it when only content a publisher vouched for is acceptable.
     /// </summary>
     public bool RequireHashes { get; set; }
 

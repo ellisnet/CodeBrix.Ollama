@@ -96,14 +96,111 @@ public sealed class NativeLibraryLoaderTests
         IReadOnlyList<string> directories = new[] { "/base" };
 
         //Act
-        string message = NativeLibraryLoader.DescribeLoadFailure(directories, "osx-x64", "libcodebrix_llama.dylib");
+        string message = NativeLibraryLoader.DescribeLoadFailure(
+            directories, "osx-x64", "libcodebrix_llama.dylib", systemSearchAllowed: true);
 
         //Assert
         message.Should().Contain(Path.Combine("/base", "runtimes", "osx-x64", "native", "libcodebrix_llama.dylib"));
         message.Should().Contain(Path.Combine("/base", "libcodebrix_llama.dylib"));
-        message.Should().Contain("the operating system's own search path");
+        message.Should().Contain("(the operating system's own search path)");
         message.Should().Contain("runtimes/osx-x64/native/");
     }
+
+    /// <summary>Without the opt-in the message says the system search was left out, and how to allow it.</summary>
+    [Fact]
+    public void DescribeLoadFailure_says_the_system_search_was_not_tried_by_default()
+    {
+        //Act
+        string message = NativeLibraryLoader.DescribeLoadFailure(
+            new[] { "/base" }, "osx-x64", "libcodebrix_llama.dylib", systemSearchAllowed: false);
+
+        //Assert
+        message.Should().NotContain("(the operating system's own search path)");
+        message.Should().Contain("was not tried");
+        message.Should().Contain("AllowSystemNativeLibrary");
+    }
+
+    /// <summary>The system search is off unless the application asks for it.</summary>
+    [Fact]
+    public void AllowSystemNativeLibrary_is_off_by_default()
+        => ModelRunner.AllowSystemNativeLibrary.Should().BeFalse();
+
+    /// <summary>The native the suite loaded came from the package layout and passed the hash check.</summary>
+    [Fact]
+    public void EnsureLoaded_loads_a_hash_checked_file_not_a_system_search_result()
+    {
+        //Act
+        NativeLibraryLoader.EnsureLoaded();
+
+        //Assert
+        NativeLibraryLoader.LoadedPath.Should().NotContain("operating-system search path");
+        File.Exists(NativeLibraryLoader.LoadedPath).Should().BeTrue();
+    }
+
+    /// <summary>The genuine shipped file for this platform passes the integrity check.</summary>
+    [Fact]
+    public void VerifyIntegrity_accepts_the_shipped_native()
+    {
+        //Arrange
+        string path = ShippedNativePath();
+        using FileStream bytes = File.OpenRead(path);
+
+        //Act
+        Action act = () => NativeLibraryLoader.VerifyIntegrity(
+            bytes, path, NativeLibraryLoader.RuntimeIdentifier, NativeLibraryLoader.NativeFileName);
+
+        //Assert
+        act.Should().NotThrow();
+    }
+
+    /// <summary>
+    /// A copy of the shipped native with one byte changed is refused, and the message names the path and
+    /// both hashes. Only the check runs; nothing is loaded, so the process is left as it was.
+    /// </summary>
+    [Fact]
+    public void VerifyIntegrity_refuses_a_tampered_copy_naming_the_path_and_both_hashes()
+    {
+        //Arrange
+        byte[] content = File.ReadAllBytes(ShippedNativePath());
+        content[content.Length / 2] ^= 0xFF;
+        string expected = NativeLibraryHashes.ExpectedFor(
+            NativeLibraryLoader.RuntimeIdentifier, NativeLibraryLoader.NativeFileName);
+        string actual = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(content));
+        const string PlantedPath = "/planted/libcodebrix_llama";
+        using MemoryStream bytes = new MemoryStream(content);
+
+        //Act
+        Action act = () => NativeLibraryLoader.VerifyIntegrity(
+            bytes, PlantedPath, NativeLibraryLoader.RuntimeIdentifier, NativeLibraryLoader.NativeFileName);
+
+        //Assert
+        NativeLibraryException failure = act.Should().Throw<NativeLibraryException>().Which;
+        failure.Message.Should().Contain(PlantedPath);
+        failure.Message.Should().Contain(expected);
+        failure.Message.Should().Contain(actual);
+    }
+
+    /// <summary>A native for a runtime identifier or file name the package records nothing for is refused.</summary>
+    /// <param name="runtimeIdentifier">The runtime identifier asked for.</param>
+    /// <param name="fileName">The file name asked for.</param>
+    [Theory]
+    [InlineData("linux-x86", "libcodebrix_llama.so")]
+    [InlineData("linux-x64", "libllama.so")]
+    public void VerifyIntegrity_refuses_a_native_with_no_recorded_hash(string runtimeIdentifier, string fileName)
+    {
+        //Arrange
+        using MemoryStream bytes = new MemoryStream(new byte[] { 1, 2, 3 });
+
+        //Act
+        Action act = () => NativeLibraryLoader.VerifyIntegrity(bytes, "/x/" + fileName, runtimeIdentifier, fileName);
+
+        //Assert
+        act.Should().Throw<NativeLibraryException>().Which.Message.Should().Contain("records no SHA-256");
+    }
+
+    private static string ShippedNativePath() => Path.Combine(
+        AppContext.BaseDirectory, "runtimes", NativeLibraryLoader.RuntimeIdentifier, "native",
+        NativeLibraryLoader.NativeFileName);
 
     /// <summary>The engine loads from the runtimes layout the test output carries.</summary>
     [Fact]

@@ -29,6 +29,7 @@ internal static class JinjaJson
 
     private static void Write(StringBuilder builder, object value, int indent, int depth)
     {
+        TemplateBudget.EnsureStack();
         if (depth > MaximumDepth)
         {
             throw JinjaValues.RuntimeError(
@@ -121,11 +122,14 @@ internal static class JinjaJson
 
     private static void AppendNewLine(StringBuilder builder, int indent, int depth)
     {
+        TemplateBudget.CheckString(builder.Length);
+        TemplateBudget.Poll();
         if (indent < 0)
         {
             return;
         }
 
+        TemplateBudget.CheckString(builder.Length + 1 + ((double)indent * depth));
         builder.Append('\n');
         builder.Append(' ', indent * depth);
     }

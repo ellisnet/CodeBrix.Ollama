@@ -71,6 +71,7 @@ internal static class GoFormat
             }
 
             builder.Append(Print(args[i]));
+            TemplateBudget.CheckString(builder.Length);
         }
 
         return builder.ToString();
@@ -93,6 +94,7 @@ internal static class GoFormat
             }
 
             builder.Append(Print(args[i]));
+            TemplateBudget.CheckString(builder.Length);
         }
 
         builder.Append('\n');
@@ -147,7 +149,7 @@ internal static class GoFormat
             int width = -1;
             while (i < text.Length && text[i] >= '0' && text[i] <= '9')
             {
-                width = ((width < 0 ? 0 : width) * 10) + (text[i] - '0');
+                width = (int)Math.Min(int.MaxValue, ((width < 0 ? 0L : width) * 10L) + (text[i] - '0'));
                 i++;
             }
 
@@ -158,10 +160,15 @@ internal static class GoFormat
                 precision = 0;
                 while (i < text.Length && text[i] >= '0' && text[i] <= '9')
                 {
-                    precision = (precision * 10) + (text[i] - '0');
+                    precision = (int)Math.Min(int.MaxValue, (precision * 10L) + (text[i] - '0'));
                     i++;
                 }
             }
+
+            //a width pads and a precision writes digits, so both are how much text the verb will produce;
+            //each is refused before anything is padded or formatted
+            TemplateBudget.CheckString(width);
+            TemplateBudget.CheckString(precision);
 
             if (i >= text.Length)
             {
@@ -199,6 +206,7 @@ internal static class GoFormat
             }
 
             builder.Append(rendered);
+            TemplateBudget.CheckString(builder.Length);
         }
 
         if (argIndex < args.Count)

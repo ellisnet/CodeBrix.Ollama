@@ -37,7 +37,7 @@ internal static class ChatJinjaVariables
     /// <param name="request">The chat request.</param>
     /// <param name="bosToken">The vocabulary's beginning-of-sequence token text; <see langword="null"/> becomes empty.</param>
     /// <param name="eosToken">The vocabulary's end-of-sequence token text; <see langword="null"/> becomes empty.</param>
-    /// <returns>The variables, ready for <see cref="JinjaTemplate.Render"/>.</returns>
+    /// <returns>The variables, ready for <see cref="JinjaTemplate.Render(IReadOnlyDictionary{string, object})"/>.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="request"/> is <see langword="null"/>.</exception>
     public static IReadOnlyDictionary<string, object> Build(ChatRequest request, string bosToken, string eosToken)
     {

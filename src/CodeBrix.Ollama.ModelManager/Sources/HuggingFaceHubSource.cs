@@ -191,9 +191,10 @@ public sealed class HuggingFaceHubSource : IBundleSource, IDisposable
     }
 
     /// <summary>
-    /// Reads the repository document of the revision that was asked for. A revision that is already a
-    /// commit needs no resolving, the default branch is described by the plain repository document, and
-    /// anything else is asked for by name.
+    /// Reads the repository document of the revision that was asked for. The default branch is described
+    /// by the plain repository document; anything else - a branch, a tag or a commit - is asked for by
+    /// name, because the plain document always describes the head of the default branch and would
+    /// silently swap a pinned commit for whatever that branch holds today.
     /// </summary>
     /// <param name="cancellationToken">A token that cancels the request.</param>
     /// <returns>The parsed document, which the caller disposes.</returns>
@@ -201,7 +202,7 @@ public sealed class HuggingFaceHubSource : IBundleSource, IDisposable
     private async Task<JsonDocument> ReadRepositoryAsync(CancellationToken cancellationToken)
     {
         string address = "https://" + HubHost + "/api/models/" + Escape(Repository);
-        if (!IsCommitSha(Revision) && !string.Equals(Revision, DefaultRevision, StringComparison.Ordinal))
+        if (!string.Equals(Revision, DefaultRevision, StringComparison.Ordinal))
         {
             address += "/revision/" + Uri.EscapeDataString(Revision);
         }
@@ -417,18 +418,35 @@ public sealed class HuggingFaceHubSource : IBundleSource, IDisposable
     /// </summary>
     /// <param name="root">The repository document.</param>
     /// <returns>The commit.</returns>
-    /// <exception cref="RegistryException">The document names no commit and the revision is not one.</exception>
+    /// <exception cref="RegistryException">
+    /// The document names no commit and the revision is not one, or the revision is a commit and the
+    /// document names a different one.
+    /// </exception>
     private string ReadCommit(JsonElement root)
     {
         string sha = ReadString(root, "sha");
+        string pinned = HexOrNull(Revision, 40);
         if (!string.IsNullOrWhiteSpace(sha))
         {
-            return sha.Trim();
+            string named = sha.Trim();
+            if (pinned != null && !string.Equals(named, pinned, StringComparison.OrdinalIgnoreCase))
+            {
+                // A pin that comes back as another commit is not a pin. Listing whatever the Hub named
+                // would hand the caller files the commit they asked for does not hold.
+                throw new RegistryException(
+                    "the Hugging Face Hub answered commit " + named + " for " + Repository
+                        + " when commit " + pinned + " was asked for; the listing is refused rather than"
+                        + " pinned to a commit nobody asked for",
+                    null,
+                    null);
+            }
+            return pinned ?? named;
         }
 
-        if (IsCommitSha(Revision))
+        if (pinned != null)
         {
-            return Revision;
+            // The tree is read at the commit itself, so a document that names none still cannot move it.
+            return pinned;
         }
 
         throw new RegistryException(
@@ -590,16 +608,6 @@ public sealed class HuggingFaceHubSource : IBundleSource, IDisposable
             segments[index] = Uri.EscapeDataString(segments[index]);
         }
         return string.Join("/", segments);
-    }
-
-    /// <summary>
-    /// Whether a revision is already a commit, in which case there is nothing to resolve.
-    /// </summary>
-    /// <param name="revision">The revision to test.</param>
-    /// <returns><see langword="true"/> for 40 hexadecimal characters.</returns>
-    private static bool IsCommitSha(string revision)
-    {
-        return HexOrNull(revision, 40) != null;
     }
 
     /// <summary>

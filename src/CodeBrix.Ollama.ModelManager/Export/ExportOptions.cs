@@ -70,4 +70,27 @@ public sealed class ExportOptions
     /// </para>
     /// </remarks>
     public bool AllowRemoteCode { get; set; }
+
+    /// <summary>
+    /// Whether the GenAI builder and Optimum routes may run with a transformers release older than the
+    /// one that fixes CVE-2026-9856 (5.10). The default is <see langword="false"/>, which refuses the
+    /// export with a <see cref="PythonModuleTooOldException"/> that names the upgrade.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// It exists for one reason: the Optimum route's optimum-onnx package does not yet install beside
+    /// transformers 5.x, so without it that route cannot run anywhere. Setting it to
+    /// <see langword="true"/> ACCEPTS AN UNPATCHED TRANSFORMERS in this process, and with it any other
+    /// hole that release carries. Set it only when the route cannot run otherwise, and stop setting it
+    /// once the environment can be upgraded.
+    /// </para>
+    /// <para>
+    /// What it does not change: the chat template names are still checked in .NET before any Python
+    /// runs, which closes CVE-2026-9856 itself whatever transformers is installed; the torch and onnx
+    /// floors still refuse; and <see cref="PythonSupport.Check"/> still reports transformers as below its
+    /// floor. On transformers 5.10 or later it does nothing. The MuseCoco routes and
+    /// <see cref="ExportRoute.PublisherOnnx"/> ignore it.
+    /// </para>
+    /// </remarks>
+    public bool AllowUnpatchedTransformers { get; set; }
 }

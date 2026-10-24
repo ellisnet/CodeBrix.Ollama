@@ -109,7 +109,7 @@ public sealed class OllamaTemplateParseTests
         var parsed = OllamaTemplate.Parse("{{ template \"missing\" . }}");
 
         //Act
-        var thrown = Record.Exception(() => parsed.Render(new OllamaTemplateValues()));
+        var thrown = Record.Exception(() => parsed.Render(new OllamaTemplateValues(), TestContext.Current.CancellationToken));
 
         //Assert
         thrown.Should().BeOfType<ChatTemplateException>();

@@ -4,7 +4,7 @@ Oct 24, 2026 · @Jeremy Ellis
 
 ## Summary
 
-ModelRunner's design removes two of the video's five risk layers outright: no listener or API (Layer 4) and no tool execution (Layer 5). Its headline exploits do not reproduce against this code either: Llama Drama (template code execution) and Bleeding Llama (false tensor sizes) are closed at the pinned llama.cpp b10221. What remains is narrower but real: template denial of service, special-token injection, no template pinning, an unverified native library, and in-process blast radius. ModelManager carries most of the open work, mainly around pinning and verifying what it downloads.
+ModelRunner's design removes two of the video's five risk layers outright: no listener or API (Layer 4) and no tool execution (Layer 5). Its headline exploits do not reproduce against this code either: Llama Drama (template code execution) and Bleeding Llama (false tensor sizes) are closed at the pinned llama.cpp b10221. What remains is narrower but real: template denial of service, special-token injection, no template pinning, an unverified native library, and in-process blast radius. ModelManager carries most of the open work, mainly around pinning and verifying what it downloads. **Update 2026-10-24:** the five most urgent fixes below and the rest of Phase 1 are now in the code; see Mitigation Status.
 
 Reviewed: `ellisnet/codebrix.ollama` at commit `d4674c2` (2026-10-17), all of `src/`, `samples/ModelQueryTool`, `llama-native-tools/` and the relevant parts of vendored llama.cpp. Crafted GGUF files were run against the shipped linux-x64 native to confirm loader behaviour.
 
@@ -23,6 +23,63 @@ Most urgent fixes, all verified in source:
 3. **Native library is identity-checked, not integrity-checked** (ModelRunner): a forged `codebrix_llama` passes; OS search-path fallback makes planting possible.
 4. **ONNX single-file load follows absolute and `../` external-data paths** (ModelRunner).
 5. **Templates have no render budget** (ModelRunner): a hostile template can hang the engine thread or crash the process with a stack overflow.
+
+## Mitigation Status (2026-10-24)
+
+The review's Phase 1 and four low-risk Phase 2 items are now in the codebase. They ship in the next ModelManager and ModelRunner packages. Gate: Debug and Release, 0 warnings, 5,676 offline tests, 0 failed. Opt-in Python live suite: transformers 5.20.2 venv 43 / 44 (the one failure is the Optimum test; optimum is not installed there). On the 4.57.6 venv the Optimum export passes with the opt-in, and the GenAI builder exports are refused by design.
+
+### Fixed
+
+| # | Finding | Package | What changed |
+| --- | --- | --- | --- |
+| 1 | HF commit pin ignored | ModelManager | Every non-`main` revision, commits included, is read through `/revision/{rev}`. A Hub answer naming a different commit is refused. A test pins a commit other than `main`'s head. |
+| 2 | Bearer token not host-scoped | ModelManager | Token sent only over https and only to its own origin (scheme + host + port): the registry the model name points at, or the Hugging Face Hub. "Established" state is tracked per origin. Never offered to a URL-list host, a redirect target, or a 401 from any other origin. Doc comments corrected. |
+| 3 | Native library identity-checked only; OS search-path fallback | ModelRunner | The SHA-256 of every shipped native (all 7 RIDs) is embedded from `Native/SHA256SUMS`. Each candidate is hashed before `NativeLibrary.Load` and refused on mismatch; the identity probe still runs. The bare-name OS search is off unless `ModelRunner.AllowSystemNativeLibrary = true`, and a library loaded that way is reported as not hash-checked. `[DefaultDllImportSearchPaths(SafeDirectories)]` added. A test fails if any native drifts from the table. |
+| 4 | ONNX single-file route follows absolute / `../` external data | ModelRunner | `ForFile` now confines side files to the graph's folder, as the folder route does. |
+| 5 | No template render budget; unguarded statement nesting | ModelRunner | New `ModelRunnerOptions.TemplateLimits`: steps 1M, output 8M chars, string 8M, collection 1M items, nesting 256, timeout 10 s. Covers both the Jinja and the Go dialect; recursion and self-containing values are depth-checked, with a stack-sufficiency backstop. The request's `CancellationToken` reaches both renderers. Jinja and Ollama dialects now render off the engine thread. |
+| 6 | No protobuf nesting-depth limit | Core | Sub-graph depth capped at 64 in `OnnxGraphProto.Parse` and in `EnumerateGraphTensors`. |
+| 7 | CVE-2026-9856 (`chat_template` names) and no Python version floors | ModelManager | Before any Python runs, `tokenizer_config.json`, `chat_template.json` and `processor_config.json` are read in .NET; template names outside `^[A-Za-z0-9_.-]{1,64}$` (and `.`/`..`) are refused. Version floors: torch 2.6, onnx 1.16, transformers 5.10, reported by `PythonSupport.Check` and enforced by `Require` (`PythonModuleTooOldException`). |
+| 8 | No security-rebase policy | Release | "SECURITY REBASE POLICY" section in `llama-native-tools/README.txt`. `UPSTREAM.txt` records "Last checked against advisories: 2026-10-24, for b10221"; all 13 llama.cpp GitHub advisories were fixed at or before b8146. |
+| P2 | Non-LFS HF files unhashed | ModelManager | Verified against the tree API's git blob SHA-1 when no sha256 is stated. A git SHA-1 now satisfies `RequireHashes`. |
+| P2 | No public at-rest verification | ModelManager | `IModelStore.VerifyAsync(name)` re-hashes every layer and reports `VerifyResult` / `VerifyFailure` without deleting anything. A bundle pull's existence-and-size step now reports "checking stored files" rather than "verifying sha256 digest". |
+| P2 | Redirects to any host and scheme; URL lists accept `http://` | ModelManager | https→http refused. Redirects to loopback, private, link-local or unspecified IP literals (and `localhost`) refused unless the request started there. URL-list `http://` entries need `AllowInsecureHttp`. |
+| P2 | Path checks miss ADS, reserved names, case collisions; digest `$` | ModelManager | Bundle paths refuse `:`, control characters, Windows device names, trailing dot or space, and case-insensitive duplicates. `Sha256Digest` anchors with `\z`, and upper-case hex is normalized to lower case. |
+
+### Consumer opt-ins added
+
+- **`ExportOptions.AllowUnpatchedTransformers`** (default false): waives only the transformers 5.10 floor, for the GenAI builder and Optimum. It exists because optimum-onnx does not yet install beside transformers 5.x. The .NET `chat_template` check still runs, the torch and onnx floors still apply, and `Check` still reports the shortfall.
+- **`ModelRunner.AllowSystemNativeLibrary`** (default false): restores the OS search path as a last resort, without a hash check.
+
+### Behaviour changes callers will notice
+
+- `http://` URL lists and https→http redirects need `AllowInsecureHttp`.
+- Private-address redirects are refused.
+- A natively built or system `codebrix_llama` needs `AllowSystemNativeLibrary`.
+- `OnnxModel.LoadAsync(path)` no longer reads side files outside the graph's folder.
+- Templates exceeding a limit throw `ChatTemplateException`. Jinja `range()` is capped at 1M items (was 10M).
+- Python export and reduce require torch ≥ 2.6 and onnx ≥ 1.16. Export requires transformers ≥ 5.10 unless the opt-in is set.
+- A Hugging Face pull with `RequireHashes = true` now succeeds on small files verified by git SHA-1.
+- A listing containing a refused path or duplicate fails with `ArgumentException`.
+
+### Still open
+
+Everything in Phases 2 and 3 not listed above, notably:
+- special-token escaping
+- template SHA-256 and `TemplatePolicy`
+- tool-call name and schema validation
+- `CheckTensors` default
+- `GgufReader` into Core and pre-validation
+- LoRA bounds patch
+- `HashPolicy`, `ModelLock`, `VerifyOnResolve`, read-only materialize, `SafeDefault`, `PublisherPolicy`
+- size caps, and symlink handling on import
+- digest-bearing provenance
+- out-of-process hosts
+
+Two residuals from this round:
+- Redirect checks do not resolve DNS, so a public name pointing at a private address passes.
+- Core's own `OnnxModel` external-data lookup is not confined. Its only caller, ModelManager's reduce, checks every side file against the bundle root first.
+
+Release hygiene (signing, notarization, SourceLink, `SECURITY.md`) is unchanged.
 
 ## Layer 1: Model Files, Repositories and Runner Binaries
 

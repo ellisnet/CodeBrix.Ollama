@@ -15,9 +15,16 @@ namespace CodeBrix.Ollama.ModelManager;
 /// verify what arrives.
 /// </summary>
 /// <remarks>
+/// <para>
 /// A file whose size the caller already stated costs no request at all. A file whose size is unknown is
 /// asked for with a HEAD, and, when the server will not answer a HEAD, with a request for the first byte
 /// of it, whose <c>Content-Range</c> states the whole length.
+/// </para>
+/// <para>
+/// A plain-HTTP address is refused unless <see cref="ModelStoreOptions.AllowInsecureHttp"/> is set,
+/// exactly as a plain-HTTP model name is. <see cref="ModelStoreOptions.BearerToken"/> is never offered to
+/// an address in the list unless it is on the Hugging Face Hub, and then only over https.
+/// </para>
 /// </remarks>
 public sealed class HttpFileListSource : IBundleSource, IDisposable
 {
@@ -82,10 +89,22 @@ public sealed class HttpFileListSource : IBundleSource, IDisposable
     /// The files that pass the filter, with their sizes filled in. The listing carries no repository and
     /// no revision, because a list of addresses has neither.
     /// </returns>
-    /// <exception cref="RegistryException">A server would say neither how large a file is nor serve a byte of it.</exception>
+    /// <exception cref="RegistryException">
+    /// An address that passes the filter is plain HTTP and <see cref="ModelStoreOptions.AllowInsecureHttp"/>
+    /// is not set (nothing is requested at all then); a redirect on the way is refused; or a server would
+    /// say neither how large a file is nor serve a byte of it.
+    /// </exception>
     public async Task<BundleListing> ListAsync(CancellationToken cancellationToken = default)
     {
         IReadOnlyList<BundleFile> kept = Filter.Apply(Files);
+
+        // Every address is checked before any of them is asked anything, so a list with one plain-HTTP
+        // entry fails as a whole instead of half way through a pull.
+        foreach (BundleFile file in kept)
+        {
+            _client.EnsureAddressAllowed(file.Url);
+        }
+
         var described = new List<BundleFile>(kept.Count);
 
         foreach (BundleFile file in kept)
@@ -130,7 +149,7 @@ public sealed class HttpFileListSource : IBundleSource, IDisposable
         string md5 = null;
 
         using (HttpResponseMessage head = await _client.SendWithChallengeAsync(
-            HttpMethod.Head, file.Url, null, null, true, false, cancellationToken).ConfigureAwait(false))
+            HttpMethod.Head, file.Url, null, null, RegistryClient.IsTokenAddressForFile(file.Url), false, cancellationToken).ConfigureAwait(false))
         {
             if ((int)head.StatusCode < 400)
             {
@@ -144,7 +163,7 @@ public sealed class HttpFileListSource : IBundleSource, IDisposable
             // Some servers refuse a HEAD outright. Asking for the first byte gets the whole length in
             // the Content-Range of the answer, at the cost of one byte.
             using HttpResponseMessage ranged = await _client.SendWithChallengeAsync(
-                HttpMethod.Get, file.Url, null, "bytes=0-0", true, false, cancellationToken).ConfigureAwait(false);
+                HttpMethod.Get, file.Url, null, "bytes=0-0", RegistryClient.IsTokenAddressForFile(file.Url), false, cancellationToken).ConfigureAwait(false);
 
             if ((int)ranged.StatusCode >= 400)
             {

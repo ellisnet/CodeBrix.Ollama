@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using System.Text;
 
 namespace CodeBrix.Ollama.ModelManager;
 
@@ -16,7 +17,11 @@ namespace CodeBrix.Ollama.ModelManager;
 /// path the publisher uses and the path a later <c>Materialize</c> call lays out on disk. A backslash
 /// in the supplied path is read as a separator and rewritten, a leading <c>./</c> is dropped, and a
 /// path that is rooted or that walks up with <c>..</c> is refused: a bundle must never be able to
-/// write outside the directory it is materialized into.
+/// write outside the directory it is materialized into. A path that would mean something else, or
+/// nothing at all, on some platform is refused as well, so that a bundle lays out the same tree on
+/// every one of them: a colon anywhere (a drive, or an NTFS alternate data stream such as
+/// <c>config.json:payload</c>), a control character, a segment that is a Windows device name such as
+/// <c>CON</c>, <c>NUL</c>, <c>COM1</c> or <c>LPT1.txt</c>, and a segment that ends in a dot or a space.
 /// </para>
 /// <para>
 /// Sizes and hashes are what the SOURCE stated, not what was measured. <see cref="Size"/> is
@@ -71,13 +76,15 @@ public sealed class BundleFile
     /// did not state one. The case is normalized to lower case.
     /// </param>
     /// <param name="gitSha1">
-    /// The git blob identifier as 40 hexadecimal characters, or <see langword="null"/>. It identifies
-    /// the object in the publisher's repository and is not a hash of the content as it arrives, so it
-    /// is recorded and never verified against.
+    /// The git blob identifier as 40 hexadecimal characters, or <see langword="null"/>: the SHA-1 of
+    /// <c>"blob " + length + "\0"</c> followed by the content, which is how git names a file. A download
+    /// verifies against it when no SHA-256 is stated; see <see cref="GitSha1"/>. The case is normalized
+    /// to lower case.
     /// </param>
     /// <exception cref="ArgumentException">
-    /// The path is missing, rooted or walks up with <c>..</c>; the address is missing, relative or
-    /// neither http nor https; or a hash is not hexadecimal of the length its algorithm calls for.
+    /// The path is missing, rooted, walks up with <c>..</c> or is not portable (see the remarks on this
+    /// class); the address is missing, relative or neither http nor https; or a hash is not hexadecimal
+    /// of the length its algorithm calls for.
     /// </exception>
     public BundleFile(string path, string url, long size, string sha256, string md5, string gitSha1)
     {
@@ -116,8 +123,11 @@ public sealed class BundleFile
     public string Md5 { get; }
 
     /// <summary>
-    /// The git blob identifier in lower-case hexadecimal, or <see langword="null"/>. It is recorded for
-    /// provenance and never verified: it hashes the object as git stores it, not the bytes that arrive.
+    /// The git blob identifier in lower-case hexadecimal, or <see langword="null"/>: the SHA-1 of
+    /// <c>"blob " + length + "\0"</c> followed by the content. A download verifies against it when the
+    /// source stated no <see cref="Sha256"/>, which is the case for every small file of a Hugging Face
+    /// repository. When a SHA-256 is stated the SHA-256 is verified instead, because for a file kept in
+    /// large-file storage the git object is the small pointer file, not the content.
     /// </summary>
     public string GitSha1 { get; }
 
@@ -137,10 +147,13 @@ public sealed class BundleFile
         get { return Size >= 0; }
     }
 
-    /// <summary>Whether the source stated at least one hash a download can verify against.</summary>
+    /// <summary>
+    /// Whether the source stated at least one hash a download can verify against: a SHA-256, an MD5 or
+    /// a git blob identifier.
+    /// </summary>
     public bool HasVerifiableHash
     {
-        get { return Sha256 != null || Md5 != null; }
+        get { return Sha256 != null || Md5 != null || GitSha1 != null; }
     }
 
     /// <summary>
@@ -182,7 +195,10 @@ public sealed class BundleFile
     /// </summary>
     /// <param name="path">The path as it was supplied.</param>
     /// <returns>The path with forward slashes and no leading <c>./</c>.</returns>
-    /// <exception cref="ArgumentException">The path is missing, rooted or walks up with <c>..</c>.</exception>
+    /// <exception cref="ArgumentException">
+    /// The path is missing, rooted, walks up with <c>..</c>, or is not portable: it holds a colon or a
+    /// control character, or a segment is a Windows device name or ends in a dot or a space.
+    /// </exception>
     private static string NormalizePath(string path)
     {
         if (string.IsNullOrWhiteSpace(path))
@@ -213,6 +229,25 @@ public sealed class BundleFile
                 nameof(path));
         }
 
+        foreach (char character in normalized)
+        {
+            if (character == ':')
+            {
+                // A colon after the first character is an NTFS alternate data stream:
+                // "config.json:payload" writes into a hidden stream of config.json on Windows.
+                throw new ArgumentException(
+                    "The bundle file path '" + path + "' holds a colon, which names a drive or an alternate"
+                        + " data stream on Windows.",
+                    nameof(path));
+            }
+            if (char.IsControl(character))
+            {
+                throw new ArgumentException(
+                    "The bundle file path '" + EscapeControl(path) + "' holds a control character.",
+                    nameof(path));
+            }
+        }
+
         foreach (string segment in normalized.Split('/'))
         {
             if (segment == "..")
@@ -221,9 +256,75 @@ public sealed class BundleFile
                     "The bundle file path '" + path + "' walks outside the bundle with '..'.",
                     nameof(path));
             }
+            if (segment.Length > 0 && segment != "." && (segment.EndsWith('.') || segment.EndsWith(' ')))
+            {
+                // Windows strips a trailing dot or space, so "model.bin." and "model.bin" would be the
+                // same file there and two different files everywhere else.
+                throw new ArgumentException(
+                    "The bundle file path '" + path + "' has a segment that ends in a dot or a space.",
+                    nameof(path));
+            }
+            if (IsWindowsDeviceName(segment))
+            {
+                throw new ArgumentException(
+                    "The bundle file path '" + path + "' has a segment that is a Windows device name.",
+                    nameof(path));
+            }
         }
 
         return normalized;
+    }
+
+    /// <summary>
+    /// Whether one path segment is a Windows device name - <c>CON</c>, <c>PRN</c>, <c>AUX</c>,
+    /// <c>NUL</c>, <c>COM1</c> to <c>COM9</c> or <c>LPT1</c> to <c>LPT9</c> - in any case, alone or
+    /// with an extension, which Windows opens as the device instead of as a file.
+    /// </summary>
+    /// <param name="segment">The segment to test.</param>
+    /// <returns><see langword="true"/> for a device name.</returns>
+    private static bool IsWindowsDeviceName(string segment)
+    {
+        int dot = segment.IndexOf('.');
+        string stem = (dot < 0 ? segment : segment.Substring(0, dot)).TrimEnd(' ');
+
+        if (stem.Length == 3)
+        {
+            return stem.Equals("CON", StringComparison.OrdinalIgnoreCase)
+                || stem.Equals("PRN", StringComparison.OrdinalIgnoreCase)
+                || stem.Equals("AUX", StringComparison.OrdinalIgnoreCase)
+                || stem.Equals("NUL", StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (stem.Length == 4 && stem[3] >= '1' && stem[3] <= '9')
+        {
+            return stem.StartsWith("COM", StringComparison.OrdinalIgnoreCase)
+                || stem.StartsWith("LPT", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Spells every control character of a path as <c>\uXXXX</c>, so that the message that refuses it
+    /// cannot itself carry a terminal escape sequence or a line break.
+    /// </summary>
+    /// <param name="path">The path as it was supplied.</param>
+    /// <returns>The printable spelling.</returns>
+    private static string EscapeControl(string path)
+    {
+        var builder = new StringBuilder(path.Length);
+        foreach (char character in path)
+        {
+            if (char.IsControl(character))
+            {
+                builder.Append("\\u").Append(((int)character).ToString("x4", CultureInfo.InvariantCulture));
+            }
+            else
+            {
+                builder.Append(character);
+            }
+        }
+        return builder.ToString();
     }
 
     /// <summary>
